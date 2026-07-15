@@ -14,15 +14,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # NB: no `registry-url` on setup-node — it writes an empty _authToken into
+      # .npmrc that overrides OIDC and yields E404 (per kud's publisher agent).
       - uses: actions/setup-node@v4
         with:
           node-version: 24
           cache: npm
-          registry-url: https://registry.npmjs.org
       - run: npm ci
+      # Changesets publishes each changed workspace over OIDC. No NPM_TOKEN, no
+      # --provenance — the id-token permission above is what npm trusts.
       - uses: changesets/action@v1
         with:
           publish: npm run release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NPM_CONFIG_PROVENANCE: "true"
