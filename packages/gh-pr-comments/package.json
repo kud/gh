@@ -1,0 +1,51 @@
+{
+  "name": "@kud/gh-pr-comments",
+  "version": "0.1.0",
+  "description": "Browse, reply to, and resolve GitHub PR review comments in the terminal.",
+  "type": "module",
+  "bin": {
+    "gh-pr-comments": "dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "github",
+    "pull-request",
+    "code-review",
+    "cli",
+    "ink"
+  ],
+  "author": "Erwann Mest <m@kud.io>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kud/gh",
+    "directory": "packages/gh-pr-comments"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@kud/gh": "0.1.0",
+    "@kud/gh-ink": "0.1.0",
+    "@kud/ink-ui": "0.8.0",
+    "ink": "7.1.0",
+    "react": "19.2.7"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.1",
+    "@types/react": "19.2.17",
+    "tsup": "8.5.1",
+    "typescript": "5.9.3"
+  }
+}

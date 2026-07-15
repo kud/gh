@@ -37,3 +37,16 @@ export const resolveCurrentPr = async (): Promise<CurrentPr> => {
     branch: pr.headRefName,
   }
 }
+
+// The `owner/name` of the repo in the current directory.
+export const resolveCurrentRepo = async (): Promise<string> => {
+  const { stdout } = await execa("gh", [
+    "repo",
+    "view",
+    "--json",
+    "nameWithOwner",
+    "-q",
+    ".nameWithOwner",
+  ])
+  return stdout.trim()
+}

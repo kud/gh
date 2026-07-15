@@ -1,0 +1,50 @@
+{
+  "name": "@kud/gh-webhook-replay",
+  "version": "0.1.0",
+  "description": "Replay the latest pull_request webhook delivery on a GitHub repo hook.",
+  "type": "module",
+  "bin": {
+    "gh-webhook-replay": "dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "github",
+    "webhook",
+    "ci",
+    "cli",
+    "ink"
+  ],
+  "author": "Erwann Mest <m@kud.io>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kud/gh",
+    "directory": "packages/gh-webhook-replay"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@kud/gh": "0.1.0",
+    "@kud/ink-ui": "0.8.0",
+    "ink": "7.1.0",
+    "react": "19.2.7"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.1",
+    "@types/react": "19.2.17",
+    "tsup": "8.5.1",
+    "typescript": "5.9.3"
+  }
+}

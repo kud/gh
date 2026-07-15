@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { execa } from "execa"
-import { resolveCurrentPr } from "./index.js"
+import { resolveCurrentPr, resolveCurrentRepo } from "./index.js"
 
 vi.mock("execa", () => ({ execa: vi.fn() }))
 const mockedExeca = vi.mocked(execa)
@@ -46,5 +46,20 @@ describe("resolveCurrentPr", () => {
     const pr = await resolveCurrentPr()
 
     expect(pr.repo).toBe("contributor/gh")
+  })
+})
+
+describe("resolveCurrentRepo", () => {
+  it("returns the trimmed nameWithOwner", async () => {
+    mockedExeca.mockResolvedValueOnce({ stdout: "kud/gh\n" } as never)
+    expect(await resolveCurrentRepo()).toBe("kud/gh")
+    expect(mockedExeca).toHaveBeenCalledWith("gh", [
+      "repo",
+      "view",
+      "--json",
+      "nameWithOwner",
+      "-q",
+      ".nameWithOwner",
+    ])
   })
 })
