@@ -7,6 +7,10 @@ export {
   CommentsPanel,
   type CommentsPanelProps,
 } from "./components/comments-panel.js"
+export {
+  HealthPanel,
+  type HealthPanelProps,
+} from "./components/health-panel.js"
 export { renderMarkdown } from "./lib/markdown.js"
 export {
   healthDisplay,
