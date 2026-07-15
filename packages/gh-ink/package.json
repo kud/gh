@@ -1,0 +1,64 @@
+{
+  "name": "@kud/gh-ink",
+  "version": "0.1.0",
+  "description": "Ink components for rendering GitHub PR review comments and health — controlled, presentation-only, built on @kud/ink-ui and fed by @kud/gh.",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "keywords": [
+    "github",
+    "pull-request",
+    "ink",
+    "cli",
+    "react",
+    "terminal",
+    "components"
+  ],
+  "author": "Erwann Mest <m@kud.io>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kud/gh",
+    "directory": "packages/gh-ink"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "peerDependencies": {
+    "ink": ">=7",
+    "react": ">=19"
+  },
+  "dependencies": {
+    "@kud/gh": "0.1.0",
+    "@kud/ink-ui": "0.8.0"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.1",
+    "@types/react": "19.2.17",
+    "ink": "7.1.0",
+    "ink-testing-library": "4.0.0",
+    "react": "19.2.7",
+    "tsup": "8.5.1",
+    "typescript": "5.9.3",
+    "vitest": "4.1.10"
+  }
+}
