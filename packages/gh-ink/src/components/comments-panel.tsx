@@ -56,6 +56,11 @@ export type CommentsPanelProps = {
   error: string | null
   reload: () => void
   onReplyingChange?: (active: boolean) => void
+  // Off when the host already names the section — cockpit puts the payload
+  // behind a "Conversation" tab, so the panel's own heading stacked the same
+  // word twice. The "Review threads" heading is unaffected: it separates two
+  // genuinely different lists, which no host label replaces.
+  showConversationHeading?: boolean
 }
 
 // Content-only comments panel (the consuming surface owns any chrome and the
@@ -72,6 +77,7 @@ export const CommentsPanel = ({
   error,
   reload,
   onReplyingChange,
+  showConversationHeading = true,
 }: CommentsPanelProps) => {
   const [showResolved, setShowResolved] = useState(true)
   const [threadSel, setThreadSel] = useState(0)
@@ -172,15 +178,17 @@ export const CommentsPanel = ({
       )
 
     if (conversation.length === 0 && allThreads.length === 0)
-      lines.push({ text: "No comments on this PR.", dim: true })
+      lines.push({ text: "Nothing has been said on it yet.", dim: true })
 
     if (conversation.length > 0) {
-      lines.push({
-        text: `Conversation (${conversation.length})`,
-        color: colors.info,
-        bold: true,
-      })
-      lines.push({ text: "" })
+      if (showConversationHeading) {
+        lines.push({
+          text: `Conversation (${conversation.length})`,
+          color: colors.info,
+          bold: true,
+        })
+        lines.push({ text: "" })
+      }
       for (const c of conversation)
         lines.push(...commentLines(c, width, fileLink))
     }

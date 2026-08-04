@@ -38,6 +38,7 @@ type GhAuthor = { login: string } | null
 type ConversationCommentNode = {
   author: GhAuthor
   body: string
+  createdAt?: string
 }
 
 type ThreadCommentNode = {
@@ -65,6 +66,9 @@ type FetchPrCommentsResponse = {
   repository: {
     pullRequest: {
       headRefName: string
+      body: string | null
+      author: GhAuthor
+      createdAt: string
       comments: { nodes: ConversationCommentNode[] }
       reviewThreads: { nodes: ReviewThreadNode[] }
     } | null
@@ -84,7 +88,10 @@ const FETCH_PR_COMMENTS_QUERY = `
     repository(owner:$owner, name:$name) {
       pullRequest(number:$number) {
         headRefName
-        comments(first: 50) { nodes { author { login } body } }
+        body
+        author { login }
+        createdAt
+        comments(first: 50) { nodes { author { login } body createdAt } }
         reviewThreads(first: 100) {
           nodes {
             id path line originalLine isResolved isOutdated
@@ -119,6 +126,7 @@ const authorLogin = (author: GhAuthor): string => author?.login ?? "ghost"
 const mapConversationComment = (node: ConversationCommentNode): Comment => ({
   author: authorLogin(node.author),
   body: node.body.trim(),
+  createdAt: node.createdAt,
 })
 
 const mapThreadComment = (node: ThreadCommentNode): Comment => ({
@@ -161,9 +169,24 @@ export const fetchPrComments = async (
     throw new Error(`pull request not found: ${owner}/${name}#${number}`)
   }
 
+  // The description leads the conversation, the way GitHub's own Conversation
+  // tab treats it: a PR whose body carries its whole argument otherwise renders
+  // as having nothing said on it, which reads as empty rather than unanswered.
+  const description = (pullRequest.body ?? "").trim()
+  const conversation = pullRequest.comments.nodes.map(mapConversationComment)
+
   return {
     headRef: pullRequest.headRefName ?? "HEAD",
-    conversation: pullRequest.comments.nodes.map(mapConversationComment),
+    conversation: description
+      ? [
+          {
+            author: authorLogin(pullRequest.author),
+            body: description,
+            createdAt: pullRequest.createdAt,
+          },
+          ...conversation,
+        ]
+      : conversation,
     threads: pullRequest.reviewThreads.nodes.map(mapReviewThread),
   }
 }

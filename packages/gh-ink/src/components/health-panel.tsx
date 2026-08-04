@@ -218,7 +218,7 @@ export const HealthPanel = ({
         })}
       </Box>
 
-      <Box marginTop={1}>
+      <Box marginTop={checks.length ? 1 : 0}>
         <Summary label="Reviews" icon={reviewsIcon} parts={reviewParts} />
       </Box>
       {reviewers.map(([login, state], j) => {
@@ -234,7 +234,7 @@ export const HealthPanel = ({
         )
       })}
 
-      <Box marginTop={1}>
+      <Box marginTop={reviewers.length ? 1 : 0}>
         <Summary label="Merge" icon={mergeIcon} parts={[[mText, mColor]]} />
       </Box>
 

@@ -90,6 +90,71 @@ describe("fetchPrComments", () => {
     ])
   })
 
+  it("leads the conversation with the description", async () => {
+    mockedExeca.mockResolvedValueOnce(
+      stdoutOf({
+        repository: {
+          pullRequest: {
+            headRefName: "feature/foo",
+            body: "  ## Summary\n\nWhy this change.  ",
+            author: { login: "alice" },
+            createdAt: "2026-01-01T00:00:00Z",
+            comments: {
+              nodes: [
+                {
+                  author: { login: "bob" },
+                  body: "looks good",
+                  createdAt: "2026-01-02T00:00:00Z",
+                },
+              ],
+            },
+            reviewThreads: { nodes: [] },
+          },
+        },
+      }),
+    )
+
+    const result = await fetchPrComments("kud", "gh", 3)
+
+    expect(result.conversation).toEqual([
+      {
+        author: "alice",
+        body: "## Summary\n\nWhy this change.",
+        createdAt: "2026-01-01T00:00:00Z",
+      },
+      {
+        author: "bob",
+        body: "looks good",
+        createdAt: "2026-01-02T00:00:00Z",
+      },
+    ])
+  })
+
+  // A description-less PR is the common case for a one-line fix, and a null
+  // body is what GitHub actually returns for one — not an empty string.
+  it("adds no description entry when the body is null or blank", async () => {
+    for (const body of [null, "   "]) {
+      mockedExeca.mockResolvedValueOnce(
+        stdoutOf({
+          repository: {
+            pullRequest: {
+              headRefName: "feature/foo",
+              body,
+              author: { login: "alice" },
+              createdAt: "2026-01-01T00:00:00Z",
+              comments: { nodes: [] },
+              reviewThreads: { nodes: [] },
+            },
+          },
+        }),
+      )
+
+      const result = await fetchPrComments("kud", "gh", 4)
+
+      expect(result.conversation).toEqual([])
+    }
+  })
+
   it("falls back to ghost for comments with no author", async () => {
     mockedExeca.mockResolvedValueOnce(
       stdoutOf({
