@@ -15,6 +15,10 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      # Build first: workspaces import each other through their published
+      # entrypoints, so typecheck resolves `@kud/gh` via dist/*.d.ts. With build
+      # last, every dependent package failed with "Cannot find module '@kud/gh'"
+      # and CI stayed red regardless of the commit.
+      - run: npm run build
       - run: npm run typecheck
       - run: npm run test
-      - run: npm run build

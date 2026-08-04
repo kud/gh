@@ -1,6 +1,6 @@
 {
   "name": "@kud/gh-pr-comments",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Browse, reply to, and resolve GitHub PR review comments in the terminal.",
   "type": "module",
   "bin": {
@@ -36,8 +36,8 @@
     "access": "public"
   },
   "dependencies": {
-    "@kud/gh": "0.1.0",
-    "@kud/gh-ink": "0.1.0",
+    "@kud/gh": "0.2.0",
+    "@kud/gh-ink": "0.2.0",
     "@kud/ink-ui": "0.8.0",
     "ink": "7.1.0",
     "react": "19.2.7"

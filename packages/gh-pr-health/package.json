@@ -1,6 +1,6 @@
 {
   "name": "@kud/gh-pr-health",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Checks, reviews and merge state for a GitHub PR in the terminal.",
   "type": "module",
   "bin": {
@@ -36,8 +36,8 @@
     "access": "public"
   },
   "dependencies": {
-    "@kud/gh": "0.1.0",
-    "@kud/gh-ink": "0.1.0",
+    "@kud/gh": "0.2.0",
+    "@kud/gh-ink": "0.2.0",
     "@kud/ink-ui": "0.8.0",
     "execa": "9.6.1",
     "ink": "7.1.0",
