@@ -18,3 +18,6 @@ export {
   healthColor,
   healthLegend,
 } from "./lib/health-display.js"
+
+// The inbox shell — see ./inbox for what the host supplies.
+export * from "./inbox/index.js"
