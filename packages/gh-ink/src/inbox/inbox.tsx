@@ -1075,9 +1075,14 @@ const agoText = (ms: number): string => {
   return `${Math.floor(d / 86400)}d ago`
 }
 
-const CockpitHeader = ({
+/** "board" → "🚀 Board". The glyph is shared; the word is the host's. */
+const brandOf = (title: string): string =>
+  `🚀 ${title[0].toUpperCase()}${title.slice(1)}`
+
+const InboxHeader = ({
   sections,
   login,
+  brand,
   work,
   loading,
   refreshing,
@@ -1086,6 +1091,9 @@ const CockpitHeader = ({
 }: {
   sections: Section[]
   login: string
+  // The name in the top-left, host-supplied. It is also measured for the rule
+  // that fills the rest of the line, so it cannot be a hardcoded literal.
+  brand: string
   work?: boolean
   loading?: boolean
   refreshing?: boolean
@@ -1116,7 +1124,7 @@ const CockpitHeader = ({
   const fill = Math.max(
     4,
     COLS -
-      "🚀 Cockpit".length -
+      brand.length -
       countSeg.length -
       userSeg.length -
       workLabel.length -
@@ -1125,7 +1133,7 @@ const CockpitHeader = ({
   return (
     <Box marginBottom={1}>
       <Text color="#FF8700" bold>
-        {"🚀 Cockpit"}
+        {brand}
       </Text>
       <Text dimColor>{countSeg}</Text>
       {userSeg ? <Text>{userSeg}</Text> : null}
@@ -1681,7 +1689,9 @@ const BrowseScreen = ({
   tabHelp,
   isWorkRepo,
   initialIncludeWork,
+  brand,
 }: {
+  brand: string
   sections: Section[]
   login: string
   isWorkRepo?: (repo: string) => boolean
@@ -2188,7 +2198,8 @@ const BrowseScreen = ({
       borderDimColor
       paddingX={FRAME_PAD_X}
     >
-      <CockpitHeader
+      <InboxHeader
+        brand={brand}
         sections={localSections}
         login={login}
         work={workToggle ? includeWork : undefined}
@@ -2538,7 +2549,8 @@ export const App = ({
         borderDimColor
         paddingX={FRAME_PAD_X}
       >
-        <CockpitHeader
+        <InboxHeader
+          brand={brandOf(title)}
           sections={[]}
           login=""
           work={workToggle ? (initialIncludeWork ?? true) : undefined}
@@ -2578,6 +2590,7 @@ export const App = ({
   return (
     <>
       <BrowseScreen
+        brand={brandOf(title)}
         sections={state.sections}
         login={state.login}
         jiraBase={jiraBase}
