@@ -1,0 +1,2638 @@
+import { $ } from "zx"
+import { spawn } from "child_process"
+import { existsSync, readdirSync, statSync } from "fs"
+import { join } from "path"
+import React, { useState, useEffect, useRef } from "react"
+import { Text, Box, useInput, useWindowSize } from "ink"
+import type { InboxExtension } from "./extension.js"
+import { readCache, writeCache } from "./cache.js"
+import { FooterHints, LoadingScreen, Tabs, Switch } from "@kud/ink-ui"
+import {
+  type Health,
+  computeHealth as ghComputeHealth,
+  latestChecks,
+  isPassCheck,
+  isFailCheck,
+  isPendingCheck,
+} from "@kud/gh"
+import { healthDisplay, healthLegend } from "../lib/health-display.js"
+
+// ─── Work filter ─────────────────────────────────────────────────────────────
+
+export type GHDetail = {
+  reviewDecision?: string
+  mergeable?: string
+  checksPass: number
+  checksFail: number
+  checksPending: number
+  threadsTotal: number
+  lastCommitAt?: string
+  lastEventAt?: string
+}
+
+export type GHItem = {
+  kind: "pr" | "issue"
+  number: number
+  title: string
+  repo: string
+  url: string
+  branch?: string
+  health: Health
+  author?: string
+  age: string
+  ts: number
+  unresolved: number
+  // Total comments across the conversation, review bodies and every thread —
+  // the "is anything being discussed here" signal.
+  conversation: number
+  // Who spoke last, anywhere on the item. Compared against the viewer's login
+  // at render time to decide whose turn it is.
+  lastActor?: string
+  detail?: GHDetail
+  indent: boolean
+}
+
+export type JiraRow = {
+  kind: "jira"
+  key: string
+  summary: string
+  url: string
+  jiraStatus: string
+  age: string
+  indent: boolean
+  instanceKey?: string
+}
+
+export type RepoHeader = {
+  kind: "repo-header"
+  repo: string
+  age: string
+  indent: boolean
+}
+
+export type ShowMore = {
+  kind: "show-more"
+  hidden: GHItem[]
+  indent: boolean
+}
+
+export type ShowLess = {
+  kind: "show-less"
+  toHide: GHItem[]
+  indent: boolean
+}
+
+export type SubgroupHeader = {
+  kind: "subgroup-header"
+  label: string
+  age: string
+  indent: boolean
+}
+
+export type AnyItem =
+  GHItem | JiraRow | RepoHeader | SubgroupHeader | ShowMore | ShowLess
+
+// Standing status line for the "main pipeline we care about" — not a
+// browsable list item, just a glance shown above the tabs. Drilling in
+// shells out to the jenkins CLI's own interactive explorer rather than
+// re-implementing a build/console viewer here.
+export type CiStatus = {
+  job: string
+  buildNumber: number
+  result: string
+  building: boolean
+  url: string
+  age: string
+}
+
+export type Section = {
+  id: string
+  label: string
+  items: AnyItem[]
+}
+
+// Everything a host needs to render a drilled-into row. `kind` is narrowed so a
+// host can branch without re-testing item.kind.
+export type DetailContext = {
+  item: GHItem
+  kind: "pr" | "issue"
+  login: string
+  onBack: () => void
+  onRefresh: () => void
+  onRemove: (item: GHItem) => void
+}
+
+export type Action = {
+  label: string
+  hint: string
+  run: () => void
+  subActions?: Action[]
+}
+
+export type JiraTransition = {
+  label: string
+  state: string
+  resolutions?: string[]
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+export const relativeTime = (iso: string): string => {
+  const diff = (Date.now() - new Date(iso).getTime()) / 1000
+  if (diff < 3600) return `${Math.floor(diff / 60)}m`
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h`
+  if (diff < 604800) return `${Math.floor(diff / 86400)}d`
+  return `${Math.floor(diff / 604800)}w`
+}
+
+// The glance health derivation now lives in @kud/gh (shared with the health
+// panel and the standalone CLIs). Cockpit's aggregation query shapes checks under
+// statusCheckRollup.contexts.nodes and threads under reviewThreads.nodes, so we
+// map the node into the core's transport-agnostic input. Behaviour is identical
+// to the previous inline derivation — the precedence and check-dedup logic now
+// lives once, in the core.
+export type ExplainSection = { heading: string; lines: string[] }
+
+const healthSentence = (item: GHItem): string => {
+  const glyph = healthDisplay[item.health].glyph.trim()
+  const d = item.detail
+  const plural = (n: number, word: string) =>
+    `${n} ${word}${n === 1 ? "" : "s"}`
+  switch (item.health) {
+    case "merged":
+      return `Merged (${glyph}). Nothing left to do.`
+    case "closed":
+      return `Closed (${glyph}) without merging.`
+    case "draft":
+      return `Still a draft (${glyph}), so no review is being asked for yet.`
+    case "ci-fail":
+      return `CI is failing (${glyph}) — ${plural(d?.checksFail ?? 0, "check")} red.`
+    case "conflict":
+      return `It conflicts with the base branch (${glyph}) and cannot merge until that is resolved.`
+    case "changes-req":
+      return `Changes were requested (${glyph}).`
+    case "threads":
+      return `${plural(item.unresolved, "review thread")} still open (${glyph}).`
+    case "pending":
+      return `${plural(d?.checksPending ?? 0, "check")} still running (${glyph}).`
+    case "approved":
+      return `Approved (${glyph}) and ready to merge.`
+    case "waiting":
+      return `Nobody has reviewed it yet (${glyph}).`
+    default:
+      return "An open issue — no review state applies."
+  }
+}
+
+const checksSentence = (d?: GHDetail): string | null => {
+  if (!d) return null
+  const total = d.checksPass + d.checksFail + d.checksPending
+  if (total === 0) return "No CI checks run on it."
+  const parts: string[] = []
+  if (d.checksPass) parts.push(`${d.checksPass} passing`)
+  if (d.checksFail) parts.push(`${d.checksFail} failing`)
+  if (d.checksPending) parts.push(`${d.checksPending} running`)
+  return `Checks: ${parts.join(", ")}.`
+}
+
+// The stall test compares the last thing SAID with the last thing PUSHED. A PR
+// sent back weeks ago whose author never pushed is not waiting on you, however
+// urgent its glyph looks — that distinction is the whole reason this modal
+// exists, so it gets its own sentence rather than being left to inference.
+const turnSentences = (item: GHItem, login: string): string[] => {
+  if (!item.lastActor) return ["Nothing has been said on it yet."]
+  const d = item.detail
+  const when = d?.lastEventAt ? `${relativeTime(d.lastEventAt)} ago` : "earlier"
+  if (item.lastActor !== login)
+    return [`${item.lastActor} spoke last (←), ${when}. Your reply is owed.`]
+
+  // On your own PR there is no "them" to be stalled on — it is waiting on a
+  // reviewer, and the push test below would otherwise read your own last commit
+  // back to you as someone else's inaction.
+  const them = item.author && item.author !== login ? item.author : null
+  if (!them)
+    return [
+      `You spoke last (→), ${when}. It is waiting on a reviewer, not on you.`,
+    ]
+
+  const lines = [`You spoke last (→), ${when}. The ball is with ${them}.`]
+  if (d?.lastCommitAt && d.lastEventAt && d.lastCommitAt < d.lastEventAt)
+    lines.push(
+      `Nothing has been pushed since ${relativeTime(d.lastCommitAt)} ago, so it is stalled on ${them}, not on you.`,
+    )
+  return lines
+}
+
+export const explainItem = (item: GHItem, login: string): ExplainSection[] => {
+  const author = item.author && item.author !== login ? item.author : "you"
+  const kind = item.kind === "pr" ? "pull request" : "issue"
+  const stands = [healthSentence(item)]
+  const checks = item.kind === "pr" ? checksSentence(item.detail) : null
+  if (checks) stands.push(checks)
+  if (item.conversation > 0)
+    stands.push(
+      `${item.conversation} comment${item.conversation === 1 ? "" : "s"} across the conversation and its threads.`,
+    )
+
+  return [
+    {
+      heading: "What it is",
+      lines: [
+        `A ${kind} on ${item.repo}, opened by ${author} ${item.age} ago.`,
+      ],
+    },
+    { heading: "Where it stands", lines: stands },
+    { heading: "Whose turn", lines: turnSentences(item, login) },
+  ]
+}
+
+export const repoPriority = (repo: string): number => {
+  const profile = process.env.OS_PROFILE ?? ""
+  if (profile === "work") {
+    if (repo === "theorchard/orchardgo") return 0
+    if (repo.startsWith("theorchard/")) return 1
+    if (repo.startsWith("kud/")) return 2
+    return 3
+  }
+  return repo.startsWith("kud/") ? 0 : 1
+}
+
+export const sortItems = (items: GHItem[]): GHItem[] =>
+  [...items].sort((a, b) => {
+    const pd = repoPriority(a.repo) - repoPriority(b.repo)
+    return pd !== 0 ? pd : a.repo.localeCompare(b.repo)
+  })
+
+// Flat, newest-first ordering. Repos are *not* clustered — an item's repo
+// header still appears (via insertRepoHeaders), but only when the repo changes
+// as we walk down the timeline, so the same repo can recur further down.
+export const sortByRecency = (items: GHItem[]): GHItem[] =>
+  [...items].sort((a, b) => b.ts - a.ts)
+
+export const insertRepoHeaders = (items: GHItem[]): AnyItem[] => {
+  const result: AnyItem[] = []
+  let lastRepo = ""
+  for (const item of items) {
+    if (!item.indent && item.repo !== lastRepo) {
+      lastRepo = item.repo
+      result.push({
+        kind: "repo-header",
+        repo: item.repo,
+        age: "",
+        indent: false,
+      })
+    }
+    result.push(item)
+  }
+  return result
+}
+
+// Lay out a section's GH items: the Done tab is a flat newest-first list, every
+// other tab stays grouped by repo. Repo headers are inserted either way.
+export const layoutGHItems = (items: GHItem[], sectionId: string): AnyItem[] =>
+  insertRepoHeaders(
+    sectionId === "done" ? sortByRecency(items) : sortItems(items),
+  )
+
+// Keep only work- or only home-origin GitHub items, leaving non-GH rows
+// (jira) untouched. Mirrors filterByRepos' gh/other split.
+export const filterByOrigin = (
+  sections: Section[],
+  keep: "work" | "home",
+  isWorkRepo: (repo: string) => boolean,
+): Section[] =>
+  sections
+    .map((s) => {
+      const kept = s.items.filter(
+        (i) =>
+          i.kind !== "repo-header" &&
+          i.kind !== "subgroup-header" &&
+          i.kind !== "show-more" &&
+          i.kind !== "show-less" &&
+          (i.kind === "pr" || i.kind === "issue"
+            ? keep === "work"
+              ? isWorkRepo(i.repo)
+              : !isWorkRepo(i.repo)
+            : true),
+      )
+      const gh = kept.filter(
+        (i): i is GHItem => i.kind === "pr" || i.kind === "issue",
+      )
+      const other = kept.filter((i) => i.kind !== "pr" && i.kind !== "issue")
+      return { ...s, items: [...layoutGHItems(gh, s.id), ...other] }
+    })
+    .filter((s) =>
+      s.items.some(
+        (i) => i.kind !== "repo-header" && i.kind !== "subgroup-header",
+      ),
+    )
+
+const searchText = (i: AnyItem): string =>
+  i.kind === "pr" || i.kind === "issue"
+    ? `${i.title} ${i.repo} #${i.number}`
+    : i.kind === "jira"
+      ? `${i.summary} ${i.key}`
+      : ""
+
+export const filterBySearch = (
+  sections: Section[],
+  query: string,
+): Section[] => {
+  const q = query.trim().toLowerCase()
+  if (!q) return sections
+  return sections
+    .map((s) => {
+      const kept = s.items.filter(
+        (i) =>
+          i.kind !== "repo-header" &&
+          i.kind !== "subgroup-header" &&
+          i.kind !== "show-more" &&
+          i.kind !== "show-less" &&
+          searchText(i).toLowerCase().includes(q),
+      )
+      const gh = kept.filter(
+        (i): i is GHItem => i.kind === "pr" || i.kind === "issue",
+      )
+      const other = kept.filter((i) => i.kind !== "pr" && i.kind !== "issue")
+      return { ...s, items: [...layoutGHItems(gh, s.id), ...other] }
+    })
+    .filter((s) =>
+      s.items.some(
+        (i) => i.kind !== "repo-header" && i.kind !== "subgroup-header",
+      ),
+    )
+}
+
+export const filterByRepos = (
+  sections: Section[],
+  repos: Set<string>,
+): Section[] => {
+  if (repos.size === 0) return sections
+  return sections
+    .map((s) => {
+      const kept = s.items.filter(
+        (i) =>
+          i.kind !== "repo-header" &&
+          i.kind !== "subgroup-header" &&
+          i.kind !== "show-more" &&
+          i.kind !== "show-less" &&
+          (i.kind === "pr" || i.kind === "issue" ? repos.has(i.repo) : true),
+      )
+      const gh = kept.filter(
+        (i): i is GHItem => i.kind === "pr" || i.kind === "issue",
+      )
+      const other = kept.filter((i) => i.kind !== "pr" && i.kind !== "issue")
+      return { ...s, items: [...layoutGHItems(gh, s.id), ...other] }
+    })
+    .filter((s) =>
+      s.items.some(
+        (i) => i.kind !== "repo-header" && i.kind !== "subgroup-header",
+      ),
+    )
+}
+
+// Drop one row and any header it orphans. Shared by the inbox and the app-level
+// state so a close removes the row from whichever screen you closed it on —
+// closing from the drill used to hand back to a list still showing the item
+// until a refetch landed.
+const isHeader = (i: AnyItem) =>
+  i.kind === "repo-header" || i.kind === "subgroup-header"
+
+// A header survives only while it still owns content, which is a question about
+// the run that FOLLOWS it — not about the list as a whole. "Is there any
+// non-header later on" kept every emptied repo whose header happened to be
+// followed by another repo's rows, so only a trailing orphan ever disappeared.
+//
+// insertRepoHeaders emits a repo-header immediately before its own rows, so for
+// one the test is just whether the next element is a row. A subgroup-header sits
+// a level up, above repo-headers, so it scans past those and gives up only at
+// the next subgroup or the end of the list.
+const headerOwnsContent = (items: AnyItem[], idx: number): boolean => {
+  const kind = items[idx].kind
+  for (let i = idx + 1; i < items.length; i++) {
+    const next = items[i]
+    if (!isHeader(next)) return true
+    if (kind === "repo-header" || next.kind === "subgroup-header") return false
+  }
+  return false
+}
+
+export const withoutItem = (sections: Section[], target: GHItem): Section[] =>
+  sections
+    .map((s) => {
+      const kept = s.items.filter(
+        (i) =>
+          isHeader(i) ||
+          !(
+            i.kind === target.kind &&
+            (i as GHItem).number === target.number &&
+            (i as GHItem).repo === target.repo
+          ),
+      )
+      return {
+        ...s,
+        items: kept.filter(
+          (item, idx) => !isHeader(item) || headerOwnsContent(kept, idx),
+        ),
+      }
+    })
+    .filter((s) => s.items.some((i) => !isHeader(i)))
+
+export const reposInSections = (sections: Section[]): string[] =>
+  [
+    ...new Set(
+      sections
+        .flatMap((s) => s.items)
+        .filter((i): i is GHItem => i.kind === "pr" || i.kind === "issue")
+        .map((i) => i.repo),
+    ),
+  ].sort()
+
+export const moveCursor = (
+  items: AnyItem[],
+  current: number,
+  dir: 1 | -1,
+): number => {
+  let next = current + dir
+  while (
+    next >= 0 &&
+    next < items.length &&
+    (items[next].kind === "repo-header" ||
+      items[next].kind === "subgroup-header")
+  )
+    next += dir
+  if (next < 0 || next >= items.length) return current
+  return next
+}
+
+const itemLines = (item: AnyItem, isFirst: boolean): number =>
+  (item.kind === "repo-header" || item.kind === "subgroup-header") && !isFirst
+    ? 2
+    : 1
+
+export const fitCount = (
+  items: AnyItem[],
+  start: number,
+  budget: number,
+): number => {
+  let lines = 0
+  let count = 0
+  for (let i = start; i < items.length; i++) {
+    const cost = itemLines(items[i], i === start)
+    if (lines + cost > budget) break
+    lines += cost
+    count++
+  }
+  return count
+}
+
+export const windowCount = (
+  items: AnyItem[],
+  start: number,
+  budget: number,
+): number => {
+  const raw = fitCount(items, start, budget)
+  // Reserve a single line for the "↓ N more" indicator when there's more below.
+  // (Was 3 — the larger reservation released all at once at the end, so the
+  // viewport grew by ~3 rows in one step and the list appeared to jump.)
+  return start + raw < items.length ? fitCount(items, start, budget - 1) : raw
+}
+
+export const maxViewStart = (items: AnyItem[], budget: number): number => {
+  let start = 0
+  while (
+    start < items.length - 1 &&
+    start + windowCount(items, start, budget) < items.length
+  )
+    start++
+  return start
+}
+
+export const withHeaders = (items: AnyItem[], idx: number): number => {
+  let start = idx
+  while (
+    start > 0 &&
+    (items[start - 1].kind === "repo-header" ||
+      items[start - 1].kind === "subgroup-header")
+  )
+    start--
+  return start
+}
+
+export const truncate = (str: string, max: number): string => {
+  if (str.length <= max) return str
+  const half = Math.floor((max - 1) / 2)
+  return `${str.slice(0, half)}…${str.slice(-half)}`
+}
+
+export const clipboard = (text: string) => {
+  const p = spawn("pbcopy", [], { stdio: "pipe" })
+  p.stdin.write(text)
+  p.stdin.end()
+}
+
+// ─── iTerm2 helpers ───────────────────────────────────────────────────────────
+
+export const buildCheckoutCmd = async (
+  repoFull: string,
+  branch: string,
+  login: string,
+): Promise<string> => {
+  const [repoOwner, repoName] = repoFull.split("/")
+  const projects = process.env.PROJECTS_DIR ?? `${process.env.HOME}/Projects`
+  const profile = process.env.OS_PROFILE ?? ""
+  const isWorkRepo =
+    profile === "work" &&
+    (repoFull.startsWith("theorchard/") ||
+      (repoFull.startsWith("kud/") &&
+        (repoName ?? "").startsWith("theorchard-")))
+  const cloneBase =
+    profile === "work"
+      ? `${projects}/${isWorkRepo ? "work" : "home"}`
+      : projects
+  const searchDirs =
+    profile === "work" ? [`${projects}/work`, `${projects}/home`] : [projects]
+
+  let repoPath = ""
+  outer: for (const searchDir of searchDirs) {
+    if (!existsSync(searchDir)) continue
+    let entries: string[]
+    try {
+      entries = readdirSync(searchDir)
+    } catch {
+      continue
+    }
+    for (const entry of entries) {
+      const fullPath = join(searchDir, entry)
+      try {
+        if (!statSync(fullPath).isDirectory()) continue
+      } catch {
+        continue
+      }
+      for (const remote of ["origin", "upstream"]) {
+        const r = await $({
+          nothrow: true,
+          quiet: true,
+        })`git -C ${fullPath} remote get-url ${remote}`
+        if (r.exitCode === 0 && r.stdout.includes(repoFull)) {
+          repoPath = fullPath
+          break outer
+        }
+      }
+    }
+  }
+
+  if (!repoPath) {
+    const candidate = `${cloneBase}/${repoOwner}-${repoName}`
+    if (existsSync(candidate)) repoPath = candidate
+  }
+
+  let cmd: string
+  if (repoPath) {
+    cmd = `cd ${repoPath}`
+  } else if (repoOwner === login) {
+    cmd = `cd ${cloneBase} && gh repo clone ${repoFull} && cd ${repoName}`
+  } else {
+    const r = await $({
+      nothrow: true,
+      quiet: true,
+    })`gh repo list ${login} --fork --limit 200 --json name,parent --jq ${`.[] | select(.parent.nameWithOwner == "${repoFull}") | .name`}`
+    const forkName = r.stdout.trim()
+    if (forkName) {
+      cmd = `cd ${cloneBase} && git clone git@github.com:${login}/${forkName}.git && cd ${forkName} && git remote add upstream git@github.com:${repoFull}.git`
+    } else {
+      cmd = `cd ${cloneBase} && gh repo fork ${repoFull} --clone && cd $(ls -td -- */ | head -1)`
+    }
+  }
+  if (branch)
+    cmd += ` && git fetch origin ${branch} 2>/dev/null; git switch ${branch}`
+  return cmd
+}
+
+// Find a repo's local checkout by matching its git remote against ~/Projects
+// (and the work/home split) — the "glob the github remote" resolution. Returns
+// the absolute path, or null when the repo isn't checked out locally.
+export const resolveRepoPath = async (
+  repoFull: string,
+): Promise<string | null> => {
+  const projects = process.env.PROJECTS_DIR ?? `${process.env.HOME}/Projects`
+  const profile = process.env.OS_PROFILE ?? ""
+  const searchDirs =
+    profile === "work" ? [`${projects}/work`, `${projects}/home`] : [projects]
+  for (const searchDir of searchDirs) {
+    if (!existsSync(searchDir)) continue
+    let entries: string[]
+    try {
+      entries = readdirSync(searchDir)
+    } catch {
+      continue
+    }
+    for (const entry of entries) {
+      const fullPath = join(searchDir, entry)
+      try {
+        if (!statSync(fullPath).isDirectory()) continue
+      } catch {
+        continue
+      }
+      for (const remote of ["origin", "upstream"]) {
+        const r = await $({
+          nothrow: true,
+          quiet: true,
+        })`git -C ${fullPath} remote get-url ${remote}`
+        if (r.exitCode === 0 && r.stdout.includes(repoFull)) return fullPath
+      }
+    }
+  }
+  return null
+}
+
+export const itermRun = async (
+  cmd: string,
+  appleScript: string,
+): Promise<void> => {
+  await $({
+    nothrow: true,
+    quiet: true,
+    env: { ...process.env, ITERM_CMD: cmd },
+  })`osascript -e ${appleScript}`
+}
+
+export const jumpToRepo = async (
+  repoFull: string,
+  branch: string,
+  login: string,
+): Promise<void> => {
+  const cmd = await buildCheckoutCmd(repoFull, branch, login)
+  await itermRun(
+    cmd,
+    `tell application "iTerm2"
+      tell current window
+        create tab with default profile
+        tell current session of current tab
+          write text (system attribute "ITERM_CMD")
+        end tell
+      end tell
+    end tell`,
+  )
+}
+
+export const runInPane = async (cmd: string): Promise<void> => {
+  await itermRun(
+    cmd,
+    `tell application "iTerm2"
+      tell current window
+        tell current session of current tab
+          set newPane to (split vertically with default profile)
+          tell newPane
+            write text (system attribute "ITERM_CMD")
+          end tell
+        end tell
+      end tell
+    end tell`,
+  )
+}
+
+export const jumpToRepoPane = async (
+  repoFull: string,
+  branch: string,
+  login: string,
+): Promise<void> => {
+  const cmd = await buildCheckoutCmd(repoFull, branch, login)
+  await runInPane(cmd)
+}
+
+export const openInTab = async (cmd: string): Promise<void> => {
+  await itermRun(
+    cmd,
+    `tell application "iTerm2"
+      tell current window
+        create tab with default profile
+        tell current session of current tab
+          write text (system attribute "ITERM_CMD")
+        end tell
+      end tell
+    end tell`,
+  )
+}
+
+export const runInPaneHorizontal = async (cmd: string): Promise<void> => {
+  await itermRun(
+    cmd,
+    `tell application "iTerm2"
+      tell current window
+        tell current session of current tab
+          set newPane to (split horizontally with default profile)
+          tell newPane
+            write text (system attribute "ITERM_CMD")
+          end tell
+        end tell
+      end tell
+    end tell`,
+  )
+}
+
+// Run in the *current* session: the command is typed after a short delay, so
+// the caller must process.exit() immediately to free the terminal from the TUI
+// before the text lands (mirrors the inbox's "switch here" action).
+export const runHere = (cmd: string): void => {
+  const proc = spawn(
+    "osascript",
+    [
+      "-e",
+      `delay 0.5
+tell application "iTerm2"
+  tell current session of current window
+    write text (system attribute "ITERM_CMD")
+  end tell
+end tell`,
+    ],
+    {
+      detached: true,
+      stdio: "ignore",
+      env: { ...process.env, ITERM_CMD: cmd },
+    },
+  )
+  proc.unref()
+}
+
+// ─── Data shared ──────────────────────────────────────────────────────────────
+
+const FRAME_COLOR = "gray"
+const FRAME_PAD_X = 1
+const FRAME_CHROME_COLS = 2 /* border */ + FRAME_PAD_X * 2 /* padding */
+export const COLS = (process.stdout.columns ?? 120) - FRAME_CHROME_COLS
+
+export const topLevelCount = (s: Section) =>
+  s.items.filter(
+    (i) =>
+      i.kind !== "repo-header" && i.kind !== "subgroup-header" && !i.indent,
+  ).length
+
+export const drillCmd = (item: AnyItem): string | null => {
+  if (item.kind === "jira") return `jira issue view ${item.key}`
+  // pr / issue drill in-tree via mounted views (openDrillView)
+  return null
+}
+
+const drillLabel = (item: AnyItem): string => {
+  if (item.kind === "jira") return "View ticket"
+  if (item.kind === "issue") return "View issue"
+  if (item.kind === "pr") return "Open PR"
+  return "Drill in"
+}
+
+export const buildActions = (
+  item: AnyItem,
+  login: string,
+  showFlash: (msg: string) => void,
+  jiraBase?: string,
+  jiraKeyRe?: RegExp,
+  jiraTransitions?: JiraTransition[],
+  onRefresh?: () => void,
+  onRemove?: (item: GHItem) => void,
+  onOpenView?: (item: AnyItem) => boolean,
+): Action[] => {
+  if (
+    item.kind === "repo-header" ||
+    item.kind === "subgroup-header" ||
+    item.kind === "show-more" ||
+    item.kind === "show-less"
+  )
+    return []
+
+  const open: Action = {
+    label: "Open in browser",
+    hint: "o",
+    run: () => {
+      $`open ${item.url}`.catch(() => {})
+      showFlash("↗ Opened in browser")
+    },
+  }
+
+  const copyUrl: Action = {
+    label: "Copy URL",
+    hint: "c",
+    run: () => {
+      clipboard(item.url)
+      const label = item.kind === "jira" ? item.key : `#${item.number}`
+      showFlash(`✓ Copied URL for ${label}`)
+    },
+  }
+
+  // pr / issue mount an in-tree view (openDrillView via onOpenView); jira still
+  // spawns a pane (drillCmd). Show the drill action whenever either path exists,
+  // so "d" is always in the ↵ menu — not only when there's a pane command.
+  const drill = drillCmd(item)
+  const mountable = item.kind === "pr" || item.kind === "issue"
+  const drillAction: Action | null =
+    drill || (mountable && onOpenView)
+      ? {
+          label: drillLabel(item),
+          hint: "d",
+          run: () => {
+            if (onOpenView?.(item)) return
+            if (drill) {
+              void runInPane(drill).catch(() => {})
+              showFlash(`↗ ${drillLabel(item)}`)
+            }
+          },
+        }
+      : null
+
+  if (item.kind === "jira") {
+    const base: Action[] = drillAction
+      ? [drillAction, open, copyUrl]
+      : [open, copyUrl]
+    if (jiraTransitions && jiraTransitions.length > 0) {
+      base.push({
+        label: "Move status",
+        hint: "t",
+        run: () => {},
+        subActions: jiraTransitions.map(({ label, state, resolutions }) =>
+          resolutions && resolutions.length > 0
+            ? {
+                label,
+                hint: "",
+                run: () => {},
+                subActions: resolutions.map((resolution) => ({
+                  label: resolution,
+                  hint: "",
+                  run: () => {
+                    showFlash(`⋯ ${label} · ${resolution}…`)
+                    void $`jira issue move ${(item as JiraRow).key} ${state} --resolution ${resolution}`
+                      .then(() => {
+                        showFlash(`✓ ${label} · ${resolution}`)
+                        setTimeout(() => onRefresh?.(), 1500)
+                      })
+                      .catch(() => showFlash(`✗ Move to ${label} failed`))
+                  },
+                })),
+              }
+            : {
+                label,
+                hint: "",
+                run: () => {
+                  showFlash(`⋯ Moving to ${label}…`)
+                  void $`jira issue move ${(item as JiraRow).key} ${state}`
+                    .then(() => {
+                      showFlash(`✓ Moved to ${label}`)
+                      setTimeout(() => onRefresh?.(), 1500)
+                    })
+                    .catch(() => showFlash(`✗ Move to ${label} failed`))
+                },
+              },
+        ),
+      })
+    }
+    return base
+  }
+
+  const actions: Action[] = drillAction
+    ? [drillAction, open, copyUrl]
+    : [open, copyUrl]
+
+  actions.push({
+    label: "Copy repo name",
+    hint: "r",
+    run: () => {
+      clipboard(item.repo)
+      showFlash(`✓ Copied ${item.repo}`)
+    },
+  })
+
+  if (item.kind === "pr" && item.branch) {
+    actions.push({
+      label: "Copy branch name",
+      hint: "b",
+      run: () => {
+        clipboard(item.branch!)
+        showFlash(`✓ Copied ${item.branch}`)
+      },
+    })
+  }
+
+  if (item.kind === "pr" && item.branch) {
+    actions.push({
+      label: "Switch here",
+      hint: "s",
+      run: () => {
+        const script = [
+          "delay 0.5",
+          'tell application "iTerm2"',
+          "  tell current session of current window",
+          `    write text "git switch ${item.branch}"`,
+          "  end tell",
+          "end tell",
+        ].join("\n")
+        const proc = spawn("osascript", ["-e", script], {
+          detached: true,
+          stdio: "ignore",
+        })
+        proc.unref()
+        process.exit(0)
+      },
+    })
+  }
+
+  if (item.kind === "issue") {
+    actions.push({
+      label: "Open project in new tab",
+      hint: "j",
+      run: () => {
+        showFlash(`⋯ Opening ${item.repo}…`)
+        void jumpToRepo(item.repo, "", login)
+          .then(() => showFlash(`↗ Opened ${item.repo} in new tab`))
+          .catch(() => showFlash("✗ Jump failed"))
+      },
+    })
+    actions.push({
+      label: "Open project in new pane",
+      hint: "p",
+      run: () => {
+        showFlash(`⋯ Opening pane for ${item.repo}…`)
+        void jumpToRepoPane(item.repo, "", login)
+          .then(() => showFlash(`↗ Opened ${item.repo} in new pane`))
+          .catch(() => showFlash("✗ Pane failed"))
+      },
+    })
+    actions.push({
+      label: "Close issue",
+      hint: "",
+      run: () => {},
+      subActions: [
+        {
+          label: `Close #${item.number}`,
+          hint: "",
+          run: () => {
+            onRemove?.(item as GHItem)
+            showFlash(`✓ Closed #${item.number}`)
+            void $`gh issue close ${item.number} --repo ${item.repo}`.catch(
+              () => {
+                showFlash(`✗ Close failed — restoring #${item.number}`)
+                onRefresh?.()
+              },
+            )
+          },
+        },
+        { label: "Cancel", hint: "", run: () => {} },
+      ],
+    })
+  }
+
+  if (item.kind === "pr") {
+    actions.push({
+      label: "Switch in new tab",
+      hint: "j",
+      run: () => {
+        showFlash(`⋯ Jumping to ${item.repo}…`)
+        void jumpToRepo(item.repo, item.branch ?? "", login)
+          .then(() => showFlash(`↗ Opened ${item.repo} in new tab`))
+          .catch(() => showFlash("✗ Jump failed"))
+      },
+    })
+    actions.push({
+      label: "Switch in new pane",
+      hint: "p",
+      run: () => {
+        showFlash(`⋯ Opening pane for ${item.repo}…`)
+        void jumpToRepoPane(item.repo, item.branch ?? "", login)
+          .then(() => showFlash(`↗ Opened ${item.repo} in new pane`))
+          .catch(() => showFlash("✗ Pane failed"))
+      },
+    })
+    if (jiraBase && jiraKeyRe) {
+      const jiraKey = !item.indent ? item.title.match(jiraKeyRe)?.[0] : null
+      if (jiraKey) {
+        actions.push({
+          label: `Open ${jiraKey} in Jira`,
+          hint: "t",
+          run: () => {
+            $`open ${jiraBase}/${jiraKey}`.catch(() => {})
+            showFlash(`↗ Opened ${jiraKey} in Jira`)
+          },
+        })
+      }
+    }
+
+    actions.push({
+      label: "Close PR",
+      hint: "",
+      run: () => {},
+      subActions: [
+        {
+          label: `Close #${item.number}`,
+          hint: "",
+          run: () => {
+            onRemove?.(item as GHItem)
+            showFlash(`✓ Closed #${item.number}`)
+            void $`gh pr close ${item.number} --repo ${item.repo}`.catch(() => {
+              showFlash(`✗ Close failed — restoring #${item.number}`)
+              onRefresh?.()
+            })
+          },
+        },
+        { label: "Cancel", hint: "", run: () => {} },
+      ],
+    })
+
+    if (item.branch) {
+      actions.push({
+        label: "Close PR + Delete branch",
+        hint: "",
+        run: () => {},
+        subActions: [
+          {
+            label: `Close #${item.number} + delete ${item.branch}`,
+            hint: "",
+            run: () => {
+              onRemove?.(item as GHItem)
+              showFlash(`✓ Closed #${item.number} and deleted ${item.branch}`)
+              void $`gh pr close ${item.number} --repo ${item.repo}`
+                .then(
+                  () =>
+                    $`gh api -X DELETE ${`repos/${item.repo}/git/refs/heads/${item.branch}`}`,
+                )
+                .catch(() => {
+                  showFlash(`✗ Close + delete failed — restoring`)
+                  onRefresh?.()
+                })
+            },
+          },
+          { label: "Cancel", hint: "", run: () => {} },
+        ],
+      })
+    }
+  }
+
+  return actions
+}
+
+const agoText = (ms: number): string => {
+  const d = (Date.now() - ms) / 1000
+  if (d < 60) return "just now"
+  if (d < 3600) return `${Math.floor(d / 60)}m ago`
+  if (d < 86400) return `${Math.floor(d / 3600)}h ago`
+  return `${Math.floor(d / 86400)}d ago`
+}
+
+const CockpitHeader = ({
+  sections,
+  login,
+  work,
+  loading,
+  refreshing,
+  hasPending,
+  fetchedAt,
+}: {
+  sections: Section[]
+  login: string
+  work?: boolean
+  loading?: boolean
+  refreshing?: boolean
+  hasPending?: boolean
+  fetchedAt?: number | null
+}) => {
+  const total = sections.reduce((n, s) => n + topLevelCount(s), 0)
+  // padStart, not padEnd: the count needs a stable width so the header doesn't
+  // shuffle as it changes, but padding after the digits splits "47" from
+  // "items". The slack belongs in front of the number, where it reads as a gap
+  // between the title and the count rather than a hole inside a phrase.
+  const countSeg = loading
+    ? "      loading…  "
+    : `  ${String(total).padStart(3)} item${total !== 1 ? "s" : ""}  ·  `
+  const userSeg = loading ? "" : `@${login}  `
+  const workLabel = work === undefined ? "" : " w work ●─○ home  "
+
+  // Refresh status: pending (actionable) wins, then in-flight, then freshness.
+  const [statusText, statusColor] = hasPending
+    ? ["● new · r apply", "#FF8700"]
+    : refreshing
+      ? ["↻ refreshing…", "cyan"]
+      : fetchedAt
+        ? [`updated ${agoText(fetchedAt)}`, undefined]
+        : ["", undefined]
+  const statusSeg = statusText ? statusText + "  " : ""
+
+  const fill = Math.max(
+    4,
+    COLS -
+      "🚀 Cockpit".length -
+      countSeg.length -
+      userSeg.length -
+      workLabel.length -
+      statusSeg.length,
+  )
+  return (
+    <Box marginBottom={1}>
+      <Text color="#FF8700" bold>
+        {"🚀 Cockpit"}
+      </Text>
+      <Text dimColor>{countSeg}</Text>
+      {userSeg ? <Text>{userSeg}</Text> : null}
+      {work !== undefined ? (
+        <>
+          <Text dimColor>{" w "}</Text>
+          <Switch left="work" right="home" value={work ? "left" : "right"} />
+          <Text dimColor>{"  "}</Text>
+        </>
+      ) : null}
+      {statusText ? (
+        <Text
+          color={statusColor as any}
+          dimColor={!statusColor}
+          bold={hasPending}
+        >
+          {statusSeg}
+        </Text>
+      ) : null}
+      <Text color="cyan" dimColor>
+        {"╌".repeat(fill)}
+      </Text>
+    </Box>
+  )
+}
+
+// A standing single-line row, always the same height (one line + marginBottom)
+// across loading/error/ready so the content below it never jumps.
+export type CiStatusState =
+  { kind: "loading" } | { kind: "error" } | { kind: "ready"; status: CiStatus }
+
+export const toCiStatusState = (status: CiStatus | null): CiStatusState =>
+  status ? { kind: "ready", status } : { kind: "error" }
+
+// Same *meaningful* CI state? Compared on the build identity (job + number +
+// result + building), deliberately ignoring `age`/`url` — age drifts every
+// poll, and repainting the whole screen just because "3m" ticked to "4m" is
+// exactly the flicker we're avoiding. Used to skip no-op setState on each poll.
+export const sameCiStatusState = (
+  a: CiStatusState,
+  b: CiStatusState,
+): boolean => {
+  if (a.kind !== b.kind) return false
+  if (a.kind !== "ready" || b.kind !== "ready") return true
+  return (
+    a.status.job === b.status.job &&
+    a.status.buildNumber === b.status.buildNumber &&
+    a.status.result === b.status.result &&
+    a.status.building === b.status.building
+  )
+}
+
+export const jenkinsResultDisplay = (
+  result: string,
+  building: boolean,
+): [string, string] => {
+  if (building) return ["*", "yellow"]
+  if (result === "SUCCESS") return ["✓", "green"]
+  if (result === "FAILURE" || result === "ABORTED") return ["✗", "red"]
+  if (result === "UNSTABLE") return ["±", "yellow"]
+  return ["·", "#888888"]
+}
+
+// ─── Explain ──────────────────────────────────────────────────────────────────
+
+// A row's state rendered as sentences, derived entirely from data already
+// fetched — no model, no second request. Every clause names the glyph it is
+// explaining, so reading one teaches the vocabulary rather than replacing it.
+
+export const CiStatusLine = ({
+  state,
+  job,
+}: {
+  state: CiStatusState
+  job?: string
+}) => {
+  const name = job ?? "ci"
+  if (state.kind === "loading")
+    return (
+      <Box marginBottom={1}>
+        <Text dimColor>{"  · "}</Text>
+        <Text dimColor>{`${name}  loading…`}</Text>
+      </Box>
+    )
+
+  // "no build / not configured" rather than "unavailable": this state is a null
+  // from the fetcher, which means Jenkins has no credentials or the job has no
+  // builds — never a permissions failure. A failed request keeps the last-known
+  // status instead, so "unavailable" read as "you lost access" and sent a real
+  // debugging session down the wrong path.
+  if (state.kind === "error")
+    return (
+      <Box marginBottom={1}>
+        <Text color="red" bold>
+          {"  ✗ "}
+        </Text>
+        <Text dimColor>{`${name}  no build / not configured`}</Text>
+      </Box>
+    )
+
+  const { status } = state
+  const [, color] = jenkinsResultDisplay(status.result, status.building)
+  const label = status.building ? "BUILDING" : status.result
+  return (
+    <Box marginBottom={1}>
+      <Text dimColor>{"  "}</Text>
+      <Text color={color as any} bold>
+        {"● "}
+      </Text>
+      <Text bold>{status.job}</Text>
+      <Text dimColor>{"  " + label}</Text>
+      <Text color="#FF8700">{"  #" + status.buildNumber}</Text>
+      {status.age ? <Text dimColor>{"  " + status.age}</Text> : null}
+    </Box>
+  )
+}
+
+const RepoHeaderRow = ({ repo, gap }: { repo: string; gap: boolean }) => {
+  const label = `── ${repo} `
+  const fill = Math.max(4, 46 - label.length)
+  return (
+    <Box marginTop={gap ? 1 : 0}>
+      <Text dimColor>{"  " + label + "─".repeat(fill)}</Text>
+    </Box>
+  )
+}
+
+const ItemRow = ({
+  item,
+  active,
+  gap,
+  login,
+}: {
+  item: AnyItem
+  active: boolean
+  gap?: boolean
+  login?: string
+}) => {
+  if (item.kind === "repo-header")
+    return <RepoHeaderRow repo={item.repo} gap={gap ?? false} />
+
+  if (item.kind === "subgroup-header")
+    return (
+      <Box marginTop={gap ? 1 : 0}>
+        <Text color="#FF8700" bold>
+          {"  » "}
+        </Text>
+        <Text bold>{item.label}</Text>
+      </Box>
+    )
+
+  if (item.kind === "show-more")
+    return (
+      <Box>
+        <Text color="cyan">{active ? "❯ " : "  "}</Text>
+        <Text dimColor>{"└─ "}</Text>
+        <Text dimColor>{active ? "↵ " : "  "}</Text>
+        <Text dimColor>{`+${item.hidden.length} more`}</Text>
+      </Box>
+    )
+
+  if (item.kind === "show-less")
+    return (
+      <Box>
+        <Text color="cyan">{active ? "❯ " : "  "}</Text>
+        <Text dimColor>{"└─ "}</Text>
+        <Text dimColor>{active ? "↵ " : "  "}</Text>
+        <Text dimColor>show less</Text>
+      </Box>
+    )
+
+  if (item.kind === "jira") {
+    const titleMax = Math.max(20, COLS - item.key.length - 10)
+    return (
+      <Box marginTop={gap ? 1 : 0}>
+        <Text color="cyan">{active ? "❯ " : "  "}</Text>
+        <Text color="#FF8700" bold={active}>
+          {item.key + "  "}
+        </Text>
+        <Text bold={active}>{truncate(item.summary, titleMax)}</Text>
+      </Box>
+    )
+  }
+
+  const { glyph: icon, color } = healthDisplay[item.health]
+  // Whose turn it is, in its own fixed cell. Arrows rather than the nerd-font
+  // comment glyph because this column sits in the aligned zone left of the
+  // title: a PUA codepoint that renders double-width in some fonts would shift
+  // only the rows that carry one, and a fixed cell exists precisely so the
+  // title never moves. ← and → are already proven in this UI's footer hints.
+  const [turnIcon, turnColor] =
+    !login || !item.lastActor
+      ? [" ", "white"]
+      : item.lastActor === login
+        ? ["→", "#888888"]
+        : ["←", "#FF8700"]
+  const numStr = `#${item.number}`.padEnd(7)
+  // Hide "by me" — the author suffix is only signal when it's someone else.
+  const showAuthor = !!item.author && item.author !== login
+  // Unresolved review threads — a comment glyph (nf-fa-comments) + count, keeping
+  // to the single-glyph health vocabulary instead of spelling out "unresolved".
+  const unresolvedLabel =
+    item.unresolved > 0 ? `\u{f086} ${item.unresolved}` : ""
+  const suffix = [
+    item.age || "",
+    unresolvedLabel,
+    showAuthor ? `by ${item.author}` : "",
+  ]
+    .filter(Boolean)
+    .join("  ")
+  const repoLabel = item.indent ? item.repo : ""
+  const fixedWidth =
+    2 +
+    (item.indent ? 3 : 0) +
+    2 /* health */ +
+    2 /* turn */ +
+    7 +
+    repoLabel.length +
+    suffix.length +
+    6
+  const titleMax = Math.max(20, COLS - fixedWidth)
+
+  return (
+    <Box>
+      <Text color="cyan">{active ? "❯ " : "  "}</Text>
+      {item.indent ? <Text dimColor>{"└─ "}</Text> : null}
+      <Text color={color as any} bold>
+        {icon + " "}
+      </Text>
+      <Text color={turnColor as any} bold={turnIcon === "←"}>
+        {turnIcon + " "}
+      </Text>
+      <Text color="#FF8700">{numStr}</Text>
+      <Text bold={active}>{truncate(item.title, titleMax) + "  "}</Text>
+      {repoLabel ? <Text dimColor>{repoLabel}</Text> : null}
+      {unresolvedLabel ? (
+        <Text bold color="#FF8700">
+          {"  " + unresolvedLabel}
+        </Text>
+      ) : null}
+      {showAuthor ? (
+        <Text dimColor italic>
+          {"  by " + item.author}
+        </Text>
+      ) : null}
+      {/* Age last, so every row ends on the date — a consistent right edge. */}
+      {item.age ? <Text dimColor>{"  " + item.age}</Text> : null}
+    </Box>
+  )
+}
+
+// The menu's whole state machine: cursor movement, descent into a confirm
+// sub-menu, and dismissal. Shared by the inbox and the PR drill — a second
+// hand-rolled copy would drift the first time one grew a case the other lacked.
+// handleKey reports whether it consumed the key, so a host can bail out of its
+// own keymap while the menu is up.
+export const useActionMenu = () => {
+  const [actions, setActions] = useState<Action[] | null>(null)
+  const [cursor, setCursor] = useState(0)
+
+  const open = (next: Action[]) => {
+    if (next.length === 0) return
+    setCursor(0)
+    setActions(next)
+  }
+
+  const handleKey = (key: {
+    upArrow?: boolean
+    downArrow?: boolean
+    return?: boolean
+    escape?: boolean
+  }): boolean => {
+    if (!actions) return false
+    if (key.upArrow) setCursor((c) => Math.max(0, c - 1))
+    if (key.downArrow) setCursor((c) => Math.min(actions.length - 1, c + 1))
+    if (key.return) {
+      const action = actions[cursor]
+      if (action?.subActions) {
+        setCursor(0)
+        setActions(action.subActions)
+      } else {
+        setActions(null)
+        action?.run()
+      }
+    }
+    if (key.escape) setActions(null)
+    return true
+  }
+
+  return { actions, cursor, open, close: () => setActions(null), handleKey }
+}
+
+export const ActionMenu = ({
+  item,
+  actions,
+  cursor,
+}: {
+  item: AnyItem
+  actions: Action[]
+  cursor: number
+}) => {
+  const title =
+    item.kind === "jira"
+      ? item.key
+      : item.kind === "pr" || item.kind === "issue"
+        ? `#${item.number}`
+        : ""
+  return (
+    <Box
+      flexDirection="column"
+      borderStyle="round"
+      borderColor="cyan"
+      paddingX={1}
+      marginTop={1}
+    >
+      <Text color="cyan" bold>
+        {title}
+      </Text>
+      <Text dimColor>{"─".repeat(32)}</Text>
+      {actions.map((a, i) => (
+        <Box key={a.label}>
+          <Text color="cyan">{i === cursor ? "❯ " : "  "}</Text>
+          <Text bold={i === cursor}>{a.label}</Text>
+          <Text dimColor>{"  " + a.hint}</Text>
+        </Box>
+      ))}
+      <Text dimColor>{"─".repeat(32)}</Text>
+      <Text dimColor>↑↓ navigate ↵ confirm esc cancel</Text>
+    </Box>
+  )
+}
+
+// `?` legend: what the row glyphs mean, plus the full key map (including the
+// context hotkeys that never fit in the footer). Two columns so it stays short
+// vertically. Purely informational — any key closes it.
+// The turn column's vocabulary, kept beside healthLegend so the two read as
+// one system in the modal.
+const TURN_LEGEND: [string, string, string][] = [
+  ["←", "#FF8700", "They spoke last · your turn"],
+  ["→", "#888888", "You spoke last · waiting on them"],
+]
+
+// Tab meanings are supplied by the caller rather than hardcoded: home's tabs are
+// GitHub searches, work's are Jira statuses, and a list baked in here would be
+// wrong in one of the two cockpits at all times.
+const HelpModal = ({
+  workToggle,
+  hasCi,
+  hasJira,
+  tabHelp,
+}: {
+  workToggle?: boolean
+  hasCi?: boolean
+  hasJira?: boolean
+  tabHelp?: [string, string][]
+}) => {
+  const keys: [string, string][] = [
+    ["↑ ↓", "navigate"],
+    ["← → · tab", "switch tab"],
+    ["↵ · d", "open / drill in"],
+    ["m", "actions · close"],
+    ["e", "explain this row"],
+    ["o", "open in browser"],
+    ["c", "copy URL"],
+    ["b", "copy branch"],
+    ["s", "switch to branch here"],
+    ["j", "open repo in new tab"],
+    ["p", "open repo in new pane"],
+    ...(hasJira
+      ? ([["t", "Jira: move / open ticket"]] as [string, string][])
+      : []),
+    ["/", "search"],
+    ["f", "filter by repo"],
+    ["r", "refresh"],
+    ...(workToggle
+      ? ([["w", "toggle work / home"]] as [string, string][])
+      : []),
+    ...(hasCi ? ([["J", "Jenkins explorer"]] as [string, string][]) : []),
+    ["?", "this help"],
+    ["q", "quit"],
+  ]
+  return (
+    <Box
+      flexDirection="column"
+      borderStyle="round"
+      borderColor="cyan"
+      paddingX={1}
+    >
+      <Text color="cyan" bold>
+        Legend
+      </Text>
+      <Box marginTop={1}>
+        <Box flexDirection="column" marginRight={3} minWidth={26}>
+          <Text bold dimColor>
+            Status
+          </Text>
+          {healthLegend.map(([health, label]) => {
+            const { glyph: icon, color } = healthDisplay[health]
+            return (
+              <Box key={health}>
+                <Text color={color as any} bold>
+                  {icon + " "}
+                </Text>
+                <Text>{" " + label}</Text>
+              </Box>
+            )
+          })}
+          {TURN_LEGEND.map(([icon, color, label]) => (
+            <Box key={icon}>
+              <Text color={color as any} bold>
+                {icon + " "}
+              </Text>
+              <Text>{" " + label}</Text>
+            </Box>
+          ))}
+          <Box>
+            <Text bold color="#FF8700">
+              {"\u{f086} "}
+            </Text>
+            <Text>{" Open-thread count"}</Text>
+          </Box>
+        </Box>
+        {tabHelp ? (
+          <Box flexDirection="column" marginRight={3} minWidth={30}>
+            <Text bold dimColor>
+              Tabs
+            </Text>
+            {tabHelp.map(([tab, meaning]) => (
+              <Box key={tab}>
+                <Text color="#FF8700">{tab.padEnd(10)}</Text>
+                <Text>{meaning}</Text>
+              </Box>
+            ))}
+          </Box>
+        ) : null}
+        <Box flexDirection="column">
+          <Text bold dimColor>
+            Keys
+          </Text>
+          {keys.map(([k, label]) => (
+            <Box key={k}>
+              <Text color="cyan">{k.padEnd(11)}</Text>
+              <Text>{label}</Text>
+            </Box>
+          ))}
+        </Box>
+      </Box>
+      {tabHelp ? (
+        <Text dimColor>
+          Each item lands in the FIRST tab that claims it, so counts are
+          residuals rather than totals.
+        </Text>
+      ) : null}
+      <Text dimColor>esc · ? close</Text>
+    </Box>
+  )
+}
+
+const ExplainModal = ({ item, login }: { item: GHItem; login: string }) => (
+  <Box
+    flexDirection="column"
+    borderStyle="round"
+    borderColor="cyan"
+    paddingX={1}
+    width={Math.min(COLS, 78)}
+  >
+    <Text color="#FF8700" bold>
+      {`#${item.number} · ${item.repo}`}
+    </Text>
+    <Text>{item.title}</Text>
+    {explainItem(item, login).map((section) => (
+      <Box key={section.heading} flexDirection="column" marginTop={1}>
+        <Text bold dimColor>
+          {section.heading}
+        </Text>
+        {section.lines.map((line, i) => (
+          <Text key={i}>{"  " + line}</Text>
+        ))}
+      </Box>
+    ))}
+    <Box marginTop={1}>
+      <Text dimColor>esc · e close</Text>
+    </Box>
+  </Box>
+)
+
+const RepoPicker = ({
+  repos,
+  selected,
+  cursor,
+}: {
+  repos: string[]
+  selected: Set<string>
+  cursor: number
+}) => {
+  const { rows } = useWindowSize()
+  const budget = Math.max(6, rows - 12)
+  const start = Math.max(
+    0,
+    Math.min(cursor - Math.floor(budget / 2), repos.length - budget),
+  )
+  const visible = repos.slice(start, start + budget)
+  return (
+    <Box
+      flexDirection="column"
+      borderStyle="round"
+      borderColor="cyan"
+      paddingX={1}
+      minWidth={42}
+    >
+      <Text color="cyan" bold>
+        {`Filter by repo  (${selected.size} on)`}
+      </Text>
+      <Text dimColor>{"─".repeat(36)}</Text>
+      {visible.map((repo, i) => {
+        const idx = start + i
+        const on = selected.has(repo)
+        const active = idx === cursor
+        return (
+          <Box key={repo}>
+            <Text color="cyan">{active ? "❯ " : "  "}</Text>
+            <Text color={on ? "green" : undefined}>{on ? "◉ " : "○ "}</Text>
+            <Text bold={active}>{repo}</Text>
+          </Box>
+        )
+      })}
+      {repos.length > budget ? (
+        <Text dimColor>{`  … ${repos.length} repos total`}</Text>
+      ) : null}
+      <Text dimColor>{"─".repeat(36)}</Text>
+      <Text dimColor>space toggle · a clear all · ↵/esc done</Text>
+    </Box>
+  )
+}
+
+const BrowseScreen = ({
+  sections,
+  login,
+  jiraBase,
+  jiraKeyRe,
+  jiraTransitions,
+  onRefresh,
+  refreshing,
+  hasPending,
+  fetchedAt,
+  workToggle,
+  hidden,
+  onOpenPr,
+  onOpenIssue,
+  onOpenExt,
+  ciStatusState,
+  ciJob,
+  tabHelp,
+  isWorkRepo,
+  initialIncludeWork,
+}: {
+  sections: Section[]
+  login: string
+  isWorkRepo?: (repo: string) => boolean
+  initialIncludeWork?: boolean
+  tabHelp?: [string, string][]
+  jiraBase?: string
+  jiraKeyRe?: RegExp
+  jiraTransitions?: JiraTransition[]
+  onRefresh?: () => void
+  refreshing?: boolean
+  hasPending?: boolean
+  fetchedAt?: number | null
+  workToggle?: boolean
+  hidden?: boolean
+  onOpenPr?: (item: GHItem) => void
+  onOpenIssue?: (item: GHItem) => void
+  onOpenExt?: (id: string, target?: string) => void
+  // The CI line renders here, between the inbox header and the tabs. Its
+  // full poll state (loading / error / ready) is passed so the row is always
+  // present once wired; undefined means "no CI row at all" (home's cockpit).
+  ciStatusState?: CiStatusState
+  ciJob?: string
+}) => {
+  const { rows } = useWindowSize()
+  const [includeWork, setIncludeWork] = useState(() =>
+    workToggle ? (initialIncludeWork ?? true) : true,
+  )
+  // Symmetric work ⇄ home switch: ☑ = work only, ☐ = home only. Only active
+  // when workToggle is set (the work-profile cockpit); off elsewhere.
+  // Both directions of the toggle are the same filter with `keep` flipped, so the
+  // host supplies one predicate rather than two filters. No predicate, no split.
+  const applyWork = (secs: Section[], include: boolean): Section[] =>
+    !workToggle || !isWorkRepo
+      ? secs
+      : filterByOrigin(secs, include ? "work" : "home", isWorkRepo)
+  const initialSections = applyWork(sections, includeWork)
+
+  const [localSections, setLocalSections] = useState(initialSections)
+  const [tabIdx, setTabIdx] = useState(0)
+  const [cursors, setCursors] = useState<number[]>(
+    initialSections.map((s) =>
+      Math.max(
+        0,
+        s.items.findIndex(
+          (i) => i.kind !== "repo-header" && i.kind !== "subgroup-header",
+        ),
+      ),
+    ),
+  )
+  const [viewStarts, setViewStarts] = useState<number[]>(
+    initialSections.map(() => 0),
+  )
+  const [flash, setFlash] = useState<string | null>(null)
+  const menu = useActionMenu()
+  const [search, setSearch] = useState<string | null>(null)
+  const [searchInput, setSearchInput] = useState(false)
+  const [repoFilter, setRepoFilter] = useState<Set<string>>(new Set())
+  const [repoPicker, setRepoPicker] = useState(false)
+  const [repoCursor, setRepoCursor] = useState(0)
+  const [help, setHelp] = useState(false)
+  const [explain, setExplain] = useState(false)
+  const filterActive = search != null || repoFilter.size > 0
+  // The CI row occupies 2 rows (content + margin); reserve them out of the
+  // list's height budget so the tree never grows taller than the terminal
+  // (Ink clips overflow from the top, which would eat the CI line).
+  const reserveCiRow = ciStatusState != null
+  const ciStatus = ciStatusState?.kind === "ready" ? ciStatusState.status : null
+  const listHeight = Math.max(
+    5,
+    // -10 rather than -8: the extra 2 are the frame's top and bottom border
+    // rows, so the tree never grows taller than the terminal inside the frame.
+    rows - 10 - (filterActive ? 2 : 0) - (reserveCiRow ? 2 : 0),
+  )
+
+  useEffect(() => {
+    setCursors((p) => p.map((c, i) => (i === tabIdx ? 0 : c)))
+    setViewStarts((p) => p.map((v, i) => (i === tabIdx ? 0 : v)))
+  }, [search])
+
+  // Pull in fresh data when App applies it (no longer via a loading remount).
+  useEffect(() => {
+    setLocalSections(applyWork(sections, includeWork))
+  }, [sections])
+
+  useEffect(() => {
+    setTabIdx((prev) => Math.min(prev, Math.max(0, localSections.length - 1)))
+    setCursors((prev) =>
+      localSections.map((s, i) => {
+        const c = Math.min(prev[i] ?? 0, s.items.length - 1)
+        if (c < 0) return 0
+        return s.items[c]?.kind === "repo-header" ||
+          s.items[c]?.kind === "subgroup-header"
+          ? moveCursor(s.items, c, 1)
+          : c
+      }),
+    )
+    setViewStarts((prev) =>
+      localSections.map((s, i) =>
+        Math.min(prev[i] ?? 0, maxViewStart(s.items, listHeight)),
+      ),
+    )
+  }, [localSections, listHeight])
+
+  const removeItemFromSections = (target: GHItem) =>
+    setLocalSections((prev) => withoutItem(prev, target))
+
+  const safeTabIdx = Math.min(tabIdx, Math.max(0, localSections.length - 1))
+  const rawSection = localSections[safeTabIdx] ?? {
+    id: "empty",
+    label: "",
+    items: [],
+  }
+  const searched =
+    search != null ? filterBySearch([rawSection], search) : [rawSection]
+  const filtered =
+    repoFilter.size > 0 ? filterByRepos(searched, repoFilter) : searched
+  const section = filterActive
+    ? { ...rawSection, items: filtered[0]?.items ?? [] }
+    : rawSection
+  const allRepos = reposInSections(localSections)
+  const cursor = cursors[safeTabIdx] ?? 0
+  const viewStart = viewStarts[safeTabIdx] ?? 0
+  const visibleCount = windowCount(section.items, viewStart, listHeight)
+  const visibleItems = section.items.slice(viewStart, viewStart + visibleCount)
+  const hasMore = viewStart + visibleCount < section.items.length
+  const activeItem = section.items[cursor]
+
+  const showFlash = (msg: string) => {
+    setFlash(msg)
+    setTimeout(() => setFlash(null), 2000)
+  }
+
+  const openDrillView = (item: AnyItem): boolean => {
+    const open = (fn: (i: GHItem) => void, i: GHItem): boolean => {
+      menu.close()
+      fn(i)
+      return true
+    }
+    if (item.kind === "pr" && onOpenPr) return open(onOpenPr, item)
+    if (item.kind === "issue" && onOpenIssue) return open(onOpenIssue, item)
+    return false
+  }
+
+  const openMenu = () => {
+    if (
+      !activeItem ||
+      activeItem.kind === "repo-header" ||
+      activeItem.kind === "subgroup-header"
+    )
+      return
+    const actions = buildActions(
+      activeItem,
+      login,
+      (msg) => {
+        menu.close()
+        showFlash(msg)
+      },
+      jiraBase,
+      jiraKeyRe,
+      jiraTransitions,
+      onRefresh,
+      removeItemFromSections,
+      openDrillView,
+    )
+    menu.open(actions)
+  }
+
+  useInput((input, key) => {
+    if (hidden) return
+    // Every shortcut below is a bare letter/arrow with no modifier — none of
+    // them are meant to fire on a ctrl/meta chord. Without this, a Ctrl+<key>
+    // press (e.g. the very common Ctrl+D shell reflex) is indistinguishable
+    // from the plain key at the `input` level (readline reports it as the
+    // same letter with key.ctrl set), so it'd silently trigger that letter's
+    // action — including drilling into whatever row is active.
+    if (key.ctrl || key.meta) return
+
+    // Help legend is a pure overlay: any key dismisses it, and nothing else
+    // is processed while it's up.
+    if (help) {
+      setHelp(false)
+      return
+    }
+    if (input === "?") {
+      setHelp(true)
+      return
+    }
+
+    if (explain) {
+      setExplain(false)
+      return
+    }
+
+    if (repoPicker) {
+      if (key.escape || key.return) return setRepoPicker(false)
+      if (key.upArrow) return setRepoCursor((c) => Math.max(0, c - 1))
+      if (key.downArrow)
+        return setRepoCursor((c) => Math.min(allRepos.length - 1, c + 1))
+      if (input === "a") return setRepoFilter(new Set())
+      if (input === " ") {
+        const repo = allRepos[repoCursor]
+        if (repo)
+          setRepoFilter((prev) => {
+            const next = new Set(prev)
+            if (next.has(repo)) next.delete(repo)
+            else next.add(repo)
+            return next
+          })
+      }
+      return
+    }
+
+    if (searchInput) {
+      if (key.return) return setSearchInput(false)
+      if (key.escape) {
+        setSearch(null)
+        return setSearchInput(false)
+      }
+      if (key.backspace || key.delete)
+        return setSearch((s) => (s ?? "").slice(0, -1))
+      if (input && !key.ctrl && !key.meta && !key.tab)
+        return setSearch((s) => (s ?? "") + input)
+      return
+    }
+    if (input === "/") {
+      setSearch("")
+      setSearchInput(true)
+      return
+    }
+    if (input === "f" && allRepos.length > 0) {
+      setRepoCursor(0)
+      setRepoPicker(true)
+      return
+    }
+    if (key.escape && search != null) {
+      setSearch(null)
+      return
+    }
+    if (key.escape && repoFilter.size > 0) {
+      setRepoFilter(new Set())
+      return
+    }
+
+    if (menu.handleKey(key)) return
+
+    if (key.upArrow) {
+      const next = moveCursor(section.items, cursor, -1)
+      const newVs = Math.min(viewStart, withHeaders(section.items, next))
+      setCursors((p) => p.map((c, i) => (i === tabIdx ? next : c)))
+      setViewStarts((p) => p.map((v, i) => (i === tabIdx ? newVs : v)))
+    }
+    if (key.downArrow) {
+      const next = moveCursor(section.items, cursor, 1)
+      let newVs = viewStart
+      while (next >= newVs + windowCount(section.items, newVs, listHeight))
+        newVs++
+      setCursors((p) => p.map((c, i) => (i === tabIdx ? next : c)))
+      setViewStarts((p) => p.map((v, i) => (i === tabIdx ? newVs : v)))
+    }
+    if (key.leftArrow) setTabIdx((i) => Math.max(0, i - 1))
+    if (key.rightArrow)
+      setTabIdx((i) => Math.min(localSections.length - 1, i + 1))
+    if (key.tab)
+      setTabIdx(
+        (i) =>
+          (i + (key.shift ? -1 : 1) + localSections.length) %
+          localSections.length,
+      )
+    if (input === "q") process.exit(0)
+    if (input === "r") {
+      onRefresh?.()
+      return
+    }
+    if (workToggle && input === "w") {
+      const next = !includeWork
+      setIncludeWork(next)
+      setLocalSections(applyWork(sections, next))
+      return
+    }
+    if (input === "J" && ciStatus) {
+      // The embedded <JenkinsBody> from @kud/jenkins-ink — the same grid
+      // jenkins-cli mounts — instead of shelling out to `jenkins -i`.
+      onOpenExt?.("jenkins", ciStatus.job)
+      return
+    }
+    if (
+      !activeItem ||
+      activeItem.kind === "repo-header" ||
+      activeItem.kind === "subgroup-header"
+    )
+      return
+
+    if (key.return && activeItem.kind === "show-more") {
+      setLocalSections((prev) =>
+        prev.map((s) => ({
+          ...s,
+          items: s.items.flatMap((i) =>
+            i === activeItem
+              ? [
+                  ...activeItem.hidden,
+                  {
+                    kind: "show-less" as const,
+                    toHide: activeItem.hidden,
+                    indent: true,
+                  },
+                ]
+              : [i],
+          ),
+        })),
+      )
+      return
+    }
+
+    if (key.return && activeItem.kind === "show-less") {
+      setLocalSections((prev) =>
+        prev.map((s) => ({
+          ...s,
+          items: s.items
+            .filter((i) => !activeItem.toHide.includes(i as GHItem))
+            .flatMap((i) =>
+              i === activeItem
+                ? [
+                    {
+                      kind: "show-more" as const,
+                      hidden: activeItem.toHide,
+                      indent: true,
+                    },
+                  ]
+                : [i],
+            ),
+        })),
+      )
+      return
+    }
+
+    if (activeItem.kind === "show-more" || activeItem.kind === "show-less")
+      return
+
+    if (key.return) {
+      // ↵ goes straight into the item's screen (PR / issue mount);
+      // only items without a mounted view (jira) fall back to the action menu.
+      if (openDrillView(activeItem)) return
+      openMenu()
+      return
+    }
+
+    // `m` is the only way into the action menu for a PR or an issue: ↵ mounts
+    // their drill view above, so the close/jump/copy actions buildActions has
+    // always returned were unreachable for exactly the two kinds that have the
+    // most of them. Not Shift+↵ — terminals send a bare CR for it, so Ink
+    // cannot tell the two apart without terminal-specific key protocols.
+    if (input === "m") {
+      openMenu()
+      return
+    }
+
+    // Both of these must stay BELOW the search and repo-picker branches: those
+    // return early to consume typed characters, and a letter bound above them
+    // fires instead of reaching the search field. `e` was briefly bound next to
+    // `?` and swallowed every "e" typed into a search.
+    if (
+      input === "e" &&
+      activeItem &&
+      (activeItem.kind === "pr" || activeItem.kind === "issue")
+    ) {
+      setExplain(true)
+      return
+    }
+
+    if (input === "o") {
+      // Opening a URL in the browser doesn't need the terminal, so stay in the
+      // inbox — you can open several PRs without relaunching.
+      $`open ${activeItem.url}`.catch(() => {})
+      const label =
+        activeItem.kind === "jira" ? activeItem.key : `#${activeItem.number}`
+      showFlash(`↗ Opened ${label}`)
+      return
+    }
+    if (input === "c") {
+      clipboard(activeItem.url)
+      const label =
+        activeItem.kind === "jira" ? activeItem.key : `#${activeItem.number}`
+      showFlash(`✓ Copied URL for ${label}`)
+      return
+    }
+    if (input === "d") {
+      if (openDrillView(activeItem)) return
+      const cmd = drillCmd(activeItem)
+      if (cmd) {
+        void runInPane(cmd).catch(() => {})
+        showFlash(`↗ ${drillLabel(activeItem)}`)
+      }
+      return
+    }
+    if (input === "b" && activeItem.kind === "pr" && activeItem.branch) {
+      clipboard(activeItem.branch)
+      showFlash(`✓ Copied ${activeItem.branch}`)
+      return
+    }
+    if (activeItem.kind !== "jira") {
+      if (input === "s" && activeItem.kind === "pr" && activeItem.branch) {
+        const script = [
+          "delay 0.5",
+          'tell application "iTerm2"',
+          "  tell current session of current window",
+          `    write text "git switch ${activeItem.branch}"`,
+          "  end tell",
+          "end tell",
+        ].join("\n")
+        const proc = spawn("osascript", ["-e", script], {
+          detached: true,
+          stdio: "ignore",
+        })
+        proc.unref()
+        process.exit(0)
+      }
+      if (
+        input === "j" &&
+        (activeItem.kind === "pr" || activeItem.kind === "issue")
+      ) {
+        const { repo } = activeItem
+        const branch = activeItem.kind === "pr" ? (activeItem.branch ?? "") : ""
+        showFlash(`⋯ Opening ${repo}…`)
+        void jumpToRepo(repo, branch, login)
+          .then(() => showFlash(`↗ Opened ${repo} in new tab`))
+          .catch(() => showFlash("✗ Jump failed"))
+        return
+      }
+    }
+    if (
+      input === "t" &&
+      activeItem &&
+      activeItem.kind === "jira" &&
+      jiraTransitions &&
+      jiraTransitions.length > 0
+    ) {
+      const jiraKey = activeItem.key
+      const actions: Action[] = jiraTransitions.map(
+        ({ label, state, resolutions }) =>
+          resolutions && resolutions.length > 0
+            ? {
+                label,
+                hint: "",
+                run: () => {},
+                subActions: resolutions.map((resolution) => ({
+                  label: resolution,
+                  hint: "",
+                  run: () => {
+                    menu.close()
+                    showFlash(`⋯ ${label} · ${resolution}…`)
+                    $`jira issue move ${jiraKey} ${state} --resolution ${resolution}`
+                      .then(() => {
+                        showFlash(`✓ ${label} · ${resolution}`)
+                        setTimeout(() => onRefresh?.(), 1500)
+                      })
+                      .catch(() => showFlash(`✗ Move to ${label} failed`))
+                  },
+                })),
+              }
+            : {
+                label,
+                hint: "",
+                run: () => {
+                  menu.close()
+                  showFlash(`⋯ Moving to ${label}…`)
+                  $`jira issue move ${jiraKey} ${state}`
+                    .then(() => {
+                      showFlash(`✓ Moved to ${label}`)
+                      setTimeout(() => onRefresh?.(), 1500)
+                    })
+                    .catch(() => showFlash(`✗ Move to ${label} failed`))
+                },
+              },
+      )
+      menu.open(actions)
+    }
+  })
+
+  const hints: [string, string][] = [
+    ["↑↓", "nav"],
+    ["←→", "tab"],
+    ["↵/d", "open"],
+    ["m", "actions"],
+    ["e", "explain"],
+    ["/", "search"],
+    ["f", "filter"],
+    ["r", "refresh"],
+    ...(ciStatus ? ([["J", "jenkins"]] as [string, string][]) : []),
+    ["?", "help"],
+    ["q", "quit"],
+  ]
+  const matchCount = section.items.filter(
+    (i) => i.kind !== "repo-header" && i.kind !== "subgroup-header",
+  ).length
+
+  if (hidden) return null
+
+  return (
+    <Box
+      flexDirection="column"
+      marginTop={1}
+      borderStyle="round"
+      borderColor={FRAME_COLOR}
+      borderDimColor
+      paddingX={FRAME_PAD_X}
+    >
+      <CockpitHeader
+        sections={localSections}
+        login={login}
+        work={workToggle ? includeWork : undefined}
+        refreshing={refreshing}
+        hasPending={hasPending}
+        fetchedAt={fetchedAt}
+      />
+
+      {ciStatusState ? (
+        <CiStatusLine state={ciStatusState} job={ciJob} />
+      ) : null}
+
+      <Box marginBottom={1}>
+        <Tabs
+          active={section.id}
+          items={localSections.map((s) => ({
+            value: s.id,
+            label: s.label,
+            count: topLevelCount(s),
+          }))}
+        />
+      </Box>
+
+      {search != null ? (
+        <Box marginBottom={1}>
+          <Text color="cyan">{"  / "}</Text>
+          <Text>{search}</Text>
+          {searchInput ? <Text color="cyan">▏</Text> : null}
+          <Text
+            dimColor
+          >{`   ${matchCount} match${matchCount !== 1 ? "es" : ""}${searchInput ? "  ↵ accept · esc clear" : "  esc clear"}`}</Text>
+        </Box>
+      ) : repoFilter.size > 0 ? (
+        <Box marginBottom={1}>
+          <Text color="#FF8700">{"  ◉ "}</Text>
+          <Text>{`${repoFilter.size} repo${repoFilter.size !== 1 ? "s" : ""}`}</Text>
+          <Text dimColor>{"   f edit · esc clear"}</Text>
+        </Box>
+      ) : null}
+
+      {help ? (
+        <Box
+          minHeight={listHeight}
+          flexDirection="column"
+          justifyContent="center"
+          alignItems="center"
+        >
+          <HelpModal
+            workToggle={workToggle}
+            hasCi={ciStatus != null}
+            hasJira={!!jiraBase}
+            tabHelp={tabHelp}
+          />
+        </Box>
+      ) : explain &&
+        activeItem &&
+        (activeItem.kind === "pr" || activeItem.kind === "issue") ? (
+        <Box
+          minHeight={listHeight}
+          flexDirection="column"
+          justifyContent="center"
+          alignItems="center"
+        >
+          <ExplainModal item={activeItem} login={login} />
+        </Box>
+      ) : repoPicker ? (
+        <Box
+          minHeight={listHeight}
+          flexDirection="column"
+          justifyContent="center"
+          alignItems="center"
+        >
+          <RepoPicker
+            repos={allRepos}
+            selected={repoFilter}
+            cursor={Math.min(repoCursor, Math.max(0, allRepos.length - 1))}
+          />
+        </Box>
+      ) : menu.actions && activeItem && activeItem.kind !== "repo-header" ? (
+        <Box
+          minHeight={listHeight}
+          flexDirection="column"
+          justifyContent="center"
+          alignItems="center"
+        >
+          <ActionMenu
+            item={activeItem}
+            actions={menu.actions}
+            cursor={menu.cursor}
+          />
+        </Box>
+      ) : (
+        <Box flexDirection="column" minHeight={listHeight}>
+          <Box flexDirection="column" flexGrow={1}>
+            {visibleItems.map((item, i) => (
+              <ItemRow
+                // Prefix the absolute index so keys stay unique even when the
+                // same repo header recurs down a time-sorted list (Done). The
+                // sum viewStart + i is stable per underlying item across scroll.
+                key={`${viewStart + i}:${
+                  item.kind === "jira"
+                    ? (item.instanceKey ?? item.key)
+                    : item.kind === "repo-header"
+                      ? `header:${item.repo}`
+                      : item.kind === "subgroup-header"
+                        ? `subgroup:${item.label}`
+                        : item.kind === "show-more"
+                          ? `show-more:${item.hidden[0]?.repo ?? i}`
+                          : item.kind === "show-less"
+                            ? `show-less:${item.toHide[0]?.repo ?? i}`
+                            : `${item.repo}/${item.number}`
+                }`}
+                item={item}
+                active={viewStart + i === cursor}
+                login={login}
+                gap={
+                  viewStart + i > 0 &&
+                  (item.kind === "repo-header" ||
+                    item.kind === "subgroup-header" ||
+                    // A header is always followed by a blank line before its
+                    // first child — in Other PRs that's "free" because the
+                    // child is itself a repo-header (gap above). A jira row
+                    // has no such stand-in, so it needs this explicitly. Never
+                    // applies between two tickets/PRs — only right after a
+                    // header.
+                    (item.kind === "jira" &&
+                      ["repo-header", "subgroup-header"].includes(
+                        section.items[viewStart + i - 1]?.kind,
+                      )))
+                }
+              />
+            ))}
+          </Box>
+          {hasMore && (
+            <Text dimColor>
+              {"  "}↓ {section.items.length - viewStart - visibleCount} more
+            </Text>
+          )}
+        </Box>
+      )}
+
+      <Box marginTop={1}>
+        {flash ? (
+          <Text color="green">{flash}</Text>
+        ) : (
+          <FooterHints hints={hints} />
+        )}
+      </Box>
+    </Box>
+  )
+}
+
+// ─── App ──────────────────────────────────────────────────────────────────────
+
+type AppState =
+  | { phase: "loading" }
+  | { phase: "browse"; sections: Section[]; login: string }
+  | { phase: "pr"; item: GHItem; sections: Section[]; login: string }
+  | { phase: "issue"; item: GHItem; sections: Section[]; login: string }
+  | {
+      phase: "ext"
+      extId: string
+      target?: string
+      sections: Section[]
+      login: string
+    }
+
+// `age` excluded: it's relative ("3d") and drifts each fetch, so it would flag
+// "new" as PRs merely get older.
+const signatureOf = (sections: Section[]): string =>
+  JSON.stringify(sections, (k, v) => (k === "age" ? undefined : v))
+
+export const App = ({
+  fetcher,
+  cacheKey,
+  title = "inbox",
+  detailFor,
+  isWorkRepo,
+  initialIncludeWork,
+  jiraBase,
+  jiraKeyRe,
+  jiraTransitions,
+  workToggle,
+  hasCiStatus,
+  ciJob,
+  ciFetcher,
+  ciPollMs = 60_000,
+  extensions,
+  tabHelp,
+}: {
+  fetcher: () => Promise<{
+    sections: Section[]
+    login: string
+    ciStatus?: CiStatus | null
+  }>
+  cacheKey?: string
+  // What this inbox is called, for the loading line. The shell is host-agnostic;
+  // only the host knows whether it is a cockpit, a board, or something else.
+  title?: string
+  // The full-screen view for a drilled-into row. Host-supplied for the same
+  // reason `extensions` is: the shell knows a row was opened, not what a PR or a
+  // mission should look like once it is.
+  detailFor?: (ctx: DetailContext) => React.ReactNode
+  // Splitting rows by origin is a two-account concern. Without this predicate the
+  // toggle has nothing to sort by, so `workToggle` alone does nothing.
+  isWorkRepo?: (repo: string) => boolean
+  initialIncludeWork?: boolean
+  // One-line meaning per tab, for the ? legend. Supplied by the host because the
+  // tabs themselves are: home's are GitHub searches, work's are Jira statuses.
+  tabHelp?: [string, string][]
+  jiraBase?: string
+  jiraKeyRe?: RegExp
+  jiraTransitions?: JiraTransition[]
+  workToggle?: boolean
+  // Reserves a standing CI status row above everything else — loading until
+  // the first fetch resolves, then ready/error — so callers that don't wire a
+  // job (home's cockpit) see no row at all rather than one that never fills in.
+  hasCiStatus?: boolean
+  // Name of the job the row is glancing at — shown in the loading/error states,
+  // where there's no fetched status to read it from.
+  ciJob?: string
+  // Optional independent poller for the CI line: the build result moves on its
+  // own schedule (a pipeline can start/finish while you sit in the inbox), so
+  // it refreshes on its own timer rather than waiting for a full inbox refresh.
+  ciFetcher?: () => Promise<CiStatus | null>
+  ciPollMs?: number
+  // Domain extensions the host can mount as full-screen overlays (their -ink
+  // assembled bodies). Proven with Jenkins; the browse glances follow.
+  extensions?: InboxExtension[]
+}) => {
+  const [state, setState] = useState<AppState>({ phase: "loading" })
+  const [pending, setPending] = useState<{
+    sections: Section[]
+    login: string
+  } | null>(null)
+  const [refreshing, setRefreshing] = useState(false)
+  const [fetchedAt, setFetchedAt] = useState<number | null>(null)
+  // Unlike sections (gated behind "r apply" so the list doesn't shift under
+  // you mid-browse), CI status updates the moment a fresh fetch resolves —
+  // it's a glance, not something you're navigating. Only updated on a
+  // *successful* fetch (see revalidate) — a transient revalidate error leaves
+  // the last-known status up rather than flashing to "unavailable".
+  const [ciStatusState, setCiStatusState] = useState<CiStatusState>({
+    kind: "loading",
+  })
+  // Apply a CI result without re-rendering when nothing meaningful changed —
+  // returning the previous state reference makes React bail out, so a poll that
+  // finds the same build (the common case) causes no repaint at all.
+  const applyCiStatus = (status: CiStatus | null) =>
+    setCiStatusState((prev) => {
+      const next = toCiStatusState(status)
+      return sameCiStatusState(prev, next) ? prev : next
+    })
+  // Serialised sections currently on screen — so "is fresh different?" compares
+  // against what the user is looking at, not against the (already-stale) cache.
+  const displayedKey = useRef<string>("")
+
+  const showData = (sections: Section[], login: string) => {
+    displayedKey.current = signatureOf(sections)
+    setPending(null)
+    setFetchedAt(Date.now())
+    setState({ phase: "browse", sections, login })
+  }
+
+  const revalidate = (manual = false) => {
+    if (manual) setRefreshing(true)
+    fetcher()
+      .then((fresh) => {
+        if (cacheKey) writeCache(cacheKey, fresh)
+        setRefreshing(false)
+        setFetchedAt(Date.now())
+        if (hasCiStatus) applyCiStatus(fresh.ciStatus ?? null)
+        const freshKey = signatureOf(fresh.sections)
+        if (!displayedKey.current) {
+          if (fresh.sections.length === 0) {
+            // Named after the host, not the first host: a board with no missions
+            // said "Cockpit empty." until this was parameterised.
+            console.log(`${title[0].toUpperCase()}${title.slice(1)} empty.`)
+            process.exit(0)
+          }
+          showData(fresh.sections, fresh.login)
+        } else if (freshKey !== displayedKey.current) {
+          setPending(fresh)
+        } else {
+          setPending(null)
+        }
+      })
+      .catch((err) => {
+        setRefreshing(false)
+        if (!displayedKey.current) {
+          console.error("Error:", (err as Error).message)
+          process.exit(1)
+        }
+      })
+  }
+
+  const applyOrRefresh = () => {
+    if (pending) showData(pending.sections, pending.login)
+    else revalidate(true)
+  }
+
+  useEffect(() => {
+    const cached = cacheKey ? readCache(cacheKey) : null
+    if (cached && cached.sections.length > 0) {
+      displayedKey.current = signatureOf(cached.sections)
+      setFetchedAt(cached.at)
+      setState({
+        phase: "browse",
+        sections: cached.sections,
+        login: cached.login,
+      })
+    }
+    revalidate()
+  }, [])
+
+  // Poll the CI status on its own timer (independent of the gated inbox
+  // refresh), applying each result immediately — it's a glance, not something
+  // you navigate. A failed poll leaves the last-known status up rather than
+  // flashing to "unavailable"; a null result (no build / not configured) is a
+  // real "error" state. Only runs when a fetcher is wired and the row is shown.
+  useEffect(() => {
+    if (!hasCiStatus || !ciFetcher) return
+    let live = true
+    const poll = () => {
+      ciFetcher()
+        .then((status) => {
+          if (!live) return
+          applyCiStatus(status)
+        })
+        .catch(() => {})
+    }
+    poll()
+    const id = setInterval(poll, ciPollMs)
+    return () => {
+      live = false
+      clearInterval(id)
+    }
+  }, [hasCiStatus, ciFetcher, ciPollMs])
+
+  if (state.phase === "loading")
+    return (
+      <Box
+        flexDirection="column"
+        marginTop={1}
+        borderStyle="round"
+        borderColor={FRAME_COLOR}
+        borderDimColor
+        paddingX={FRAME_PAD_X}
+      >
+        <CockpitHeader
+          sections={[]}
+          login=""
+          work={workToggle ? (initialIncludeWork ?? true) : undefined}
+          loading
+        />
+        {hasCiStatus ? (
+          <CiStatusLine state={ciStatusState} job={ciJob} />
+        ) : null}
+        <LoadingScreen label={`Fetching ${title}…`} />
+      </Box>
+    )
+
+  const overlay =
+    state.phase === "pr"
+      ? { kind: "pr" as const, item: state.item }
+      : state.phase === "issue"
+        ? { kind: "issue" as const, item: state.item }
+        : state.phase === "ext"
+          ? {
+              kind: "ext" as const,
+              extId: state.extId,
+              target: state.target,
+            }
+          : null
+  const toBrowse = () =>
+    setState({ phase: "browse", sections: state.sections, login: state.login })
+
+  // Closing from a drill hands back to the inbox, so the row has to be gone
+  // from App's own sections — returning to a list that still shows what you
+  // just closed is the lag the optimistic update exists to remove.
+  const removeAndReturn = (target: GHItem) =>
+    setState({
+      phase: "browse",
+      sections: withoutItem(state.sections, target),
+      login: state.login,
+    })
+  return (
+    <>
+      <BrowseScreen
+        sections={state.sections}
+        login={state.login}
+        jiraBase={jiraBase}
+        jiraKeyRe={jiraKeyRe}
+        jiraTransitions={jiraTransitions}
+        onRefresh={applyOrRefresh}
+        refreshing={refreshing}
+        hasPending={pending !== null}
+        fetchedAt={fetchedAt}
+        workToggle={workToggle}
+        isWorkRepo={isWorkRepo}
+        initialIncludeWork={initialIncludeWork}
+        hidden={overlay !== null}
+        ciStatusState={hasCiStatus ? ciStatusState : undefined}
+        ciJob={ciJob}
+        tabHelp={tabHelp}
+        onOpenPr={(item) =>
+          setState({
+            phase: "pr",
+            item,
+            sections: state.sections,
+            login: state.login,
+          })
+        }
+        onOpenIssue={(item) =>
+          setState({
+            phase: "issue",
+            item,
+            sections: state.sections,
+            login: state.login,
+          })
+        }
+        onOpenExt={(id, target) =>
+          setState({
+            phase: "ext",
+            extId: id,
+            target,
+            sections: state.sections,
+            login: state.login,
+          })
+        }
+      />
+      {(overlay?.kind === "pr" || overlay?.kind === "issue") &&
+        detailFor?.({
+          item: overlay.item,
+          kind: overlay.kind,
+          login: state.login,
+          onBack: toBrowse,
+          onRefresh: applyOrRefresh,
+          onRemove: removeAndReturn,
+        })}
+      {overlay?.kind === "ext" &&
+        extensions
+          ?.find((e) => e.id === overlay.extId)
+          ?.body(toBrowse, overlay.target)}
+    </>
+  )
+}
