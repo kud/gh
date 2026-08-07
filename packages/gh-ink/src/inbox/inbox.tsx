@@ -514,6 +514,16 @@ export const maxViewStart = (items: AnyItem[], budget: number): number => {
   return start
 }
 
+// Where a section's cursor starts: the first row that is not a header. findIndex
+// returns -1 for a section of headers alone, which Math.max floors to 0.
+const firstSelectable = (section: Section): number =>
+  Math.max(
+    0,
+    section.items.findIndex(
+      (i) => i.kind !== "repo-header" && i.kind !== "subgroup-header",
+    ),
+  )
+
 export const withHeaders = (items: AnyItem[], idx: number): number => {
   let start = idx
   while (
@@ -1737,19 +1747,18 @@ const BrowseScreen = ({
 
   const [localSections, setLocalSections] = useState(initialSections)
   const [tabIdx, setTabIdx] = useState(0)
-  const [cursors, setCursors] = useState<number[]>(
-    initialSections.map((s) =>
-      Math.max(
-        0,
-        s.items.findIndex(
-          (i) => i.kind !== "repo-header" && i.kind !== "subgroup-header",
-        ),
-      ),
-    ),
+
+  // Keyed by section id, NOT by position. filterByOrigin drops sections that end
+  // up empty, so the work ⇄ home switch changes the section SET, not just its
+  // contents — position n is a different tab on the other side. Index-keyed state
+  // meant flipping the switch handed you another tab's saved cursor.
+  const [cursors, setCursors] = useState<Record<string, number>>(() =>
+    Object.fromEntries(initialSections.map((s) => [s.id, firstSelectable(s)])),
   )
-  const [viewStarts, setViewStarts] = useState<number[]>(
-    initialSections.map(() => 0),
-  )
+  const [viewStarts, setViewStarts] = useState<Record<string, number>>({})
+
+  const safeTabIdx = Math.min(tabIdx, Math.max(0, localSections.length - 1))
+  const activeId = localSections[safeTabIdx]?.id ?? ""
   const [flash, setFlash] = useState<string | null>(null)
   const menu = useActionMenu()
   const [search, setSearch] = useState<string | null>(null)
@@ -1772,8 +1781,8 @@ const BrowseScreen = ({
   )
 
   useEffect(() => {
-    setCursors((p) => p.map((c, i) => (i === tabIdx ? 0 : c)))
-    setViewStarts((p) => p.map((v, i) => (i === tabIdx ? 0 : v)))
+    setCursors((p) => ({ ...p, [activeId]: 0 }))
+    setViewStarts((p) => ({ ...p, [activeId]: 0 }))
   }, [search])
 
   // Pull in fresh data when App applies it (no longer via a loading remount).
@@ -1784,18 +1793,29 @@ const BrowseScreen = ({
   useEffect(() => {
     setTabIdx((prev) => Math.min(prev, Math.max(0, localSections.length - 1)))
     setCursors((prev) =>
-      localSections.map((s, i) => {
-        const c = Math.min(prev[i] ?? 0, s.items.length - 1)
-        if (c < 0) return 0
-        return s.items[c]?.kind === "repo-header" ||
-          s.items[c]?.kind === "subgroup-header"
-          ? moveCursor(s.items, c, 1)
-          : c
-      }),
+      Object.fromEntries(
+        localSections.map((s) => {
+          const c = Math.min(
+            prev[s.id] ?? firstSelectable(s),
+            s.items.length - 1,
+          )
+          if (c < 0) return [s.id, 0]
+          return [
+            s.id,
+            s.items[c]?.kind === "repo-header" ||
+            s.items[c]?.kind === "subgroup-header"
+              ? moveCursor(s.items, c, 1)
+              : c,
+          ]
+        }),
+      ),
     )
     setViewStarts((prev) =>
-      localSections.map((s, i) =>
-        Math.min(prev[i] ?? 0, maxViewStart(s.items, listHeight)),
+      Object.fromEntries(
+        localSections.map((s) => [
+          s.id,
+          Math.min(prev[s.id] ?? 0, maxViewStart(s.items, listHeight)),
+        ]),
       ),
     )
   }, [localSections, listHeight])
@@ -1803,7 +1823,6 @@ const BrowseScreen = ({
   const removeItemFromSections = (target: GHItem) =>
     setLocalSections((prev) => withoutItem(prev, target))
 
-  const safeTabIdx = Math.min(tabIdx, Math.max(0, localSections.length - 1))
   const rawSection = localSections[safeTabIdx] ?? {
     id: "empty",
     label: "",
@@ -1826,8 +1845,8 @@ const BrowseScreen = ({
     allRepos.length,
     { vimKeys: false, isActive: repoPicker },
   )
-  const cursor = cursors[safeTabIdx] ?? 0
-  const viewStart = viewStarts[safeTabIdx] ?? 0
+  const cursor = cursors[activeId] ?? 0
+  const viewStart = viewStarts[activeId] ?? 0
   const visibleCount = windowCount(section.items, viewStart, listHeight)
   const visibleItems = section.items.slice(viewStart, viewStart + visibleCount)
   const hasMore = viewStart + visibleCount < section.items.length
@@ -1951,23 +1970,23 @@ const BrowseScreen = ({
 
     // Not useListCursor / useTabs, and not an oversight. The cursor steps through
     // moveCursor, which skips repo-header and subgroup-header rows, so the hook's
-    // ±1 would land on a header. And cursors/viewStarts are per-tab arrays keyed
-    // by tabIdx, while useTabs owns a tab VALUE — adopting it would add a derived
-    // index and a clamp effect on top of the two clamps tabIdx already has, to
-    // replace four correct lines. The repo picker above is the fit; this is not.
+    // ±1 would land on a header. And tabIdx stays a position with its own clamp
+    // while useTabs owns a tab VALUE — adopting it would add a derived index and a
+    // clamp effect on top, to replace four correct lines. The repo picker above is
+    // the fit; this is not.
     if (key.upArrow) {
       const next = moveCursor(section.items, cursor, -1)
       const newVs = Math.min(viewStart, withHeaders(section.items, next))
-      setCursors((p) => p.map((c, i) => (i === tabIdx ? next : c)))
-      setViewStarts((p) => p.map((v, i) => (i === tabIdx ? newVs : v)))
+      setCursors((p) => ({ ...p, [activeId]: next }))
+      setViewStarts((p) => ({ ...p, [activeId]: newVs }))
     }
     if (key.downArrow) {
       const next = moveCursor(section.items, cursor, 1)
       let newVs = viewStart
       while (next >= newVs + windowCount(section.items, newVs, listHeight))
         newVs++
-      setCursors((p) => p.map((c, i) => (i === tabIdx ? next : c)))
-      setViewStarts((p) => p.map((v, i) => (i === tabIdx ? newVs : v)))
+      setCursors((p) => ({ ...p, [activeId]: next }))
+      setViewStarts((p) => ({ ...p, [activeId]: newVs }))
     }
     if (key.leftArrow) setTabIdx((i) => Math.max(0, i - 1))
     if (key.rightArrow)
@@ -1985,8 +2004,15 @@ const BrowseScreen = ({
     }
     if (workToggle && input === "w") {
       const next = !includeWork
+      const nextSections = applyWork(sections, next)
+      // Follow the tab you were ON, not the position it happened to occupy. The
+      // two sides drop different empty sections, so the same index is a different
+      // tab across the switch. Only when the tab has no counterpart at all does
+      // the clamp in the localSections effect get to choose.
+      const keptIdx = nextSections.findIndex((s) => s.id === activeId)
       setIncludeWork(next)
-      setLocalSections(applyWork(sections, next))
+      setLocalSections(nextSections)
+      if (keptIdx >= 0) setTabIdx(keptIdx)
       return
     }
     if (input === "J" && ciStatus) {
