@@ -6,7 +6,13 @@ import React, { useState, useEffect, useRef } from "react"
 import { Text, Box, useInput, useWindowSize } from "ink"
 import type { InboxExtension } from "./extension.js"
 import { readCache, writeCache } from "./cache.js"
-import { FooterHints, LoadingScreen, Tabs, Switch } from "@kud/ink-ui"
+import {
+  FooterHints,
+  LoadingScreen,
+  Tabs,
+  Switch,
+  useListCursor,
+} from "@kud/ink-ui"
 import {
   type Health,
   computeHealth as ghComputeHealth,
@@ -1750,7 +1756,6 @@ const BrowseScreen = ({
   const [searchInput, setSearchInput] = useState(false)
   const [repoFilter, setRepoFilter] = useState<Set<string>>(new Set())
   const [repoPicker, setRepoPicker] = useState(false)
-  const [repoCursor, setRepoCursor] = useState(0)
   const [help, setHelp] = useState(false)
   const [explain, setExplain] = useState(false)
   const filterActive = search != null || repoFilter.size > 0
@@ -1812,6 +1817,15 @@ const BrowseScreen = ({
     ? { ...rawSection, items: filtered[0]?.items ?? [] }
     : rawSection
   const allRepos = reposInSections(localSections)
+
+  // The one cursor in this file useListCursor fits: a flat list with a uniform
+  // step. The main tree's cursor moves through moveCursor, which SKIPS header
+  // rows, so ±1 is the wrong step there — see the note on the tree's handlers.
+  // vimKeys off keeps the picker's keymap byte-for-byte what it was.
+  const { cursor: repoCursor, setCursor: setRepoCursor } = useListCursor(
+    allRepos.length,
+    { vimKeys: false, isActive: repoPicker },
+  )
   const cursor = cursors[safeTabIdx] ?? 0
   const viewStart = viewStarts[safeTabIdx] ?? 0
   const visibleCount = windowCount(section.items, viewStart, listHeight)
@@ -1886,10 +1900,8 @@ const BrowseScreen = ({
     }
 
     if (repoPicker) {
+      // ↑↓ belong to useListCursor above, gated on repoPicker.
       if (key.escape || key.return) return setRepoPicker(false)
-      if (key.upArrow) return setRepoCursor((c) => Math.max(0, c - 1))
-      if (key.downArrow)
-        return setRepoCursor((c) => Math.min(allRepos.length - 1, c + 1))
       if (input === "a") return setRepoFilter(new Set())
       if (input === " ") {
         const repo = allRepos[repoCursor]
@@ -1937,6 +1949,12 @@ const BrowseScreen = ({
 
     if (menu.handleKey(key)) return
 
+    // Not useListCursor / useTabs, and not an oversight. The cursor steps through
+    // moveCursor, which skips repo-header and subgroup-header rows, so the hook's
+    // ±1 would land on a header. And cursors/viewStarts are per-tab arrays keyed
+    // by tabIdx, while useTabs owns a tab VALUE — adopting it would add a derived
+    // index and a clamp effect on top of the two clamps tabIdx already has, to
+    // replace four correct lines. The repo picker above is the fit; this is not.
     if (key.upArrow) {
       const next = moveCursor(section.items, cursor, -1)
       const newVs = Math.min(viewStart, withHeaders(section.items, next))
