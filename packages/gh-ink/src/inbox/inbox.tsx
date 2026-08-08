@@ -818,6 +818,12 @@ export const buildActions = (
   onRefresh?: () => void,
   onRemove?: (item: GHItem) => void,
   onOpenView?: (item: AnyItem) => boolean,
+  // A trailing bag rather than two more positional params. Nine was already too
+  // many, and the next contribution should extend this instead of growing the tail.
+  ext?: {
+    extensions?: InboxExtension[]
+    onOpenExt?: (id: string, target: ExtensionTarget) => void
+  },
 ): Action[] => {
   if (
     item.kind === "repo-header" ||
@@ -1092,6 +1098,17 @@ export const buildActions = (
       })
     }
   }
+
+  // Item-scoped extensions, appended last so a domain contribution never displaces
+  // the row's own actions. Reached only on GitHub rows — a Jira row returns from its
+  // own branch above, and listing "Delegate to an agent" there would offer an action
+  // whose only possible outcome is bouncing straight back.
+  for (const e of itemExtensions(ext?.extensions))
+    actions.push({
+      label: e.title,
+      hint: e.key,
+      run: () => ext?.onOpenExt?.(e.id, { item, login }),
+    })
 
   return actions
 }
@@ -1510,12 +1527,14 @@ const TURN_LEGEND: [string, string, string][] = [
 // wrong in one of the two cockpits at all times.
 const HelpModal = ({
   workToggle,
-  hasCi,
+  extensions,
   hasJira,
   tabHelp,
 }: {
   workToggle?: boolean
-  hasCi?: boolean
+  // The extensions themselves, not a `hasCi` boolean. A flag could only ever say
+  // "Jenkins exists", which is why a second extension went unlisted here.
+  extensions?: InboxExtension[]
   hasJira?: boolean
   tabHelp?: [string, string][]
 }) => {
@@ -1540,7 +1559,7 @@ const HelpModal = ({
     ...(workToggle
       ? ([["w", "toggle work / home"]] as [string, string][])
       : []),
-    ...(hasCi ? ([["J", "Jenkins explorer"]] as [string, string][]) : []),
+    ...extensionLegend(extensions),
     ["?", "this help"],
     ["q", "quit"],
   ]
@@ -1707,6 +1726,26 @@ export const extensionFor = (
   extensions?: InboxExtension[],
 ): InboxExtension | undefined =>
   input ? extensions?.find((e) => e.key === input) : undefined
+
+// The footer strip and the `?` legend, derived rather than hand-written. Both used
+// to hardcode `["J", "jenkins"]` behind a `ciStatus`/`hasCi` flag, so honouring
+// `key` in the dispatch left `a` working and undiscoverable — the mechanism was
+// generic and everything that ADVERTISED it still named one domain.
+export const extensionHints = (
+  extensions?: InboxExtension[],
+): [string, string][] =>
+  (extensions ?? []).map((e) => [e.key, e.hint ?? e.title.toLowerCase()])
+
+export const extensionLegend = (
+  extensions?: InboxExtension[],
+): [string, string][] => (extensions ?? []).map((e) => [e.key, e.title])
+
+// Extensions that belong in a row's action menu. `scope` defaults to "global", so
+// an extension has to opt IN to being listed against an item — a host that has not
+// thought about it does not get Jenkins offered as something to do to a PR.
+export const itemExtensions = (
+  extensions?: InboxExtension[],
+): InboxExtension[] => (extensions ?? []).filter((e) => e.scope === "item")
 
 const BrowseScreen = ({
   sections,
@@ -1916,6 +1955,7 @@ const BrowseScreen = ({
       onRefresh,
       removeItemFromSections,
       openDrillView,
+      { extensions, onOpenExt },
     )
     menu.open(actions)
   }
@@ -2263,7 +2303,7 @@ const BrowseScreen = ({
     ["/", "search"],
     ["f", "filter"],
     ["r", "refresh"],
-    ...(ciStatus ? ([["J", "jenkins"]] as [string, string][]) : []),
+    ...extensionHints(extensions),
     ["?", "help"],
     ["q", "quit"],
   ]
@@ -2333,7 +2373,7 @@ const BrowseScreen = ({
         >
           <HelpModal
             workToggle={workToggle}
-            hasCi={ciStatus != null}
+            extensions={extensions}
             hasJira={!!jiraBase}
             tabHelp={tabHelp}
           />
