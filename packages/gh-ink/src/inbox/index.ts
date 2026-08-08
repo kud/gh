@@ -56,5 +56,5 @@ export {
   type ExplainSection,
   type DetailContext,
 } from "./inbox.js"
-export type { InboxExtension } from "./extension.js"
+export type { InboxExtension, ExtensionTarget } from "./extension.js"
 export { readCache, writeCache } from "./cache.js"
