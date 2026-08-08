@@ -4,7 +4,7 @@ import { existsSync, readdirSync, statSync } from "fs"
 import { join } from "path"
 import React, { useState, useEffect, useRef } from "react"
 import { Text, Box, useInput, useWindowSize } from "ink"
-import type { InboxExtension } from "./extension.js"
+import type { InboxExtension, ExtensionTarget } from "./extension.js"
 import { readCache, writeCache } from "./cache.js"
 import {
   FooterHints,
@@ -22,6 +22,17 @@ import {
   isPendingCheck,
 } from "@kud/gh"
 import { healthDisplay, healthLegend } from "../lib/health-display.js"
+
+// Every child process this module spawns goes through here, and none may inherit
+// its output. A bare zx `$` captures a child's stdout but passes its STDERR
+// straight to the terminal, and `gh`/`jira` print confirmations like "✓ Closed
+// issue #N" there so stdout stays pipeable. Ink owns a region of stdout and
+// repaints it; it has no view of stderr at all, so that line lands raw at the
+// cursor OUTSIDE the frame and flickers there until the next render scrolls it
+// away — a duplicate of a message the inbox was already showing properly through
+// showFlash, which renders inside the border. Nothing in a full-screen TUI ever
+// wants a child's raw output, `open`'s failure text included.
+const quietly = $({ quiet: true })
 
 // ─── Work filter ─────────────────────────────────────────────────────────────
 
@@ -820,7 +831,7 @@ export const buildActions = (
     label: "Open in browser",
     hint: "o",
     run: () => {
-      $`open ${item.url}`.catch(() => {})
+      quietly`open ${item.url}`.catch(() => {})
       showFlash("↗ Opened in browser")
     },
   }
@@ -875,7 +886,7 @@ export const buildActions = (
                   hint: "",
                   run: () => {
                     showFlash(`⋯ ${label} · ${resolution}…`)
-                    void $`jira issue move ${(item as JiraRow).key} ${state} --resolution ${resolution}`
+                    void quietly`jira issue move ${(item as JiraRow).key} ${state} --resolution ${resolution}`
                       .then(() => {
                         showFlash(`✓ ${label} · ${resolution}`)
                         setTimeout(() => onRefresh?.(), 1500)
@@ -889,7 +900,7 @@ export const buildActions = (
                 hint: "",
                 run: () => {
                   showFlash(`⋯ Moving to ${label}…`)
-                  void $`jira issue move ${(item as JiraRow).key} ${state}`
+                  void quietly`jira issue move ${(item as JiraRow).key} ${state}`
                     .then(() => {
                       showFlash(`✓ Moved to ${label}`)
                       setTimeout(() => onRefresh?.(), 1500)
@@ -982,7 +993,7 @@ export const buildActions = (
           run: () => {
             onRemove?.(item as GHItem)
             showFlash(`✓ Closed #${item.number}`)
-            void $`gh issue close ${item.number} --repo ${item.repo}`.catch(
+            void quietly`gh issue close ${item.number} --repo ${item.repo}`.catch(
               () => {
                 showFlash(`✗ Close failed — restoring #${item.number}`)
                 onRefresh?.()
@@ -1023,7 +1034,7 @@ export const buildActions = (
           label: `Open ${jiraKey} in Jira`,
           hint: "t",
           run: () => {
-            $`open ${jiraBase}/${jiraKey}`.catch(() => {})
+            quietly`open ${jiraBase}/${jiraKey}`.catch(() => {})
             showFlash(`↗ Opened ${jiraKey} in Jira`)
           },
         })
@@ -1041,10 +1052,12 @@ export const buildActions = (
           run: () => {
             onRemove?.(item as GHItem)
             showFlash(`✓ Closed #${item.number}`)
-            void $`gh pr close ${item.number} --repo ${item.repo}`.catch(() => {
-              showFlash(`✗ Close failed — restoring #${item.number}`)
-              onRefresh?.()
-            })
+            void quietly`gh pr close ${item.number} --repo ${item.repo}`.catch(
+              () => {
+                showFlash(`✗ Close failed — restoring #${item.number}`)
+                onRefresh?.()
+              },
+            )
           },
         },
         { label: "Cancel", hint: "", run: () => {} },
@@ -1063,10 +1076,10 @@ export const buildActions = (
             run: () => {
               onRemove?.(item as GHItem)
               showFlash(`✓ Closed #${item.number} and deleted ${item.branch}`)
-              void $`gh pr close ${item.number} --repo ${item.repo}`
+              void quietly`gh pr close ${item.number} --repo ${item.repo}`
                 .then(
                   () =>
-                    $`gh api -X DELETE ${`repos/${item.repo}/git/refs/heads/${item.branch}`}`,
+                    quietly`gh api -X DELETE ${`repos/${item.repo}/git/refs/heads/${item.branch}`}`,
                 )
                 .catch(() => {
                   showFlash(`✗ Close + delete failed — restoring`)
@@ -1685,6 +1698,16 @@ const RepoPicker = ({
   )
 }
 
+// Which extension a keypress opens, if any. Split out of the input handler so the
+// empty-input guard is testable rather than incidental: Ink reports arrow keys,
+// Tab and Escape with `input` as an empty string, so a matcher without the guard
+// would fire any extension that declared `key: ""` on every single cursor move.
+export const extensionFor = (
+  input: string,
+  extensions?: InboxExtension[],
+): InboxExtension | undefined =>
+  input ? extensions?.find((e) => e.key === input) : undefined
+
 const BrowseScreen = ({
   sections,
   login,
@@ -1700,6 +1723,7 @@ const BrowseScreen = ({
   onOpenPr,
   onOpenIssue,
   onOpenExt,
+  extensions,
   ciStatusState,
   ciJob,
   tabHelp,
@@ -1724,7 +1748,11 @@ const BrowseScreen = ({
   hidden?: boolean
   onOpenPr?: (item: GHItem) => void
   onOpenIssue?: (item: GHItem) => void
-  onOpenExt?: (id: string, target?: string) => void
+  onOpenExt?: (id: string, target?: ExtensionTarget) => void
+  // Needed only to read each extension's `key`; the bodies are mounted by App,
+  // not here. Without it BrowseScreen cannot dispatch on `key` at all, which is
+  // what confined extensions to the hardcoded Jenkins arm.
+  extensions?: InboxExtension[]
   // The CI line renders here, between the inbox header and the tabs. Its
   // full poll state (loading / error / ready) is passed so the row is always
   // present once wired; undefined means "no CI row at all" (home's cockpit).
@@ -2015,10 +2043,22 @@ const BrowseScreen = ({
       if (keptIdx >= 0) setTabIdx(keptIdx)
       return
     }
-    if (input === "J" && ciStatus) {
-      // The embedded <JenkinsBody> from @kud/jenkins-ink — the same grid
-      // jenkins-cli mounts — instead of shelling out to `jenkins -i`.
-      onOpenExt?.("jenkins", ciStatus.job)
+    // Any extension whose declared key is pressed opens it. This used to be a
+    // hardcoded `input === "J"` arm calling onOpenExt("jenkins", …), which made
+    // InboxExtension.key decorative — the field existed, BrowseScreen never
+    // received the array, and a second extension could declare a key that nothing
+    // would ever read. The position is deliberate: below every built-in binding,
+    // so a declared key cannot shadow navigation, refresh or quit, and above the
+    // activeItem guard, so a domain-scoped extension still opens on an empty tab.
+    // Both contexts travel in the target and the body takes what it needs —
+    // Jenkins reads ciJob, a row-scoped extension reads item.
+    const ext = extensionFor(input, extensions)
+    if (ext) {
+      onOpenExt?.(ext.id, {
+        item: activeItem ?? undefined,
+        ciJob: ciStatus?.job,
+        login,
+      })
       return
     }
     if (
@@ -2108,7 +2148,7 @@ const BrowseScreen = ({
     if (input === "o") {
       // Opening a URL in the browser doesn't need the terminal, so stay in the
       // inbox — you can open several PRs without relaunching.
-      $`open ${activeItem.url}`.catch(() => {})
+      quietly`open ${activeItem.url}`.catch(() => {})
       const label =
         activeItem.kind === "jira" ? activeItem.key : `#${activeItem.number}`
       showFlash(`↗ Opened ${label}`)
@@ -2186,7 +2226,7 @@ const BrowseScreen = ({
                   run: () => {
                     menu.close()
                     showFlash(`⋯ ${label} · ${resolution}…`)
-                    $`jira issue move ${jiraKey} ${state} --resolution ${resolution}`
+                    quietly`jira issue move ${jiraKey} ${state} --resolution ${resolution}`
                       .then(() => {
                         showFlash(`✓ ${label} · ${resolution}`)
                         setTimeout(() => onRefresh?.(), 1500)
@@ -2201,7 +2241,7 @@ const BrowseScreen = ({
                 run: () => {
                   menu.close()
                   showFlash(`⋯ Moving to ${label}…`)
-                  $`jira issue move ${jiraKey} ${state}`
+                  quietly`jira issue move ${jiraKey} ${state}`
                     .then(() => {
                       showFlash(`✓ Moved to ${label}`)
                       setTimeout(() => onRefresh?.(), 1500)
@@ -2406,7 +2446,7 @@ type AppState =
   | {
       phase: "ext"
       extId: string
-      target?: string
+      target?: ExtensionTarget
       sections: Section[]
       login: string
     }
@@ -2676,6 +2716,7 @@ export const App = ({
             login: state.login,
           })
         }
+        extensions={extensions}
       />
       {(overlay?.kind === "pr" || overlay?.kind === "issue") &&
         detailFor?.({
