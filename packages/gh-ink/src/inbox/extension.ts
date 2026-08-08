@@ -38,8 +38,19 @@ export type ExtensionTarget = {
 // key already taken (q r w f / J) simply never reaches it.
 export interface InboxExtension {
   id: string
+  // Spelled out, for the `?` legend: "Jenkins explorer", not "jenkins".
   title: string
   key: string
+  // Short label for the footer strip, where columns are scarce. Falls back to a
+  // lowercased `title`, which is what the footer showed for Jenkins before any of
+  // this was derived — the two surfaces genuinely want different lengths.
+  hint?: string
+  // Whether the extension acts on the SELECTED ROW or on the host as a whole.
+  // Only `item` extensions earn a place in a row's action menu: Jenkins is not
+  // something you do to a pull request, and listing it under `m` beside "Close PR"
+  // would read as if it were. Both kinds appear in the footer and the legend,
+  // because both are things you can press.
+  scope?: "item" | "global"
   // `target` is the optional context the opener passes — the body decides what to
   // do with it, and ignores the parts it has no use for.
   body: (onExit: () => void, target?: ExtensionTarget) => ReactNode
