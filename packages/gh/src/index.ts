@@ -12,6 +12,7 @@
 // The deciding test is "is there a query to optimise?": yes → gh api; no →
 // porcelain.
 export * from "./gh.js"
+export * from "./inbox.js"
 export * from "./pr.js"
 export * from "./pr-comments.js"
 export * from "./health.js"

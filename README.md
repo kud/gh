@@ -6,13 +6,13 @@ and every surface (standalone command, cockpit dashboard, MCP) consumes it.
 
 ## Packages
 
-| Package                  | Role                                                                         | Status                                    |
-| ------------------------ | ---------------------------------------------------------------------------- | ----------------------------------------- |
-| [`@kud/gh`](packages/gh) | **core** — `gh` CLI primitives, PR review comments, health, webhook logic    | 🟢 comments landed; health + webhook next |
-| `@kud/gh-ink`            | **components** — controlled Ink panels (health, comments) + token→colour map | ⚪ planned                                |
-| `@kud/gh-pr-comments`    | CLI — browse / reply / resolve review threads                                | ⚪ planned                                |
-| `@kud/gh-pr-health`      | CLI — checks / reviews / merge-state for a PR                                | ⚪ planned                                |
-| `@kud/gh-webhook-replay` | CLI — replay the latest `pull_request` webhook delivery                      | ⚪ planned                                |
+| Package                                                | Role                                                                                           | Status   |
+| ------------------------------------------------------ | ---------------------------------------------------------------------------------------------- | -------- |
+| [`@kud/gh`](packages/gh)                               | **core** — `gh` CLI primitives, PR review comments, health, webhook logic                      | 🟢 0.2.0 |
+| [`@kud/gh-ink`](packages/gh-ink)                       | **components** — controlled Ink panels (health, comments) + the inbox shell + token→colour map | 🟢 0.5.0 |
+| [`@kud/gh-pr-comments`](packages/gh-pr-comments)       | CLI — browse / reply / resolve review threads                                                  | 🟢 0.1.5 |
+| [`@kud/gh-pr-health`](packages/gh-pr-health)           | CLI — checks / reviews / merge-state for a PR                                                  | 🟢 0.1.5 |
+| [`@kud/gh-webhook-replay`](packages/gh-webhook-replay) | CLI — replay the latest `pull_request` webhook delivery                                        | 🟢 0.1.1 |
 
 ## Design
 
