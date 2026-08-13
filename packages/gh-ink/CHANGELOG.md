@@ -1,5 +1,15 @@
 # @kud/gh-ink
 
+## 0.6.0
+
+### Minor Changes
+
+- Surface a failed background refresh in the flash instead of swallowing it.
+
+  Once something is on screen, a rejected `fetcher()` was caught and dropped: the list kept rendering from cache with no hint it had gone stale, and the only thing a user saw was whatever the fetcher's child process leaked to stderr — outside the Ink frame, where nothing can lay it out.
+
+  `BrowseScreen` takes an optional `refreshError`, flashed inside the border like every other transient outcome. It carries a timestamp so two identical failures in a row are two distinct values; a bare string would compare equal and fire only once, reading as a recovery.
+
 ## 0.5.3
 
 ### Patch Changes
