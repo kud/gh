@@ -87,6 +87,7 @@ export const buildInboxQuery = ({
     nodes { __typename ... on PullRequest {
       number title createdAt url headRefName
       repository { nameWithOwner }
+      author { login }
       ${PR_HEALTH}
       ${PR_CONVERSATION}
     }}
