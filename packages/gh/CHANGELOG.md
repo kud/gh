@@ -1,5 +1,13 @@
 # @kud/gh
 
+## 0.4.1
+
+### Patch Changes
+
+- Select `author { login }` on `myPRs` too, so every PR section agrees on its shape.
+
+  It was the one section omitting it — the search is `author:@me`, so the author looked redundant. It is not: a consumer reading `author` gets `undefined` on exactly the section holding your own PRs, and nothing in the response says whether the field was absent or genuinely unset.
+
 ## 0.4.0
 
 ### Minor Changes
