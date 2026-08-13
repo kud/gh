@@ -30,17 +30,24 @@ const PR_HEALTH = `
 // carries its latest author and timestamp: the conversation, the review bodies,
 // and each thread's last reply. The last commit rides along so a consumer can
 // say whether the author has pushed since being sent back.
+//
+// `__typename` distinguishes a Bot from a User, which a login cannot: GraphQL
+// reports app authors bare (`greptile-apps`), without the `[bot]` suffix REST
+// adds, so there is nothing in the name to match on. A consumer needs it to
+// decide whether a push answers what was said — it does when a machine said it,
+// and does not when a person did. Note it catches GitHub Apps only; a machine
+// ACCOUNT like `raycastbot` is a User and reads as human here.
 const PR_CONVERSATION = `
-      comments(last: 1) { totalCount nodes { author { login } createdAt } }
-      reviews(last: 1) { nodes { author { login } state submittedAt } }
+      comments(last: 1) { totalCount nodes { author { __typename login } createdAt } }
+      reviews(last: 1) { nodes { author { __typename login } state submittedAt } }
       reviewThreads(first: 50) { nodes {
         isResolved
-        comments(last: 1) { totalCount nodes { author { login } createdAt } }
+        comments(last: 1) { totalCount nodes { author { __typename login } createdAt } }
       } }
       commits(last: 1) { nodes { commit { committedDate } } }`
 
 const ISSUE_CONVERSATION = `
-      comments(last: 1) { totalCount nodes { author { login } createdAt } }`
+      comments(last: 1) { totalCount nodes { author { __typename login } createdAt } }`
 
 // Fetched so a consumer can tell a `plan` issue from any other — which decides
 // what a delegated session gets handed. Nothing here renders labels.
