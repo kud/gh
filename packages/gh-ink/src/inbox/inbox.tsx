@@ -1757,6 +1757,7 @@ const BrowseScreen = ({
   refreshing,
   hasPending,
   fetchedAt,
+  refreshError,
   workToggle,
   hidden,
   onOpenPr,
@@ -1783,6 +1784,10 @@ const BrowseScreen = ({
   refreshing?: boolean
   hasPending?: boolean
   fetchedAt?: number | null
+  // A background revalidate that failed. Carries `at` so two identical failures
+  // in a row are still two distinct values — a bare string would compare equal
+  // and the flash would fire only once, reading as "it recovered".
+  refreshError?: { message: string; at: number }
   workToggle?: boolean
   hidden?: boolean
   onOpenPr?: (item: GHItem) => void
@@ -1923,6 +1928,16 @@ const BrowseScreen = ({
     setFlash(msg)
     setTimeout(() => setFlash(null), 2000)
   }
+
+  // A failed background refresh used to be swallowed: the list kept rendering
+  // from cache with no hint it had gone stale, and the only thing the user saw
+  // was whatever the fetcher's child process leaked to stderr — outside the
+  // frame, where nothing can lay it out. It belongs in the flash, inside the
+  // border, like every other transient outcome in this UI.
+  useEffect(() => {
+    if (refreshError) showFlash(`✗ ${refreshError.message}`)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshError])
 
   const openDrillView = (item: AnyItem): boolean => {
     const open = (fn: (i: GHItem) => void, i: GHItem): boolean => {
@@ -2561,6 +2576,10 @@ export const App = ({
   } | null>(null)
   const [refreshing, setRefreshing] = useState(false)
   const [fetchedAt, setFetchedAt] = useState<number | null>(null)
+  const [refreshError, setRefreshError] = useState<{
+    message: string
+    at: number
+  } | null>(null)
   // Unlike sections (gated behind "r apply" so the list doesn't shift under
   // you mid-browse), CI status updates the moment a fresh fetch resolves —
   // it's a glance, not something you're navigating. Only updated on a
@@ -2595,6 +2614,7 @@ export const App = ({
         if (cacheKey) writeCache(cacheKey, fresh)
         setRefreshing(false)
         setFetchedAt(Date.now())
+        setRefreshError(null)
         if (hasCiStatus) applyCiStatus(fresh.ciStatus ?? null)
         const freshKey = signatureOf(fresh.sections)
         if (!displayedKey.current) {
@@ -2613,10 +2633,14 @@ export const App = ({
       })
       .catch((err) => {
         setRefreshing(false)
+        const message = (err as Error).message
+        // Nothing on screen yet — there is no frame to flash inside, so the
+        // terminal is the only surface left and exiting is honest.
         if (!displayedKey.current) {
-          console.error("Error:", (err as Error).message)
+          console.error("Error:", message)
           process.exit(1)
         }
+        setRefreshError({ message, at: Date.now() })
       })
   }
 
@@ -2724,6 +2748,7 @@ export const App = ({
         refreshing={refreshing}
         hasPending={pending !== null}
         fetchedAt={fetchedAt}
+        refreshError={refreshError ?? undefined}
         workToggle={workToggle}
         isWorkRepo={isWorkRepo}
         initialIncludeWork={initialIncludeWork}
