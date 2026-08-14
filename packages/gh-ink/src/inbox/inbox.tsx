@@ -1727,10 +1727,12 @@ export const extensionFor = (
 ): InboxExtension | undefined =>
   input ? extensions?.find((e) => e.key === input) : undefined
 
-// The footer strip and the `?` legend, derived rather than hand-written. Both used
-// to hardcode `["J", "jenkins"]` behind a `ciStatus`/`hasCi` flag, so honouring
-// `key` in the dispatch left `a` working and undiscoverable — the mechanism was
-// generic and everything that ADVERTISED it still named one domain.
+// The `?` legend, derived rather than hand-written. It used to hardcode
+// `["J", "jenkins"]` behind a `ciStatus`/`hasCi` flag, so honouring `key` in the
+// dispatch left `a` working and undiscoverable — the mechanism was generic and
+// everything that ADVERTISED it still named one domain. The footer strip no longer
+// lists extensions: it is fixed-width orientation, and every extension added would
+// otherwise widen it until it wrapped.
 export const extensionHints = (
   extensions?: InboxExtension[],
 ): [string, string][] =>
@@ -2314,11 +2316,6 @@ const BrowseScreen = ({
     ["←→", "tab"],
     ["↵/d", "open"],
     ["m", "actions"],
-    ["e", "explain"],
-    ["/", "search"],
-    ["f", "filter"],
-    ["r", "refresh"],
-    ...extensionHints(extensions),
     ["?", "help"],
     ["q", "quit"],
   ]
