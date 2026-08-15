@@ -122,8 +122,19 @@ export const buildInboxQuery = ({
   const issueConversation = full ? ISSUE_CONVERSATION : ""
   const issueLabels = full ? ISSUE_LABELS : ""
 
+  /*
+   * `rateLimit` is free — it does not count against itself — and it is the only
+   * authoritative source for what this query costs. Every estimate made about
+   * that on 2026-08-14 was wrong, one of them by 25x, because GraphQL cost is
+   * node-count based and nested connections multiply: `reviewThreads(first: 50)`
+   * beneath `search(first: 100)` is 5,000 nodes from two lines of query text. A
+   * package handing out a 111-point query should hand out the means to see it.
+   *
+   * (GraphQL has no `/* *\/` comments, only `#`, so this note lives out here.)
+   */
   return `
 {
+  rateLimit { cost nodeCount remaining resetAt }
   viewer { login }
   myPRs: search(query: "${scope}is:pr is:open author:@me", type: ISSUE, first: 100) {
     nodes { __typename ... on PullRequest {

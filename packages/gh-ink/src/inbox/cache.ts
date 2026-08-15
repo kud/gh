@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs"
+import { readFileSync, writeFileSync, mkdirSync, rmSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
 import { useState, useEffect } from "react"
@@ -7,6 +7,33 @@ import type { Section } from "./inbox.js"
 // On-disk cache for the inbox glance, so launch renders instantly from the last
 // known state while the network revalidates in the background. One file per
 // profile (home / work) under XDG_CACHE_HOME.
+
+/**
+ * How long a cached glance is trusted before launch refetches it.
+ *
+ * The glance costs **111 GraphQL points** — measured via `rateLimit { cost }`,
+ * at a nodeCount of 25,550 — against a 5000/hour account-wide pool shared with
+ * everything else `gh` touches. Until this existed the cache was painted on
+ * mount and then refetched unconditionally, so it bought a fast first frame and
+ * saved nothing at all: a cache that records rather than prevents.
+ *
+ * 120s bounds the pathological case rather than the typical one. Nobody launches
+ * the cockpit thirty times an hour — but at 120s even that ceiling is 3330
+ * points, inside budget, and "nobody does that" is exactly what was believed
+ * about the process that exhausted this pool on 2026-08-14.
+ */
+export const CACHE_TTL_MS = 120_000
+
+/**
+ * Bump when `CachedCockpit`'s shape changes.
+ *
+ * `readCache` used to validate only that `sections` was an array, which was
+ * survivable while the cache was overwritten seconds after every launch. Once a
+ * TTL lets an entry be *trusted*, a file written by an older `Section` shape
+ * would deserialise into new code and render wrong. An unrecognised version is
+ * a miss, which costs one cold fetch on upgrade.
+ */
+const CACHE_VERSION = 1
 
 export type CachedCockpit = { sections: Section[]; login: string; at: number }
 
@@ -19,6 +46,7 @@ const cacheFile = (key: string): string =>
 export const readCache = (key: string): CachedCockpit | null => {
   try {
     const raw = JSON.parse(readFileSync(cacheFile(key), "utf8"))
+    if (raw?.version !== CACHE_VERSION) return null
     if (!Array.isArray(raw?.sections)) return null
     return { sections: raw.sections, login: raw.login ?? "", at: raw.at ?? 0 }
   } catch {
@@ -26,15 +54,41 @@ export const readCache = (key: string): CachedCockpit | null => {
   }
 }
 
+/** Whether a cached glance is young enough to launch on without refetching. */
+export const isFresh = (
+  cached: CachedCockpit | null,
+  now = Date.now(),
+): boolean => !!cached && now - cached.at < CACHE_TTL_MS
+
 export const writeCache = (
   key: string,
   data: { sections: Section[]; login: string },
 ): void => {
   try {
     mkdirSync(cacheDir(), { recursive: true })
-    writeFileSync(cacheFile(key), JSON.stringify({ ...data, at: Date.now() }))
+    writeFileSync(
+      cacheFile(key),
+      JSON.stringify({ version: CACHE_VERSION, ...data, at: Date.now() }),
+    )
   } catch {
     // cache is best-effort — never let a write failure break the inbox
+  }
+}
+
+/**
+ * Drop a cached glance the moment an action makes it wrong.
+ *
+ * Synchronous and at action time, not at refresh time. The handlers schedule
+ * their refresh behind `setTimeout(…, 1500)` to let GitHub settle, so quitting
+ * inside that window leaves pre-action state on disk. Harmless while every
+ * launch refetched; under the TTL it means merging a PR, quitting, relaunching,
+ * and finding the row still there.
+ */
+export const invalidateCache = (key: string): void => {
+  try {
+    rmSync(cacheFile(key), { force: true })
+  } catch {
+    // best-effort, same as the write
   }
 }
 
