@@ -5,7 +5,7 @@ import { join } from "path"
 import React, { useState, useEffect, useRef } from "react"
 import { Text, Box, useInput, useWindowSize } from "ink"
 import type { InboxExtension, ExtensionTarget } from "./extension.js"
-import { readCache, writeCache } from "./cache.js"
+import { invalidateCache, isFresh, readCache, writeCache } from "./cache.js"
 import {
   FooterHints,
   LoadingScreen,
@@ -823,6 +823,14 @@ export const buildActions = (
   ext?: {
     extensions?: InboxExtension[]
     onOpenExt?: (id: string, target: ExtensionTarget) => void
+    /**
+     * A mutation landed. Drops the cached glance now and schedules the refresh,
+     * replacing a bare `setTimeout(onRefresh, 1500)` at each call site.
+     *
+     * Both halves matter and only one is visible: the delay lets GitHub settle,
+     * the drop stops the pre-action cache outliving a quit inside that window.
+     */
+    onActed?: () => void
   },
 ): Action[] => {
   if (
@@ -895,7 +903,7 @@ export const buildActions = (
                     void quietly`jira issue move ${(item as JiraRow).key} ${state} --resolution ${resolution}`
                       .then(() => {
                         showFlash(`✓ ${label} · ${resolution}`)
-                        setTimeout(() => onRefresh?.(), 1500)
+                        ext?.onActed?.()
                       })
                       .catch(() => showFlash(`✗ Move to ${label} failed`))
                   },
@@ -909,7 +917,7 @@ export const buildActions = (
                   void quietly`jira issue move ${(item as JiraRow).key} ${state}`
                     .then(() => {
                       showFlash(`✓ Moved to ${label}`)
-                      setTimeout(() => onRefresh?.(), 1500)
+                      ext?.onActed?.()
                     })
                     .catch(() => showFlash(`✗ Move to ${label} failed`))
                 },
@@ -1756,6 +1764,7 @@ const BrowseScreen = ({
   jiraKeyRe,
   jiraTransitions,
   onRefresh,
+  onActed,
   refreshing,
   hasPending,
   fetchedAt,
@@ -1783,6 +1792,8 @@ const BrowseScreen = ({
   jiraKeyRe?: RegExp
   jiraTransitions?: JiraTransition[]
   onRefresh?: () => void
+  /** A mutation landed: drop the cached glance now, refresh shortly. */
+  onActed?: () => void
   refreshing?: boolean
   hasPending?: boolean
   fetchedAt?: number | null
@@ -1972,7 +1983,7 @@ const BrowseScreen = ({
       onRefresh,
       removeItemFromSections,
       openDrillView,
-      { extensions, onOpenExt },
+      { extensions, onOpenExt, onActed },
     )
     menu.open(actions)
   }
@@ -2286,7 +2297,7 @@ const BrowseScreen = ({
                     quietly`jira issue move ${jiraKey} ${state} --resolution ${resolution}`
                       .then(() => {
                         showFlash(`✓ ${label} · ${resolution}`)
-                        setTimeout(() => onRefresh?.(), 1500)
+                        onActed?.()
                       })
                       .catch(() => showFlash(`✗ Move to ${label} failed`))
                   },
@@ -2301,7 +2312,7 @@ const BrowseScreen = ({
                   quietly`jira issue move ${jiraKey} ${state}`
                     .then(() => {
                       showFlash(`✓ Moved to ${label}`)
-                      setTimeout(() => onRefresh?.(), 1500)
+                      onActed?.()
                     })
                     .catch(() => showFlash(`✗ Move to ${label} failed`))
                 },
@@ -2646,9 +2657,20 @@ export const App = ({
     else revalidate(true)
   }
 
+  /* Drop the cache the instant a mutation lands, then refresh once GitHub has
+     had a moment to settle. The delay used to sit at each call site as a bare
+     `setTimeout(…, 1500)`; the drop has to be synchronous and here, because the
+     window between acting and refreshing is exactly when a quit would strand
+     pre-action rows on disk. */
+  const onActed = () => {
+    if (cacheKey) invalidateCache(cacheKey)
+    setTimeout(() => applyOrRefresh(), 1500)
+  }
+
   useEffect(() => {
     const cached = cacheKey ? readCache(cacheKey) : null
-    if (cached && cached.sections.length > 0) {
+    const painted = !!cached && cached.sections.length > 0
+    if (painted && cached) {
       displayedKey.current = signatureOf(cached.sections)
       setFetchedAt(cached.at)
       setState({
@@ -2657,7 +2679,12 @@ export const App = ({
         login: cached.login,
       })
     }
-    revalidate()
+    /* The whole point of the cache, and it was missing. This used to revalidate
+       unconditionally, so the cached paint bought a fast first frame and saved
+       nothing — 111 GraphQL points on every launch, however recently the last
+       one ran. `r` still refetches on demand (`revalidate(true)`), and an action
+       drops the entry outright, so nothing here can strand you on stale rows. */
+    if (!painted || !isFresh(cached)) revalidate()
   }, [])
 
   // Poll the CI status on its own timer (independent of the gated inbox
@@ -2742,6 +2769,7 @@ export const App = ({
         jiraKeyRe={jiraKeyRe}
         jiraTransitions={jiraTransitions}
         onRefresh={applyOrRefresh}
+        onActed={onActed}
         refreshing={refreshing}
         hasPending={pending !== null}
         fetchedAt={fetchedAt}
