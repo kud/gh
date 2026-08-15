@@ -108,6 +108,15 @@ describe("buildInboxQuery", () => {
     // isDraft used to live inside the health fragment, where dropping health
     // would have taken it — and a draft rendering as an open PR is a wrong
     // answer, not a missing one.
+    //
+    // Both shapes, because this protects cockpit as much as any minimal caller,
+    // even though cockpit only ever asks for `full`. It splits Open from Draft
+    // on `!n.isDraft` / `n.isDraft`, and falls back to `"isDraft" in node` to
+    // tell a PR from an issue where a fragment omits `__typename` — so a PR
+    // would drill into the issues endpoint. What protects it is the field being
+    // in the base list, not the shape it requests: if it ever drifts back inside
+    // health, `full` keeps working and nothing warns anyone until someone prunes
+    // health for an unrelated reason.
     it("keeps isDraft on every open-PR source in both shapes", () => {
       for (const shape of ["full", "minimal"] as const)
         for (const alias of OPEN_PR_SOURCES)
