@@ -69,6 +69,60 @@ describe("buildInboxQuery", () => {
     }
   })
 
+  /*
+   * The shape axis exists for cost, so these pin cost-bearing selections by
+   * name. `statusCheckRollup.contexts` appears on five PR sources and
+   * `reviewThreads(first: 50)` multiplies beneath each — together they are why
+   * the full query measures 111 points against a 5000/hour budget.
+   */
+  describe("shape", () => {
+    it("defaults to full, so an existing caller keeps what it had", () => {
+      expect(buildInboxQuery()).toBe(buildInboxQuery({ shape: "full" }))
+    })
+
+    it("drops health, conversation and labels when minimal", () => {
+      const query = buildInboxQuery({ shape: "minimal" })
+      for (const field of [
+        "statusCheckRollup",
+        "reviewThreads",
+        "reviewDecision",
+        "mergeable",
+        "comments(",
+        "labels(",
+        "commits(",
+      ])
+        expect(query).not.toContain(field)
+    })
+
+    // Identity has to survive, or a minimal caller cannot render a row at all.
+    it("keeps every field a row is identified by", () => {
+      const query = buildInboxQuery({ shape: "minimal" })
+      for (const alias of OPEN_PR_SOURCES) {
+        const block = blockFor(query, alias)
+        for (const field of ["number", "title", "url", "isDraft"])
+          expect(block).toContain(field)
+        expect(block).toContain("nameWithOwner")
+      }
+    })
+
+    // isDraft used to live inside the health fragment, where dropping health
+    // would have taken it — and a draft rendering as an open PR is a wrong
+    // answer, not a missing one.
+    it("keeps isDraft on every open-PR source in both shapes", () => {
+      for (const shape of ["full", "minimal"] as const)
+        for (const alias of OPEN_PR_SOURCES)
+          expect(blockFor(buildInboxQuery({ shape }), alias)).toContain(
+            "isDraft",
+          )
+    })
+
+    it("still asks every source, so sections cannot silently empty", () => {
+      const query = buildInboxQuery({ shape: "minimal" })
+      for (const alias of [...OPEN_PR_SOURCES, "repoIssues", "recentlyDone"])
+        expect(query).toContain(`${alias}: search(`)
+    })
+  })
+
   it("windows recentlyDone and recomputes the date per call", () => {
     const today = new Date().toISOString().slice(0, 10)
     const yesterday = new Date(Date.now() - 86400 * 1000)

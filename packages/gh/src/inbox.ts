@@ -6,21 +6,54 @@
 // own vocabulary — cockpit splits home from work, a web dashboard may group by
 // project — so nothing here decides what a section is.
 
+/**
+ * How much of each row to ask for.
+ *
+ * `full` carries health, conversation and labels — everything `computeHealth`
+ * and a conversation line need. `minimal` carries identity only: type, number,
+ * title, url, draft, timestamp, repo.
+ *
+ * This is a cost axis, not a taste one. Measured against GitHub's own
+ * `rateLimit { cost }`: the full query costs **111 points** of a 5000/hour
+ * budget, at a nodeCount of ~25,550 — because `statusCheckRollup.contexts`
+ * appears in five PR fragments and `reviewThreads(first: 50)` multiplies
+ * beneath each one. A caller that renders a title and a link was paying for
+ * every check run on every open PR. At 111 a poller gets 45 refreshes an hour.
+ */
+export type InboxShape = "full" | "minimal"
+
 /** A repo-scoped or account-wide inbox. */
 export type InboxQueryOptions = {
   /** `owner/name`. Scopes every search to one repository. */
   repo?: string
   /** How far back `recentlyDone` looks. Defaults to 14 days. */
   doneWithinDays?: number
+  /**
+   * Defaults to `full`, so every existing caller keeps what it had. Reach for
+   * `minimal` only when nothing downstream reads health, conversation or
+   * labels — those fields do not degrade, they vanish, and `computeHealth`
+   * falls through to a wrong answer rather than an absent one.
+   */
+  shape?: InboxShape
 }
 
 // computeHealth's precedence needs reviewDecision, mergeable and the check
 // rollup. A fragment that omits them does NOT degrade gracefully — it falls
 // straight through to whatever token is left, so a PR you already sent back
-// renders as "awaiting review" and a failing one renders as quiet. Every PR
-// fragment therefore carries the whole set; none of it is optional.
+// renders as "awaiting review" and a failing one renders as quiet.
+//
+// So this set is all-or-nothing, which is exactly why `shape` drops it whole
+// rather than field by field: a caller either computes health and needs every
+// one of these, or renders none of it and should pay for none of it. There is
+// no coherent middle, and the `minimal` shape is not a smaller health — it is
+// the absence of health.
+//
+// `isDraft` is deliberately NOT in here. It is identity, not health, and a
+// minimal caller still has to tell a draft from an open PR, so it sits in the
+// base field list beside `number` and `title` where dropping health cannot
+// take it with them.
 const PR_HEALTH = `
-      isDraft reviewDecision mergeable
+      reviewDecision mergeable
       statusCheckRollup { contexts(first: 20) { nodes {
         ... on CheckRun { name conclusion status }
         ... on StatusContext { context state }
@@ -75,39 +108,48 @@ const sinceDay = (days: number) =>
 export const buildInboxQuery = ({
   repo,
   doneWithinDays = 14,
+  shape = "full",
 }: InboxQueryOptions = {}) => {
   const scope = repo ? `repo:${repo} ` : ""
   const owned = repo ? "" : "user:@me "
   const doneSince = sinceDay(doneWithinDays)
+
+  /* Interpolated as empty strings rather than branching the query text, so the
+     two shapes cannot drift into two separately-maintained queries. */
+  const full = shape === "full"
+  const health = full ? PR_HEALTH : ""
+  const conversation = full ? PR_CONVERSATION : ""
+  const issueConversation = full ? ISSUE_CONVERSATION : ""
+  const issueLabels = full ? ISSUE_LABELS : ""
 
   return `
 {
   viewer { login }
   myPRs: search(query: "${scope}is:pr is:open author:@me", type: ISSUE, first: 100) {
     nodes { __typename ... on PullRequest {
-      number title createdAt url headRefName
+      number title createdAt url headRefName isDraft
       repository { nameWithOwner }
       author { login }
-      ${PR_HEALTH}
-      ${PR_CONVERSATION}
+      ${health}
+      ${conversation}
     }}
   }
   reviewRequests: search(query: "${scope}is:pr is:open review-requested:@me", type: ISSUE, first: 20) {
     nodes { __typename ... on PullRequest {
-      number title createdAt url headRefName
+      number title createdAt url headRefName isDraft
       repository { nameWithOwner }
       author { login }
-      ${PR_HEALTH}
-      ${PR_CONVERSATION}
+      ${health}
+      ${conversation}
     }}
   }
   reviewed: search(query: "${scope}is:pr is:open reviewed-by:@me -author:@me -review-requested:@me", type: ISSUE, first: 20) {
     nodes { __typename ... on PullRequest {
-      number title createdAt url headRefName
+      number title createdAt url headRefName isDraft
       repository { nameWithOwner }
       author { login }
-      ${PR_HEALTH}
-      ${PR_CONVERSATION}
+      ${health}
+      ${conversation}
     }}
   }
   assigned: search(query: "${scope}is:open assignee:@me", type: ISSUE, first: 30) {
@@ -115,13 +157,13 @@ export const buildInboxQuery = ({
       __typename
       ... on Issue {
         number title createdAt url repository { nameWithOwner } author { login }
-        ${ISSUE_CONVERSATION}
-        ${ISSUE_LABELS}
+        ${issueConversation}
+        ${issueLabels}
       }
       ... on PullRequest {
-        number title createdAt url headRefName repository { nameWithOwner } author { login }
-        ${PR_HEALTH}
-        ${PR_CONVERSATION}
+        number title createdAt url headRefName isDraft repository { nameWithOwner } author { login }
+        ${health}
+        ${conversation}
       }
     }
   }
@@ -130,8 +172,8 @@ export const buildInboxQuery = ({
       number title createdAt url
       repository { nameWithOwner }
       author { login }
-      ${ISSUE_CONVERSATION}
-      ${ISSUE_LABELS}
+      ${issueConversation}
+      ${issueLabels}
     }}
   }
   authoredIssues: search(query: "${scope}is:issue is:open author:@me archived:false", type: ISSUE, first: 30) {
@@ -139,17 +181,17 @@ export const buildInboxQuery = ({
       number title createdAt url
       repository { nameWithOwner }
       author { login }
-      ${ISSUE_CONVERSATION}
-      ${ISSUE_LABELS}
+      ${issueConversation}
+      ${issueLabels}
     }}
   }
   repoPRs: search(query: "${scope}${owned}is:pr is:open -author:@me archived:false", type: ISSUE, first: 30) {
     nodes { __typename ... on PullRequest {
-      number title createdAt url headRefName
+      number title createdAt url headRefName isDraft
       repository { nameWithOwner }
       author { login }
-      ${PR_HEALTH}
-      ${PR_CONVERSATION}
+      ${health}
+      ${conversation}
     }}
   }
   recentlyDone: search(query: "${scope}is:pr author:@me -is:open closed:>=${doneSince}", type: ISSUE, first: 30) {
