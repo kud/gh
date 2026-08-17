@@ -2,8 +2,15 @@ import { $ } from "zx"
 import { spawn } from "child_process"
 import { existsSync, readdirSync, statSync } from "fs"
 import { join } from "path"
-import React, { useState, useEffect, useRef } from "react"
-import { Text, Box, useInput, useWindowSize } from "ink"
+import React, {
+  useState,
+  useEffect,
+  useRef,
+  createContext,
+  useContext,
+  type ReactNode,
+} from "react"
+import { Text as InkText, Box, useInput, useWindowSize } from "ink"
 import type { InboxExtension, ExtensionTarget } from "./extension.js"
 import { invalidateCache, isFresh, readCache, writeCache } from "./cache.js"
 import {
@@ -790,6 +797,66 @@ const FRAME_CHROME_COLS = 2 /* border */ + FRAME_PAD_X * 2 /* padding */
 export const COLS = (process.stdout.columns ?? 120) - FRAME_CHROME_COLS
 const MODAL_CHROME_COLS = 2 /* border */ + 1 * 2 /* paddingX */
 
+// An overlay floats over the list rather than replacing it, which only works
+// because a Box with a background paints every cell it covers — without one Ink
+// leaves the interior transparent and the rows behind bleed straight through the
+// panel. A shade lighter than a dark terminal on purpose, so it reads as raised
+// against the dimmed backdrop rather than as a hole cut in it.
+const OVERLAY_BG = "#22222e"
+
+// Ink has no cascade — every Text carries its own colour — so a subtree cannot be
+// dimmed from above. The flag travels by context and the wrapper below applies
+// it, which is why this module imports Ink's Text as `InkText` and shadows the
+// name: every existing `<Text>` in the file became backdrop-aware without a
+// single call site changing.
+const DimContext = createContext(false)
+
+type TextProps = React.ComponentProps<typeof InkText>
+
+const Text = ({ children, ...props }: TextProps) => {
+  const dimmed = useContext(DimContext)
+  return dimmed ? (
+    <InkText {...props} bold={false} dimColor>
+      {children}
+    </InkText>
+  ) : (
+    <InkText {...props}>{children}</InkText>
+  )
+}
+
+// The list, dimmed and lifted out of the flow so an overlay can be laid over it.
+// Ink paints in document order, so the backdrop has to come FIRST and the panel
+// second — the reverse (panel absolute, over a list in flow) reads more naturally
+// and is wrong twice: it paints under, and a panel taller than `height` is
+// centre-clipped, losing its border and its last line. In flow the panel simply
+// grows the row instead.
+const Backdrop = ({
+  dimmed,
+  absolute,
+  height,
+  children,
+}: {
+  dimmed: boolean
+  absolute: boolean
+  height: number
+  children: ReactNode
+}) => (
+  <DimContext.Provider value={dimmed}>
+    {absolute ? (
+      <Box
+        position="absolute"
+        flexDirection="column"
+        width="100%"
+        height={height}
+      >
+        {children}
+      </Box>
+    ) : (
+      children
+    )}
+  </DimContext.Provider>
+)
+
 export const topLevelCount = (s: Section) =>
   s.items.filter(
     (i) =>
@@ -1501,6 +1568,7 @@ export const ActionMenu = ({
       flexDirection="column"
       borderStyle="round"
       borderColor="cyan"
+      backgroundColor={OVERLAY_BG}
       paddingX={1}
       marginTop={1}
     >
@@ -1535,35 +1603,34 @@ const TURN_LEGEND: [string, string, string][] = [
 // GitHub searches, work's are Jira statuses, and a list baked in here would be
 // wrong in one of the two cockpits at all times.
 type LegendRow = {
-  cell: string;
-  label: string;
-  color?: string;
-  bold?: boolean;
-};
-type LegendColumn = { title: string; rows: LegendRow[] };
+  cell: string
+  label: string
+  color?: string
+  bold?: boolean
+}
+type LegendColumn = { title: string; rows: LegendRow[] }
 
-const CELL_GUTTER = 2;
-const COL_GAP = 3;
+const CELL_GUTTER = 2
+const COL_GAP = 3
 
 // The gutter between a row's cell and its label is derived from the widest cell
 // in that column, never hardcoded. The three columns used to spell the same
 // intent as `padEnd(10)` and `padEnd(11)`, so a longer key or tab name silently
 // ate its own separator.
 const cellWidthOf = (col: LegendColumn) =>
-  Math.max(0, ...col.rows.map((r) => r.cell.length)) + CELL_GUTTER;
+  Math.max(0, ...col.rows.map((r) => r.cell.length)) + CELL_GUTTER
 
 const widthOf = (col: LegendColumn) =>
   Math.max(
     col.title.length,
     ...col.rows.map((r) => cellWidthOf(col) + r.label.length),
-  );
+  )
 
-const groupWidth = (group: LegendColumn[]) =>
-  Math.max(0, ...group.map(widthOf));
+const groupWidth = (group: LegendColumn[]) => Math.max(0, ...group.map(widthOf))
 
 const layoutWidth = (groups: LegendColumn[][]) =>
   groups.reduce((total, g) => total + groupWidth(g), 0) +
-  COL_GAP * Math.max(0, groups.length - 1);
+  COL_GAP * Math.max(0, groups.length - 1)
 
 // Three columns of legend need ~118 terminal columns, and nothing here used to
 // say so: below that Ink wrapped every row mid-word and the modal came apart —
@@ -1575,25 +1642,25 @@ const legendLayout = (
   cols: LegendColumn[],
   available: number,
 ): LegendColumn[][] => {
-  const across = cols.map((c) => [c]);
-  if (layoutWidth(across) <= available) return across;
-  const stacked = [cols.slice(0, -1), cols.slice(-1)];
-  if (layoutWidth(stacked) <= available) return stacked;
-  return [cols];
-};
+  const across = cols.map((c) => [c])
+  if (layoutWidth(across) <= available) return across
+  const stacked = [cols.slice(0, -1), cols.slice(-1)]
+  if (layoutWidth(stacked) <= available) return stacked
+  return [cols]
+}
 
 const LegendGroup = ({
   group,
   width,
   marginRight,
 }: {
-  group: LegendColumn[];
-  width: number;
-  marginRight: number;
+  group: LegendColumn[]
+  width: number
+  marginRight: number
 }) => (
   <Box flexDirection="column" width={width} marginRight={marginRight}>
     {group.map((col, index) => {
-      const cellWidth = cellWidthOf(col);
+      const cellWidth = cellWidthOf(col)
       return (
         <Box
           key={col.title}
@@ -1612,10 +1679,10 @@ const LegendGroup = ({
             </Box>
           ))}
         </Box>
-      );
+      )
     })}
   </Box>
-);
+)
 
 export const HelpModal = ({
   workToggle,
@@ -1623,21 +1690,21 @@ export const HelpModal = ({
   hasJira,
   tabHelp,
 }: {
-  workToggle?: boolean;
+  workToggle?: boolean
   // The extensions themselves, not a `hasCi` boolean. A flag could only ever say
   // "Jenkins exists", which is why a second extension went unlisted here.
-  extensions?: InboxExtension[];
-  hasJira?: boolean;
-  tabHelp?: [string, string][];
+  extensions?: InboxExtension[]
+  hasJira?: boolean
+  tabHelp?: [string, string][]
 }) => {
   // Read live rather than through the module-level COLS, which is sampled once at
   // import and so cannot answer after a resize — the one thing this modal has to
   // get right.
-  const { columns } = useWindowSize();
+  const { columns } = useWindowSize()
   const available = Math.max(
     20,
     columns - FRAME_CHROME_COLS - MODAL_CHROME_COLS,
-  );
+  )
 
   const keys: [string, string][] = [
     ["↑ ↓", "navigate"],
@@ -1663,7 +1730,7 @@ export const HelpModal = ({
     ...extensionLegend(extensions),
     ["?", "this help"],
     ["q", "quit"],
-  ];
+  ]
 
   const statusColumn: LegendColumn = {
     title: "Status",
@@ -1687,7 +1754,7 @@ export const HelpModal = ({
         label: "Open-thread count",
       },
     ],
-  };
+  }
 
   const cols: LegendColumn[] = [
     statusColumn,
@@ -1707,17 +1774,18 @@ export const HelpModal = ({
       title: "Keys",
       rows: keys.map(([key, label]) => ({ cell: key, color: "cyan", label })),
     },
-  ];
+  ]
 
-  const groups = legendLayout(cols, available);
-  const widths = groups.map((g) => Math.min(groupWidth(g), available));
-  const contentWidth = Math.min(available, layoutWidth(groups));
+  const groups = legendLayout(cols, available)
+  const widths = groups.map((g) => Math.min(groupWidth(g), available))
+  const contentWidth = Math.min(available, layoutWidth(groups))
 
   return (
     <Box
       flexDirection="column"
       borderStyle="round"
       borderColor="cyan"
+      backgroundColor={OVERLAY_BG}
       paddingX={1}
       width={contentWidth + MODAL_CHROME_COLS}
     >
@@ -1742,14 +1810,15 @@ export const HelpModal = ({
       ) : null}
       <Text dimColor>esc · ? close</Text>
     </Box>
-  );
-};
+  )
+}
 
 const ExplainModal = ({ item, login }: { item: GHItem; login: string }) => (
   <Box
     flexDirection="column"
     borderStyle="round"
     borderColor="cyan"
+    backgroundColor={OVERLAY_BG}
     paddingX={1}
     width={Math.min(COLS, 78)}
   >
@@ -1794,6 +1863,7 @@ const RepoPicker = ({
       flexDirection="column"
       borderStyle="round"
       borderColor="cyan"
+      backgroundColor={OVERLAY_BG}
       paddingX={1}
       minWidth={42}
     >
@@ -2433,6 +2503,30 @@ const BrowseScreen = ({
 
   if (hidden) return null
 
+  // The four overlays are mutually exclusive and now FLOAT over the browse list
+  // instead of replacing it, so pressing `?` no longer blanks the app to show its
+  // own legend — the list stays put underneath, dimmed, the way a modal reads.
+  const overlay = help ? (
+    <HelpModal
+      workToggle={workToggle}
+      extensions={extensions}
+      hasJira={!!jiraBase}
+      tabHelp={tabHelp}
+    />
+  ) : explain &&
+    activeItem &&
+    (activeItem.kind === "pr" || activeItem.kind === "issue") ? (
+    <ExplainModal item={activeItem} login={login} />
+  ) : repoPicker ? (
+    <RepoPicker
+      repos={allRepos}
+      selected={repoFilter}
+      cursor={Math.min(repoCursor, Math.max(0, allRepos.length - 1))}
+    />
+  ) : menu.actions && activeItem && activeItem.kind !== "repo-header" ? (
+    <ActionMenu item={activeItem} actions={menu.actions} cursor={menu.cursor} />
+  ) : null
+
   return (
     <Box
       flexDirection="column"
@@ -2484,59 +2578,8 @@ const BrowseScreen = ({
         </Box>
       ) : null}
 
-      {help ? (
-        <Box
-          minHeight={listHeight}
-          flexDirection="column"
-          justifyContent="center"
-          alignItems="center"
-        >
-          <HelpModal
-            workToggle={workToggle}
-            extensions={extensions}
-            hasJira={!!jiraBase}
-            tabHelp={tabHelp}
-          />
-        </Box>
-      ) : explain &&
-        activeItem &&
-        (activeItem.kind === "pr" || activeItem.kind === "issue") ? (
-        <Box
-          minHeight={listHeight}
-          flexDirection="column"
-          justifyContent="center"
-          alignItems="center"
-        >
-          <ExplainModal item={activeItem} login={login} />
-        </Box>
-      ) : repoPicker ? (
-        <Box
-          minHeight={listHeight}
-          flexDirection="column"
-          justifyContent="center"
-          alignItems="center"
-        >
-          <RepoPicker
-            repos={allRepos}
-            selected={repoFilter}
-            cursor={Math.min(repoCursor, Math.max(0, allRepos.length - 1))}
-          />
-        </Box>
-      ) : menu.actions && activeItem && activeItem.kind !== "repo-header" ? (
-        <Box
-          minHeight={listHeight}
-          flexDirection="column"
-          justifyContent="center"
-          alignItems="center"
-        >
-          <ActionMenu
-            item={activeItem}
-            actions={menu.actions}
-            cursor={menu.cursor}
-          />
-        </Box>
-      ) : (
-        <Box flexDirection="column" minHeight={listHeight}>
+      <Box flexDirection="column" minHeight={listHeight}>
+        <Backdrop dimmed={!!overlay} absolute={!!overlay} height={listHeight}>
           <Box flexDirection="column" flexGrow={1}>
             {visibleItems.map((item, i) => (
               <ItemRow
@@ -2582,8 +2625,18 @@ const BrowseScreen = ({
               {"  "}↓ {section.items.length - viewStart - visibleCount} more
             </Text>
           )}
-        </Box>
-      )}
+        </Backdrop>
+        {overlay ? (
+          <Box
+            flexGrow={1}
+            flexDirection="column"
+            justifyContent="center"
+            alignItems="center"
+          >
+            {overlay}
+          </Box>
+        ) : null}
+      </Box>
 
       <Box marginTop={1}>
         {flash ? (
