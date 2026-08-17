@@ -788,6 +788,7 @@ const FRAME_COLOR = "gray"
 const FRAME_PAD_X = 1
 const FRAME_CHROME_COLS = 2 /* border */ + FRAME_PAD_X * 2 /* padding */
 export const COLS = (process.stdout.columns ?? 120) - FRAME_CHROME_COLS
+const MODAL_CHROME_COLS = 2 /* border */ + 1 * 2 /* paddingX */
 
 export const topLevelCount = (s: Section) =>
   s.items.filter(
@@ -1533,19 +1534,111 @@ const TURN_LEGEND: [string, string, string][] = [
 // Tab meanings are supplied by the caller rather than hardcoded: home's tabs are
 // GitHub searches, work's are Jira statuses, and a list baked in here would be
 // wrong in one of the two cockpits at all times.
-const HelpModal = ({
+type LegendRow = {
+  cell: string;
+  label: string;
+  color?: string;
+  bold?: boolean;
+};
+type LegendColumn = { title: string; rows: LegendRow[] };
+
+const CELL_GUTTER = 2;
+const COL_GAP = 3;
+
+// The gutter between a row's cell and its label is derived from the widest cell
+// in that column, never hardcoded. The three columns used to spell the same
+// intent as `padEnd(10)` and `padEnd(11)`, so a longer key or tab name silently
+// ate its own separator.
+const cellWidthOf = (col: LegendColumn) =>
+  Math.max(0, ...col.rows.map((r) => r.cell.length)) + CELL_GUTTER;
+
+const widthOf = (col: LegendColumn) =>
+  Math.max(
+    col.title.length,
+    ...col.rows.map((r) => cellWidthOf(col) + r.label.length),
+  );
+
+const groupWidth = (group: LegendColumn[]) =>
+  Math.max(0, ...group.map(widthOf));
+
+const layoutWidth = (groups: LegendColumn[][]) =>
+  groups.reduce((total, g) => total + groupWidth(g), 0) +
+  COL_GAP * Math.max(0, groups.length - 1);
+
+// Three columns of legend need ~118 terminal columns, and nothing here used to
+// say so: below that Ink wrapped every row mid-word and the modal came apart —
+// borders out of step, labels split across lines, each row silently two rows
+// tall. Rather than truncate, fall down a ladder of layouts: three across, then
+// Status and Tabs stacked beside Keys, then everything in one column. Only the
+// last is tall, and only a terminal too narrow for two columns ever sees it.
+const legendLayout = (
+  cols: LegendColumn[],
+  available: number,
+): LegendColumn[][] => {
+  const across = cols.map((c) => [c]);
+  if (layoutWidth(across) <= available) return across;
+  const stacked = [cols.slice(0, -1), cols.slice(-1)];
+  if (layoutWidth(stacked) <= available) return stacked;
+  return [cols];
+};
+
+const LegendGroup = ({
+  group,
+  width,
+  marginRight,
+}: {
+  group: LegendColumn[];
+  width: number;
+  marginRight: number;
+}) => (
+  <Box flexDirection="column" width={width} marginRight={marginRight}>
+    {group.map((col, index) => {
+      const cellWidth = cellWidthOf(col);
+      return (
+        <Box
+          key={col.title}
+          flexDirection="column"
+          marginTop={index === 0 ? 0 : 1}
+        >
+          <Text bold dimColor>
+            {col.title}
+          </Text>
+          {col.rows.map((row) => (
+            <Box key={col.title + row.cell + row.label}>
+              <Text color={row.color as any} bold={row.bold}>
+                {row.cell.padEnd(cellWidth)}
+              </Text>
+              <Text wrap="truncate-end">{row.label}</Text>
+            </Box>
+          ))}
+        </Box>
+      );
+    })}
+  </Box>
+);
+
+export const HelpModal = ({
   workToggle,
   extensions,
   hasJira,
   tabHelp,
 }: {
-  workToggle?: boolean
+  workToggle?: boolean;
   // The extensions themselves, not a `hasCi` boolean. A flag could only ever say
   // "Jenkins exists", which is why a second extension went unlisted here.
-  extensions?: InboxExtension[]
-  hasJira?: boolean
-  tabHelp?: [string, string][]
+  extensions?: InboxExtension[];
+  hasJira?: boolean;
+  tabHelp?: [string, string][];
 }) => {
+  // Read live rather than through the module-level COLS, which is sampled once at
+  // import and so cannot answer after a resize — the one thing this modal has to
+  // get right.
+  const { columns } = useWindowSize();
+  const available = Math.max(
+    20,
+    columns - FRAME_CHROME_COLS - MODAL_CHROME_COLS,
+  );
+
   const keys: [string, string][] = [
     ["↑ ↓", "navigate"],
     ["← → · tab", "switch tab"],
@@ -1570,72 +1663,76 @@ const HelpModal = ({
     ...extensionLegend(extensions),
     ["?", "this help"],
     ["q", "quit"],
-  ]
+  ];
+
+  const statusColumn: LegendColumn = {
+    title: "Status",
+    rows: [
+      ...healthLegend.map(([health, label]) => ({
+        cell: healthDisplay[health].glyph,
+        color: healthDisplay[health].color,
+        bold: true,
+        label,
+      })),
+      ...TURN_LEGEND.map(([cell, color, label]) => ({
+        cell,
+        color,
+        bold: true,
+        label,
+      })),
+      {
+        cell: "\u{f086}",
+        color: "#FF8700",
+        bold: true,
+        label: "Open-thread count",
+      },
+    ],
+  };
+
+  const cols: LegendColumn[] = [
+    statusColumn,
+    ...(tabHelp
+      ? [
+          {
+            title: "Tabs",
+            rows: tabHelp.map(([tab, meaning]) => ({
+              cell: tab,
+              color: "#FF8700",
+              label: meaning,
+            })),
+          },
+        ]
+      : []),
+    {
+      title: "Keys",
+      rows: keys.map(([key, label]) => ({ cell: key, color: "cyan", label })),
+    },
+  ];
+
+  const groups = legendLayout(cols, available);
+  const widths = groups.map((g) => Math.min(groupWidth(g), available));
+  const contentWidth = Math.min(available, layoutWidth(groups));
+
   return (
     <Box
       flexDirection="column"
       borderStyle="round"
       borderColor="cyan"
       paddingX={1}
+      width={contentWidth + MODAL_CHROME_COLS}
     >
       <Text color="cyan" bold>
         Legend
       </Text>
-      <Box marginTop={1}>
-        <Box flexDirection="column" marginRight={3} minWidth={26}>
-          <Text bold dimColor>
-            Status
-          </Text>
-          {healthLegend.map(([health, label]) => {
-            const { glyph: icon, color } = healthDisplay[health]
-            return (
-              <Box key={health}>
-                <Text color={color as any} bold>
-                  {icon + " "}
-                </Text>
-                <Text>{" " + label}</Text>
-              </Box>
-            )
-          })}
-          {TURN_LEGEND.map(([icon, color, label]) => (
-            <Box key={icon}>
-              <Text color={color as any} bold>
-                {icon + " "}
-              </Text>
-              <Text>{" " + label}</Text>
-            </Box>
-          ))}
-          <Box>
-            <Text bold color="#FF8700">
-              {"\u{f086} "}
-            </Text>
-            <Text>{" Open-thread count"}</Text>
-          </Box>
-        </Box>
-        {tabHelp ? (
-          <Box flexDirection="column" marginRight={3} minWidth={30}>
-            <Text bold dimColor>
-              Tabs
-            </Text>
-            {tabHelp.map(([tab, meaning]) => (
-              <Box key={tab}>
-                <Text color="#FF8700">{tab.padEnd(10)}</Text>
-                <Text>{meaning}</Text>
-              </Box>
-            ))}
-          </Box>
-        ) : null}
-        <Box flexDirection="column">
-          <Text bold dimColor>
-            Keys
-          </Text>
-          {keys.map(([k, label]) => (
-            <Box key={k}>
-              <Text color="cyan">{k.padEnd(11)}</Text>
-              <Text>{label}</Text>
-            </Box>
-          ))}
-        </Box>
+      <Box marginTop={1} width={contentWidth}>
+        {groups.map((group, index) => (
+          <LegendGroup
+            key={group[0]?.title ?? index}
+            group={group}
+            width={widths[index]!}
+            marginRight={index === groups.length - 1 ? 0 : COL_GAP}
+          />
+        ))}
       </Box>
       {tabHelp ? (
         <Text dimColor>
@@ -1645,8 +1742,8 @@ const HelpModal = ({
       ) : null}
       <Text dimColor>esc · ? close</Text>
     </Box>
-  )
-}
+  );
+};
 
 const ExplainModal = ({ item, login }: { item: GHItem; login: string }) => (
   <Box
