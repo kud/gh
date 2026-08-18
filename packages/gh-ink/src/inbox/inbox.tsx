@@ -16,6 +16,7 @@ import { invalidateCache, isFresh, readCache, writeCache } from "./cache.js"
 import {
   FooterHints,
   LoadingScreen,
+  StatusMessage,
   Tabs,
   Switch,
   useListCursor,
@@ -1207,6 +1208,7 @@ const InboxHeader = ({
   brand,
   work,
   loading,
+  quiet,
   refreshing,
   hasPending,
   fetchedAt,
@@ -1218,6 +1220,7 @@ const InboxHeader = ({
   brand: string
   work?: boolean
   loading?: boolean
+  quiet?: boolean
   refreshing?: boolean
   hasPending?: boolean
   fetchedAt?: number | null
@@ -1227,10 +1230,15 @@ const InboxHeader = ({
   // shuffle as it changes, but padding after the digits splits "47" from
   // "items". The slack belongs in front of the number, where it reads as a gap
   // between the title and the count rather than a hole inside a phrase.
+  // `quiet` is not `loading`: a fetch that came back empty or failed has nothing
+  // to count and nobody to attribute it to, but it is emphatically no longer
+  // loading — and "0 items · @" reads as data that half-arrived.
   const countSeg = loading
     ? "      loading…  "
-    : `  ${String(total).padStart(3)} item${total !== 1 ? "s" : ""}  ·  `
-  const userSeg = loading ? "" : `@${login}  `
+    : quiet
+      ? "  "
+      : `  ${String(total).padStart(3)} item${total !== 1 ? "s" : ""}  ·  `
+  const userSeg = loading || quiet ? "" : `@${login}  `
   const workLabel = work === undefined ? "" : " w work ●─○ home  "
 
   // Refresh status: pending (actionable) wins, then in-flight, then freshness.
@@ -2651,8 +2659,65 @@ const BrowseScreen = ({
 
 // ─── App ──────────────────────────────────────────────────────────────────────
 
+// The body of the frame when the first fetch left nothing to browse. Both
+// reasons render here rather than printing, and they SAY WHICH ONE — "nothing
+// is open" and "the fetch died" are different answers, and a screen showing
+// neither is indistinguishable from a third thing that also went wrong (a scope
+// resolved somewhere you did not mean).
+//
+// It owns its own `useInput` because App cannot: App's hooks all sit above the
+// early return that renders this, so a handler there would stay mounted under
+// BrowseScreen and fight it for `q` and `r`.
+const NoRowsScreen = ({
+  reason,
+  detail,
+  onRetry,
+}: {
+  reason: "empty" | "failed"
+  // What was actually looked at (empty) or what went wrong (failed). Optional on
+  // the empty side because only the host knows how to describe its own scope.
+  detail?: string
+  onRetry: () => void
+}) => {
+  useInput((input) => {
+    if (input === "q") process.exit(0)
+    if (input === "r") onRetry()
+  })
+  return (
+    <Box flexDirection="column">
+      <StatusMessage variant={reason === "empty" ? "info" : "error"}>
+        {reason === "empty"
+          ? "Nothing open."
+          : `Fetch failed — ${detail ?? "no reason reported"}`}
+      </StatusMessage>
+      {reason === "empty" && detail ? (
+        <Box marginTop={1}>
+          <Text dimColor>{detail}</Text>
+        </Box>
+      ) : null}
+      <Box marginTop={1}>
+        <FooterHints
+          hints={[
+            ["r", "retry"],
+            ["q", "quit"],
+          ]}
+        />
+      </Box>
+    </Box>
+  )
+}
+
 type AppState =
   | { phase: "loading" }
+  // The two ways a first fetch ends with no list to browse. They are states
+  // rather than a console.log + process.exit because the host may be running us
+  // under `alternateScreen: true`, where Ink restores the primary buffer on
+  // teardown WITHOUT replaying anything written to the alternate one — so the
+  // message was printed and then thrown away, leaving a screen that said
+  // nothing at all. A rendered state is the only surface that survives, and it
+  // is the right answer for a non-alternate host too.
+  | { phase: "empty" }
+  | { phase: "failed"; message: string }
   | { phase: "browse"; sections: Section[]; login: string }
   | { phase: "pr"; item: GHItem; sections: Section[]; login: string }
   | { phase: "issue"; item: GHItem; sections: Section[]; login: string }
@@ -2686,6 +2751,7 @@ export const App = ({
   ciPollMs = 60_000,
   extensions,
   tabHelp,
+  emptyHint,
 }: {
   fetcher: () => Promise<{
     sections: Section[]
@@ -2707,6 +2773,11 @@ export const App = ({
   // One-line meaning per tab, for the ? legend. Supplied by the host because the
   // tabs themselves are: home's are GitHub searches, work's are Jira statuses.
   tabHelp?: [string, string][]
+  // One line naming what came back empty, shown under "Nothing open." Host-
+  // supplied for the same reason `title` is: the shell knows the list is empty,
+  // not which question it asked to get there — and on a scoped run that question
+  // is exactly what the reader needs confirmed.
+  emptyHint?: string
   jiraBase?: string
   jiraKeyRe?: RegExp
   jiraTransitions?: JiraTransition[]
@@ -2777,10 +2848,8 @@ export const App = ({
         const freshKey = signatureOf(fresh.sections)
         if (!displayedKey.current) {
           if (fresh.sections.length === 0) {
-            // Named after the host, not the first host: a board with no missions
-            // said "Cockpit empty." until this was parameterised.
-            console.log(`${title[0].toUpperCase()}${title.slice(1)} empty.`)
-            process.exit(0)
+            setState({ phase: "empty" })
+            return
           }
           showData(fresh.sections, fresh.login)
         } else if (freshKey !== displayedKey.current) {
@@ -2792,11 +2861,12 @@ export const App = ({
       .catch((err) => {
         setRefreshing(false)
         const message = (err as Error).message
-        // Nothing on screen yet — there is no frame to flash inside, so the
-        // terminal is the only surface left and exiting is honest.
+        // Nothing on screen yet, so there is no list to flash the error beside —
+        // it becomes the whole screen instead. It must NOT be printed and exited:
+        // see AppState, where the alternate buffer eats exactly that.
         if (!displayedKey.current) {
-          console.error("Error:", message)
-          process.exit(1)
+          setState({ phase: "failed", message })
+          return
         }
         setRefreshError({ message, at: Date.now() })
       })
@@ -2861,7 +2931,16 @@ export const App = ({
     }
   }, [hasCiStatus, ciFetcher, ciPollMs])
 
-  if (state.phase === "loading")
+  // The three list-less states share the browse screen's frame so that whichever
+  // one you land on, the header still says what was looked at — which under
+  // `--here` is the scope itself, the thing a blank screen leaves you guessing.
+  // The `w` indicator is dropped on the two settled ones: nothing there handles
+  // the key, and a switch that does not switch is worse than no switch.
+  if (
+    state.phase === "loading" ||
+    state.phase === "empty" ||
+    state.phase === "failed"
+  )
     return (
       <Box
         flexDirection="column"
@@ -2875,13 +2954,26 @@ export const App = ({
           brand={brandOf(title)}
           sections={[]}
           login=""
-          work={workToggle ? (initialIncludeWork ?? true) : undefined}
-          loading
+          work={
+            workToggle && state.phase === "loading"
+              ? (initialIncludeWork ?? true)
+              : undefined
+          }
+          loading={state.phase === "loading"}
+          quiet={state.phase !== "loading"}
         />
         {hasCiStatus ? (
           <CiStatusLine state={ciStatusState} job={ciJob} />
         ) : null}
-        <LoadingScreen label={`Fetching ${title}…`} />
+        {state.phase === "loading" ? (
+          <LoadingScreen label={`Fetching ${title}…`} />
+        ) : (
+          <NoRowsScreen
+            reason={state.phase === "empty" ? "empty" : "failed"}
+            detail={state.phase === "failed" ? state.message : emptyHint}
+            onRetry={() => revalidate(true)}
+          />
+        )}
       </Box>
     )
 
