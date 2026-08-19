@@ -64,7 +64,16 @@ export type GHItem = {
   branch?: string
   health: Health
   author?: string
+  // Time since the item was opened — or, on the Done tab, since it was closed.
   age: string
+  // Time since anything actually happened on it: a comment, a review, a thread
+  // reply, a push. Left unset when it would merely repeat `age`, so an item
+  // nobody has touched shows one value rather than the same one twice. What
+  // counts as activity is the surface's question, not this layer's — cockpit
+  // folds conversation and commits together, another host may not.
+  activityAge?: string
+  // The sort key, in whatever sense of recency the surface means: last activity
+  // while an item is open, completion time once it is done.
   ts: number
   unresolved: number
   // Total comments across the conversation, review bodies and every thread —
@@ -282,10 +291,20 @@ export const repoPriority = (repo: string): number => {
   return repo.startsWith("kud/") ? 0 : 1
 }
 
+// Repo grouping is the OUTER key and is deliberately unchanged — priority tier,
+// then repo name — because insertRepoHeaders below depends on same-repo items
+// staying adjacent, and a strict recency sort scatters a repo down the list.
+// Recency breaks the tie WITHIN a repo, which is the one place it can reorder
+// rows without costing the grouping.
+//
+// Sorting on `ts` and not on `age`: `age` is a rendered string ("23h", "2d") and
+// sorts lexicographically, which puts "2d" before "23h".
 export const sortItems = (items: GHItem[]): GHItem[] =>
   [...items].sort((a, b) => {
     const pd = repoPriority(a.repo) - repoPriority(b.repo)
-    return pd !== 0 ? pd : a.repo.localeCompare(b.repo)
+    if (pd !== 0) return pd
+    const rd = a.repo.localeCompare(b.repo)
+    return rd !== 0 ? rd : b.ts - a.ts
   })
 
 // Flat, newest-first ordering. Repos are *not* clustered — an item's repo
@@ -1467,8 +1486,17 @@ const ItemRow = ({
   // to the single-glyph health vocabulary instead of spelling out "unresolved".
   const unresolvedLabel =
     item.unresolved > 0 ? `\u{f086} ${item.unresolved}` : ""
+  // `3h · 2d` — active 3h ago, open for 2d. The left value is by construction
+  // the smaller of the two (nothing can be touched before it exists), which is
+  // what teaches the order without a legend, a colour or a second glyph column.
+  // Collapsed to one value when they agree, so an untouched row does not read
+  // as `2d · 2d`.
+  const ageLabel =
+    item.activityAge && item.activityAge !== item.age
+      ? `${item.activityAge} · ${item.age}`
+      : item.age
   const suffix = [
-    item.age || "",
+    ageLabel || "",
     unresolvedLabel,
     showAuthor ? `by ${item.author}` : "",
   ]
@@ -1510,7 +1538,7 @@ const ItemRow = ({
         </Text>
       ) : null}
       {/* Age last, so every row ends on the date — a consistent right edge. */}
-      {item.age ? <Text dimColor>{"  " + item.age}</Text> : null}
+      {ageLabel ? <Text dimColor>{"  " + ageLabel}</Text> : null}
     </Box>
   )
 }
