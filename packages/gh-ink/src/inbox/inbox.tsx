@@ -154,6 +154,12 @@ export type DetailContext = {
   onBack: () => void
   onRefresh: () => void
   onRemove: (item: GHItem) => void
+  /**
+   * The PR just merged from here. Returns to the list, marks the row merged for
+   * a few seconds, then drops it — distinct from onRemove, which drops it at
+   * once. Optional so a host that cannot merge need not implement it.
+   */
+  onMerged?: (item: GHItem) => void
 }
 
 export type Action = {
@@ -1410,16 +1416,33 @@ const RepoHeaderRow = ({ repo, gap }: { repo: string; gap: boolean }) => {
   )
 }
 
+// A merged PR gets a moment before it goes. Without it the row simply vanishes
+// on the next refresh, so the one action in this UI that ends a piece of work is
+// also the only one with no acknowledgement at all.
+//
+// MERGED is a word, not a colour: kud is colourblind, and purple here only
+// reinforces what the label already says — the same rule healthDisplay follows
+// for every other state in this list.
+export const MERGED_HOLD_MS = 3000
+export const MERGED_FRAME_MS = 150
+const MERGED_FRAMES = ["✦", "✧", "✶", "✧"]
+const MERGED_COLOUR = "#A371F7"
+
 const ItemRow = ({
   item,
   active,
   gap,
   login,
+  merged,
+  sparkFrame = 0,
 }: {
   item: AnyItem
   active: boolean
   gap?: boolean
   login?: string
+  /** Just merged from this cockpit: sparkle in place, then the row is dropped. */
+  merged?: boolean
+  sparkFrame?: number
 }) => {
   if (item.kind === "repo-header")
     return <RepoHeaderRow repo={item.repo} gap={gap ?? false} />
@@ -1467,7 +1490,15 @@ const ItemRow = ({
     )
   }
 
-  const { glyph: icon, color } = healthDisplay[item.health]
+  const { glyph: healthIcon, color: healthColor } = healthDisplay[item.health]
+  // The sparkle replaces the health glyph rather than sitting beside it: the
+  // health column is one cell wide and every row's title is aligned off it, so
+  // an extra glyph here would shift the title of exactly the row you are
+  // watching. Health is also no longer the story — the PR is merged.
+  const icon = merged
+    ? (MERGED_FRAMES[sparkFrame % MERGED_FRAMES.length] as string)
+    : healthIcon
+  const color = merged ? MERGED_COLOUR : healthColor
   // Whose turn it is, in its own fixed cell. Arrows rather than the nerd-font
   // comment glyph because this column sits in the aligned zone left of the
   // title: a PUA codepoint that renders double-width in some fonts would shift
@@ -1495,10 +1526,12 @@ const ItemRow = ({
     item.activityAge && item.activityAge !== item.age
       ? `${item.activityAge} · ${item.age}`
       : item.age
+  const mergedLabel = merged ? "MERGED" : ""
   const suffix = [
     ageLabel || "",
     unresolvedLabel,
     showAuthor ? `by ${item.author}` : "",
+    mergedLabel,
   ]
     .filter(Boolean)
     .join("  ")
@@ -1539,6 +1572,12 @@ const ItemRow = ({
       ) : null}
       {/* Age last, so every row ends on the date — a consistent right edge. */}
       {ageLabel ? <Text dimColor>{"  " + ageLabel}</Text> : null}
+      {/* Except for the three seconds a row is on its way out. */}
+      {mergedLabel ? (
+        <Text bold color={MERGED_COLOUR}>
+          {"  " + mergedLabel}
+        </Text>
+      ) : null}
     </Box>
   )
 }
@@ -1984,10 +2023,13 @@ const BrowseScreen = ({
   isWorkRepo,
   initialIncludeWork,
   brand,
+  mergedUrls,
 }: {
   brand: string
   sections: Section[]
   login: string
+  /** URLs of rows merged from this cockpit, still inside their hold. */
+  mergedUrls?: string[]
   isWorkRepo?: (repo: string) => boolean
   initialIncludeWork?: boolean
   tabHelp?: [string, string][]
@@ -2144,6 +2186,18 @@ const BrowseScreen = ({
     setFlash(msg)
     setTimeout(() => setFlash(null), 2000)
   }
+
+  // ONE interval for every sparkling row, not one per row: the frame is shared,
+  // so N timers would only produce N chances to fall out of step. It runs solely
+  // while something is merging and is cleared the moment the last row goes, so a
+  // cockpit sitting idle redraws exactly as often as it did before.
+  const [sparkFrame, setSparkFrame] = useState(0)
+  const sparkling = (mergedUrls?.length ?? 0) > 0
+  useEffect(() => {
+    if (!sparkling) return
+    const id = setInterval(() => setSparkFrame((f) => f + 1), MERGED_FRAME_MS)
+    return () => clearInterval(id)
+  }, [sparkling])
 
   // A failed background refresh used to be swallowed: the list kept rendering
   // from cache with no hint it had gone stale, and the only thing the user saw
@@ -2638,6 +2692,11 @@ const BrowseScreen = ({
                 item={item}
                 active={viewStart + i === cursor}
                 login={login}
+                merged={
+                  (item.kind === "pr" || item.kind === "issue") &&
+                  !!mergedUrls?.includes(item.url)
+                }
+                sparkFrame={sparkFrame}
                 gap={
                   viewStart + i > 0 &&
                   (item.kind === "repo-header" ||
@@ -2959,6 +3018,13 @@ export const App = ({
     }
   }, [hasCiStatus, ciFetcher, ciPollMs])
 
+  // Merged rows live here rather than in BrowseScreen because the row has to
+  // survive the trip back from the drill view, and BrowseScreen is remounted by
+  // that navigation — state parked there would be gone before the first frame.
+  const [mergedUrls, setMergedUrls] = useState<string[]>([])
+  const mergeTimers = useRef<ReturnType<typeof setTimeout>[]>([])
+  useEffect(() => () => mergeTimers.current.forEach(clearTimeout), [])
+
   // The three list-less states share the browse screen's frame so that whichever
   // one you land on, the header still says what was looked at — which under
   // `--here` is the scope itself, the thing a blank screen leaves you guessing.
@@ -3029,6 +3095,27 @@ export const App = ({
       sections: withoutItem(state.sections, target),
       login: state.login,
     })
+
+
+  // Back to the list first, so the sparkle happens where you can see it — the
+  // drill view is still up at the moment the merge resolves, and a celebration
+  // behind an overlay is no celebration.
+  const markMerged = (target: GHItem) => {
+    toBrowse()
+    setMergedUrls((prev) =>
+      prev.includes(target.url) ? prev : [...prev, target.url],
+    )
+    mergeTimers.current.push(
+      setTimeout(() => {
+        setMergedUrls((prev) => prev.filter((u) => u !== target.url))
+        setState((s) =>
+          s.phase === "browse"
+            ? { ...s, sections: withoutItem(s.sections, target) }
+            : s,
+        )
+      }, MERGED_HOLD_MS),
+    )
+  }
   return (
     <>
       <BrowseScreen
@@ -3048,6 +3135,7 @@ export const App = ({
         isWorkRepo={isWorkRepo}
         initialIncludeWork={initialIncludeWork}
         hidden={overlay !== null}
+        mergedUrls={mergedUrls}
         ciStatusState={hasCiStatus ? ciStatusState : undefined}
         ciJob={ciJob}
         tabHelp={tabHelp}
@@ -3086,6 +3174,7 @@ export const App = ({
           onBack: toBrowse,
           onRefresh: applyOrRefresh,
           onRemove: removeAndReturn,
+          onMerged: markMerged,
         })}
       {overlay?.kind === "ext" &&
         extensions

@@ -74,6 +74,9 @@ export type HealthPanelProps = {
   // Fired when a check is activated (↵/l). The consumer decides what "open"
   // means — drill into an in-terminal log, or open the check's url in a browser.
   onOpenCheck: (check: PrCheck) => void
+  // Fired once a merge has actually landed. Optional: a surface that only reads
+  // health has nothing to do with it, and the panel still merges without one.
+  onMerged?: () => void
 }
 
 // Content-only PR health panel (the consuming surface owns any chrome and the
@@ -88,6 +91,7 @@ export const HealthPanel = ({
   error,
   reload,
   onOpenCheck,
+  onMerged,
 }: HealthPanelProps) => {
   const [cursor, setCursor] = useState(0)
   const [note, setNote] = useState<string | null>(null)
@@ -121,13 +125,21 @@ export const HealthPanel = ({
     setTimeout(() => setNote(null), 2500)
   }
 
-  const act = async (msg: string, run: () => Promise<unknown>) => {
+  const act = async (
+    msg: string,
+    run: () => Promise<unknown>,
+    onSuccess?: () => void,
+  ) => {
     setBusy(true)
     setNote(`⋯ ${msg}…`)
     try {
       await run()
       flash(`✓ ${msg}`)
-      reload()
+      // A handler that navigates away REPLACES the reload rather than racing it.
+      // Refetching a PR whose panel is about to unmount spends a request to learn
+      // what we already know, and lands its setState on a dead component.
+      if (onSuccess) onSuccess()
+      else reload()
     } catch {
       flash(`✗ ${msg} failed`)
     } finally {
@@ -145,8 +157,11 @@ export const HealthPanel = ({
   useInput((input, key) => {
     if (busy) return
     if (confirm === "merge") {
+      // Without an onMerged the third argument is undefined and act() reloads,
+      // which is exactly what this did before — so a host that never wired the
+      // celebration keeps the old behaviour rather than losing the refresh.
       if (input === "y" || input === "Y")
-        void act("merge", () => mergePr(repo, number))
+        void act("merge", () => mergePr(repo, number), onMerged)
       setConfirm(null)
       return
     }
