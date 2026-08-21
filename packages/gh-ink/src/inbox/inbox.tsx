@@ -2698,7 +2698,12 @@ const BrowseScreen = ({
                 }
                 sparkFrame={sparkFrame}
                 gap={
-                  viewStart + i > 0 &&
+                  // Window-relative, never `viewStart + i`. fitCount prices the
+                  // window's FIRST row at one line (isFirst), so gapping it when
+                  // scrolled draws a row the budget never bought — and the frame
+                  // is sized to fill the terminal exactly, so the overflow scrolls
+                  // the whole panel up a line instead of clipping.
+                  i > 0 &&
                   (item.kind === "repo-header" ||
                     item.kind === "subgroup-header" ||
                     // A header is always followed by a blank line before its
