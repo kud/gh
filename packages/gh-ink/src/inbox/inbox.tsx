@@ -1475,7 +1475,7 @@ const RepoHeaderRow = ({ repo, gap }: { repo: string; gap: boolean }) => {
 // MERGED is a word, not a colour: kud is colourblind, and purple here only
 // reinforces what the label already says — the same rule healthDisplay follows
 // for every other state in this list.
-export const MERGED_HOLD_MS = 3000
+export const MERGED_HOLD_MS = 5000
 export const MERGED_FRAME_MS = 150
 const MERGED_FRAMES = ["✦", "✧", "✶", "✧"]
 const MERGED_COLOUR = "#A371F7"
@@ -1485,7 +1485,7 @@ const MERGED_COLOUR = "#A371F7"
 // yourself a second ago and already knew about; this is reporting work that
 // happened in another window while you were reading something else, so it has
 // to survive being noticed rather than just seen.
-export const TRANSIT_HOLD_MS = 2500
+export const TRANSIT_HOLD_MS = 7000
 // One shared empty map, so clearing the marks compares equal to already-clear
 // and React skips the repaint instead of redrawing the list to change nothing.
 const NO_TRANSIENTS: Map<string, Transient> = new Map()
