@@ -3,7 +3,7 @@ import { EventEmitter } from "node:events"
 import React from "react"
 import { render } from "ink"
 import { App } from "./inbox.js"
-import type { JiraRow, Section } from "./inbox.js"
+import type { TaskRow, Section } from "./inbox.js"
 
 // `note` exists so a host can hang a secondary annotation off a row — a
 // recurrence marker, a source hint — without concatenating it into `summary`.
@@ -37,18 +37,18 @@ class FakeStdin extends EventEmitter {
 
 const settle = () => new Promise((resolve) => setImmediate(resolve))
 
-const row = (summary: string, note?: string): JiraRow => ({
-  kind: "jira",
+const row = (summary: string, note?: string): TaskRow => ({
+  kind: "task",
   key: "PROJ-1",
   summary,
   url: "https://example.invalid/PROJ-1",
-  jiraStatus: "open",
+  status: "open",
   age: "2d",
   indent: false,
   ...(note ? { note } : {}),
 })
 
-const mount = async (item: JiraRow, columns = 120) => {
+const mount = async (item: TaskRow, columns = 120) => {
   const sections: Section[] = [{ id: "today", label: "Today", items: [item] }]
   const stdout = new FakeStdout(columns, 44)
   const stdin = new FakeStdin()
@@ -70,7 +70,7 @@ const mount = async (item: JiraRow, columns = 120) => {
   return frame
 }
 
-describe("jira row note", () => {
+describe("task row note", () => {
   it("renders the note after the summary", async () => {
     const frame = await mount(row("Water the plants", "↻"))
     expect(frame).toContain("Water the plants")

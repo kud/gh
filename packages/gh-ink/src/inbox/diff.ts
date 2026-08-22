@@ -1,4 +1,4 @@
-import type { AnyItem, GHItem, JiraRow, Section } from "./inbox.js"
+import type { AnyItem, GHItem, TaskRow, Section } from "./inbox.js"
 
 /** What happened to a row between two fetches. */
 export type Transient = "in" | "out" | "changed"
@@ -13,9 +13,9 @@ export type Transient = "in" | "out" | "changed"
 // arriving PR would announce itself twice.
 export const keyOf = (item: AnyItem): string | null => {
   if (item.kind === "pr" || item.kind === "issue") return (item as GHItem).url
-  if (item.kind === "jira") {
-    const row = item as JiraRow
-    return row.url || `jira:${row.key}`
+  if (item.kind === "task") {
+    const row = item as TaskRow
+    return row.url || `task:${row.key}`
   }
   return null
 }
@@ -43,9 +43,9 @@ const renderedState = (item: AnyItem): string => {
       i.author ?? "",
     ].join("|")
   }
-  if (item.kind === "jira") {
-    const j = item as JiraRow
-    return [j.summary, j.jiraStatus].join("|")
+  if (item.kind === "task") {
+    const j = item as TaskRow
+    return [j.summary, j.status].join("|")
   }
   return ""
 }

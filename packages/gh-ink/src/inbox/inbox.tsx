@@ -89,12 +89,12 @@ export type GHItem = {
   indent: boolean
 }
 
-export type JiraRow = {
-  kind: "jira"
+export type TaskRow = {
+  kind: "task"
   key: string
   summary: string
   url: string
-  jiraStatus: string
+  status: string
   age: string
   indent: boolean
   instanceKey?: string
@@ -105,6 +105,19 @@ export type JiraRow = {
    * separately instead of being smuggled past the truncation maths.
    */
   note?: string
+  /**
+   * The Jira issue key behind this row, when one exists. Its PRESENCE is what
+   * turns on the ticket affordances — ↵ opens a menu led by `jira issue view`,
+   * and `t` transitions the issue. A row without it is just a task: ↵ opens its
+   * URL and nothing here shells out to `jira`.
+   *
+   * Separate from `key` because the two are not the same thing. `key` is the
+   * left column, and a caller is free to put anything legible there: cockpit
+   * puts the ticket key, `life` puts a Todoist project name. Reading the drill
+   * off `key` is what made `life` run `jira issue view "Maison       "` and
+   * label it "View ticket" on a surface that has never touched Jira.
+   */
+  ticket?: string
 }
 
 export type RepoHeader = {
@@ -135,7 +148,7 @@ export type SubgroupHeader = {
 
 export type AnyItem =
   | GHItem
-  | JiraRow
+  | TaskRow
   | RepoHeader
   | SubgroupHeader
   | ShowMore
@@ -373,7 +386,7 @@ export const layoutGHItems = (items: GHItem[], sectionId: string): AnyItem[] =>
   )
 
 // Keep only work- or only home-origin GitHub items, leaving non-GH rows
-// (jira) untouched. Mirrors filterByRepos' gh/other split.
+// (task) untouched. Mirrors filterByRepos' gh/other split.
 export const filterByOrigin = (
   sections: Section[],
   keep: "work" | "home",
@@ -408,7 +421,7 @@ export const filterByOrigin = (
 const searchText = (i: AnyItem): string =>
   i.kind === "pr" || i.kind === "issue"
     ? `${i.title} ${i.repo} #${i.number}`
-    : i.kind === "jira"
+    : i.kind === "task"
     ? `${i.summary} ${i.key}`
     : ""
 
@@ -918,13 +931,14 @@ export const topLevelCount = (s: Section) =>
   ).length
 
 export const drillCmd = (item: AnyItem): string | null => {
-  if (item.kind === "jira") return `jira issue view ${item.key}`
+  if (item.kind === "task")
+    return item.ticket ? `jira issue view ${item.ticket}` : null
   // pr / issue drill in-tree via mounted views (openDrillView)
   return null
 }
 
 const drillLabel = (item: AnyItem): string => {
-  if (item.kind === "jira") return "View ticket"
+  if (item.kind === "task") return "View ticket"
   if (item.kind === "issue") return "View issue"
   if (item.kind === "pr") return "Open PR"
   return "Drill in"
@@ -977,12 +991,12 @@ export const buildActions = (
     hint: "c",
     run: () => {
       clipboard(item.url)
-      const label = item.kind === "jira" ? item.key : `#${item.number}`
+      const label = item.kind === "task" ? item.key : `#${item.number}`
       showFlash(`✓ Copied URL for ${label}`)
     },
   }
 
-  // pr / issue mount an in-tree view (openDrillView via onOpenView); jira still
+  // pr / issue mount an in-tree view (openDrillView via onOpenView); a ticket-backed task still
   // spawns a pane (drillCmd). Show the drill action whenever either path exists,
   // so "d" is always in the ↵ menu — not only when there's a pane command.
   const drill = drillCmd(item)
@@ -1002,11 +1016,11 @@ export const buildActions = (
         }
       : null
 
-  if (item.kind === "jira") {
+  if (item.kind === "task") {
     const base: Action[] = drillAction
       ? [drillAction, open, copyUrl]
       : [open, copyUrl]
-    if (jiraTransitions && jiraTransitions.length > 0) {
+    if (item.ticket && jiraTransitions && jiraTransitions.length > 0) {
       base.push({
         label: "Move status",
         hint: "t",
@@ -1023,7 +1037,7 @@ export const buildActions = (
                   run: () => {
                     showFlash(`⋯ ${label} · ${resolution}…`)
                     void quietly`jira issue move ${
-                      (item as JiraRow).key
+                      (item as TaskRow).ticket
                     } ${state} --resolution ${resolution}`
                       .then(() => {
                         showFlash(`✓ ${label} · ${resolution}`)
@@ -1039,7 +1053,7 @@ export const buildActions = (
                 run: () => {
                   showFlash(`⋯ Moving to ${label}…`)
                   void quietly`jira issue move ${
-                    (item as JiraRow).key
+                    (item as TaskRow).ticket
                   } ${state}`
                     .then(() => {
                       showFlash(`✓ Moved to ${label}`)
@@ -1546,7 +1560,7 @@ const ItemRow = ({
       </Box>
     )
 
-  if (item.kind === "jira") {
+  if (item.kind === "task") {
     const note = item.note ?? ""
     const titleMax = Math.max(20, COLS - item.key.length - note.length - 10)
     return (
@@ -1733,7 +1747,7 @@ export const ActionMenu = ({
   cursor: number
 }) => {
   const title =
-    item.kind === "jira"
+    item.kind === "task"
       ? item.key
       : item.kind === "pr" || item.kind === "issue"
       ? `#${item.number}`
@@ -2546,8 +2560,16 @@ const BrowseScreen = ({
 
     if (key.return) {
       // ↵ goes straight into the item's screen (PR / issue mount);
-      // only items without a mounted view (jira) fall back to the action menu.
+      // only items without a mounted view (task) fall back to the action menu.
       if (openDrillView(activeItem)) return
+      // A row with no ticket behind it has nothing to drill into, so the menu
+      // would hold open and copy and nothing else — one keystroke in front of
+      // the only thing anyone pressed ↵ for.
+      if (activeItem.kind === "task" && !activeItem.ticket) {
+        void quietly`open ${activeItem.url}`.catch(() => {})
+        showFlash("↗ Opened in browser")
+        return
+      }
       openMenu()
       return
     }
@@ -2580,14 +2602,14 @@ const BrowseScreen = ({
       // inbox — you can open several PRs without relaunching.
       quietly`open ${activeItem.url}`.catch(() => {})
       const label =
-        activeItem.kind === "jira" ? activeItem.key : `#${activeItem.number}`
+        activeItem.kind === "task" ? activeItem.key : `#${activeItem.number}`
       showFlash(`↗ Opened ${label}`)
       return
     }
     if (input === "c") {
       clipboard(activeItem.url)
       const label =
-        activeItem.kind === "jira" ? activeItem.key : `#${activeItem.number}`
+        activeItem.kind === "task" ? activeItem.key : `#${activeItem.number}`
       showFlash(`✓ Copied URL for ${label}`)
       return
     }
@@ -2605,7 +2627,7 @@ const BrowseScreen = ({
       showFlash(`✓ Copied ${activeItem.branch}`)
       return
     }
-    if (activeItem.kind !== "jira") {
+    if (activeItem.kind !== "task") {
       if (input === "s" && activeItem.kind === "pr" && activeItem.branch) {
         const script = [
           "delay 0.5",
@@ -2638,11 +2660,12 @@ const BrowseScreen = ({
     if (
       input === "t" &&
       activeItem &&
-      activeItem.kind === "jira" &&
+      activeItem.kind === "task" &&
+      activeItem.ticket &&
       jiraTransitions &&
       jiraTransitions.length > 0
     ) {
-      const jiraKey = activeItem.key
+      const jiraKey = activeItem.ticket
       const actions: Action[] = jiraTransitions.map(
         ({ label, state, resolutions }) =>
           resolutions && resolutions.length > 0
@@ -2785,7 +2808,7 @@ const BrowseScreen = ({
                 // same repo header recurs down a time-sorted list (Done). The
                 // sum viewStart + i is stable per underlying item across scroll.
                 key={`${viewStart + i}:${
-                  item.kind === "jira"
+                  item.kind === "task"
                     ? item.instanceKey ?? item.key
                     : item.kind === "repo-header"
                     ? `header:${item.repo}`
@@ -2817,11 +2840,11 @@ const BrowseScreen = ({
                     item.kind === "subgroup-header" ||
                     // A header is always followed by a blank line before its
                     // first child — in Other PRs that's "free" because the
-                    // child is itself a repo-header (gap above). A jira row
+                    // child is itself a repo-header (gap above). A task row
                     // has no such stand-in, so it needs this explicitly. Never
                     // applies between two tickets/PRs — only right after a
                     // header.
-                    (item.kind === "jira" &&
+                    (item.kind === "task" &&
                       ["repo-header", "subgroup-header"].includes(
                         section.items[viewStart + i - 1]?.kind,
                       )))
