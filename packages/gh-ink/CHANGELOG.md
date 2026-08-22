@@ -1,5 +1,11 @@
 # @kud/gh-ink
 
+## 0.16.1
+
+### Patch Changes
+
+- b876da7: Hold the transit and merge markers longer — GONE, UPDATED and NEW now sit for 7s and a merged row sparkles for 5s, so a change that lands while you are reading something else survives being noticed.
+
 ## 0.16.0
 
 ### Minor Changes
