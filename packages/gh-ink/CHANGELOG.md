@@ -1,5 +1,24 @@
 # @kud/gh-ink
 
+## 0.15.0
+
+### Minor Changes
+
+- 79616e5: Spend the transit hold per tab, not on a global clock. A row that arrived, changed or left in a tab you were not looking at used to run out its 2.5s behind your back, so switching over showed you a list that had already settled. The marker now waits for its own tab to be displayed, and unseen marks survive the next refresh instead of being cancelled by it.
+
+### Patch Changes
+
+- a37b400: Bump `CACHE_VERSION` for the `jira` → `task` row rename.
+
+  The rename changed `Section`'s shape, which is exactly what `CACHE_VERSION`
+  exists to guard, and the previous release did not bump it. A v1 cache full of
+  `kind: "jira"` rows deserialised into a build with no branch for them, so every
+  row fell through to the GitHub renderer and crashed on
+  `healthDisplay[item.health]` — a full-screen React error on launch, cleared only
+  once the background refetch landed underneath it.
+
+  Costs one cold fetch on upgrade, which is the documented price of a version bump.
+
 ## 0.14.0
 
 ### Minor Changes
