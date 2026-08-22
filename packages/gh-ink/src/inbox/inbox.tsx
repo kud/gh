@@ -98,6 +98,13 @@ export type JiraRow = {
   age: string
   indent: boolean
   instanceKey?: string
+  /**
+   * Trailing annotation, rendered dim after the summary — a recurrence marker,
+   * a source hint, anything secondary to the title. Its own node rather than
+   * part of `summary` so it can be dimmed, and so its width is measured
+   * separately instead of being smuggled past the truncation maths.
+   */
+  note?: string
 }
 
 export type RepoHeader = {
@@ -1540,7 +1547,8 @@ const ItemRow = ({
     )
 
   if (item.kind === "jira") {
-    const titleMax = Math.max(20, COLS - item.key.length - 10)
+    const note = item.note ?? ""
+    const titleMax = Math.max(20, COLS - item.key.length - note.length - 10)
     return (
       <Box marginTop={gap ? 1 : 0}>
         <Text color="cyan">{active ? "❯ " : "  "}</Text>
@@ -1548,6 +1556,7 @@ const ItemRow = ({
           {item.key + "  "}
         </Text>
         <Text bold={active}>{truncate(item.summary, titleMax)}</Text>
+        {note ? <Text dimColor>{` ${note}`}</Text> : null}
       </Box>
     )
   }
