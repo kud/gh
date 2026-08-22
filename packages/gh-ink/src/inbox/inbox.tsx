@@ -14,7 +14,13 @@ import React, {
 import { Text as InkText, Box, useInput, useWindowSize } from "ink"
 import type { InboxExtension, ExtensionTarget } from "./extension.js"
 import { invalidateCache, isFresh, readCache, writeCache } from "./cache.js"
-import { diffSections, summariseDiff, transientOf } from "./diff.js"
+import {
+  diffSections,
+  keyOf,
+  summariseDiff,
+  tabsOfMarks,
+  transientOf,
+} from "./diff.js"
 import type { Transient } from "./diff.js"
 import {
   FooterHints,
@@ -147,12 +153,7 @@ export type SubgroupHeader = {
 }
 
 export type AnyItem =
-  | GHItem
-  | TaskRow
-  | RepoHeader
-  | SubgroupHeader
-  | ShowMore
-  | ShowLess
+  GHItem | TaskRow | RepoHeader | SubgroupHeader | ShowMore | ShowLess
 
 // Standing status line for the "main pipeline we care about" — not a
 // browsable list item, just a glance shown above the tabs. Drilling in
@@ -422,8 +423,8 @@ const searchText = (i: AnyItem): string =>
   i.kind === "pr" || i.kind === "issue"
     ? `${i.title} ${i.repo} #${i.number}`
     : i.kind === "task"
-    ? `${i.summary} ${i.key}`
-    : ""
+      ? `${i.summary} ${i.key}`
+      : ""
 
 export const filterBySearch = (
   sections: Section[],
@@ -1310,8 +1311,8 @@ const InboxHeader = ({
   const countSeg = loading
     ? "      loading…  "
     : quiet
-    ? "  "
-    : `  ${String(total).padStart(3)} item${total !== 1 ? "s" : ""}  ·  `
+      ? "  "
+      : `  ${String(total).padStart(3)} item${total !== 1 ? "s" : ""}  ·  `
   const userSeg = loading || quiet ? "" : `@${login}  `
   const workLabel = work === undefined ? "" : " w work ●─○ home  "
 
@@ -1321,10 +1322,10 @@ const InboxHeader = ({
   const [statusText, statusColor] = hasPending
     ? [`● ${pendingSummary || "new"} · r apply`, "#FF8700"]
     : refreshing
-    ? ["↻ refreshing…", "cyan"]
-    : fetchedAt
-    ? [`updated ${agoText(fetchedAt)}`, undefined]
-    : ["", undefined]
+      ? ["↻ refreshing…", "cyan"]
+      : fetchedAt
+        ? [`updated ${agoText(fetchedAt)}`, undefined]
+        : ["", undefined]
   const statusSeg = statusText ? statusText + "  " : ""
 
   const fill = Math.max(
@@ -1369,9 +1370,7 @@ const InboxHeader = ({
 // A standing single-line row, always the same height (one line + marginBottom)
 // across loading/error/ready so the content below it never jumps.
 export type CiStatusState =
-  | { kind: "loading" }
-  | { kind: "error" }
-  | { kind: "ready"; status: CiStatus }
+  { kind: "loading" } | { kind: "error" } | { kind: "ready"; status: CiStatus }
 
 export const toCiStatusState = (status: CiStatus | null): CiStatusState =>
   status ? { kind: "ready", status } : { kind: "error" }
@@ -1481,10 +1480,11 @@ export const MERGED_FRAME_MS = 150
 const MERGED_FRAMES = ["✦", "✧", "✶", "✧"]
 const MERGED_COLOUR = "#A371F7"
 
-// How long a refreshed row stays flagged. Longer than the merge sparkle, which
-// celebrates something you did yourself a second ago and already knew about;
-// this is reporting work that happened in another window while you were reading
-// something else, so it has to survive being noticed rather than just seen.
+// How long a refreshed row stays flagged, counted only while its own tab is on
+// screen. Longer than the merge sparkle, which celebrates something you did
+// yourself a second ago and already knew about; this is reporting work that
+// happened in another window while you were reading something else, so it has
+// to survive being noticed rather than just seen.
 export const TRANSIT_HOLD_MS = 2500
 // One shared empty map, so clearing the marks compares equal to already-clear
 // and React skips the repaint instead of redrawing the list to change nothing.
@@ -1589,15 +1589,15 @@ const ItemRow = ({
   const icon = merged
     ? (MERGED_FRAMES[sparkFrame % MERGED_FRAMES.length] as string)
     : transient === "out"
-    ? (TRANSIT_OUT_FRAMES[sparkFrame % TRANSIT_OUT_FRAMES.length] as string)
-    : transient === "in"
-    ? (TRANSIT_IN_FRAMES[sparkFrame % TRANSIT_IN_FRAMES.length] as string)
-    : healthIcon
+      ? (TRANSIT_OUT_FRAMES[sparkFrame % TRANSIT_OUT_FRAMES.length] as string)
+      : transient === "in"
+        ? (TRANSIT_IN_FRAMES[sparkFrame % TRANSIT_IN_FRAMES.length] as string)
+        : healthIcon
   const color = merged
     ? MERGED_COLOUR
     : transient
-    ? TRANSIT_COLOUR[transient]
-    : healthColor
+      ? TRANSIT_COLOUR[transient]
+      : healthColor
   // Whose turn it is, in its own fixed cell. Arrows rather than the nerd-font
   // comment glyph because this column sits in the aligned zone left of the
   // title: a PUA codepoint that renders double-width in some fonts would shift
@@ -1607,8 +1607,8 @@ const ItemRow = ({
     !login || !item.lastActor
       ? [" ", "white"]
       : item.lastActor === login
-      ? ["→", "#888888"]
-      : ["←", "#FF8700"]
+        ? ["→", "#888888"]
+        : ["←", "#FF8700"]
   const numStr = `#${item.number}`.padEnd(7)
   // Hide "by me" — the author suffix is only signal when it's someone else.
   const showAuthor = !!item.author && item.author !== login
@@ -1750,8 +1750,8 @@ export const ActionMenu = ({
     item.kind === "task"
       ? item.key
       : item.kind === "pr" || item.kind === "issue"
-      ? `#${item.number}`
-      : ""
+        ? `#${item.number}`
+        : ""
   return (
     <Box
       flexDirection="column"
@@ -2140,6 +2140,7 @@ const BrowseScreen = ({
   brand,
   mergedUrls,
   transients,
+  onTabChange,
 }: {
   brand: string
   sections: Section[]
@@ -2148,6 +2149,8 @@ const BrowseScreen = ({
   mergedUrls?: string[]
   /** What the refresh just did to each row, for the length of the hold. */
   transients?: Map<string, Transient>
+  /** Which tab is on screen, so the host can spend the hold per tab. */
+  onTabChange?: (sectionId: string) => void
   isWorkRepo?: (repo: string) => boolean
   initialIncludeWork?: boolean
   tabHelp?: [string, string][]
@@ -2182,7 +2185,7 @@ const BrowseScreen = ({
 }) => {
   const { rows } = useWindowSize()
   const [includeWork, setIncludeWork] = useState(() =>
-    workToggle ? initialIncludeWork ?? true : true,
+    workToggle ? (initialIncludeWork ?? true) : true,
   )
   // Symmetric work ⇄ home switch: ☑ = work only, ☐ = home only. Only active
   // when workToggle is set (the work-profile cockpit); off elsewhere.
@@ -2208,6 +2211,13 @@ const BrowseScreen = ({
 
   const safeTabIdx = Math.min(tabIdx, Math.max(0, localSections.length - 1))
   const activeId = localSections[safeTabIdx]?.id ?? ""
+  // Which tab is being read, told to whoever owns the transit hold. The tab
+  // lives here — App only ever knew the whole list — so the news a refresh
+  // brought could expire in a tab nobody had opened.
+  useEffect(() => {
+    onTabChange?.(activeId)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeId])
   const [flash, setFlash] = useState<string | null>(null)
   const menu = useActionMenu()
   const [search, setSearch] = useState<string | null>(null)
@@ -2310,8 +2320,15 @@ const BrowseScreen = ({
   // so N timers would only produce N chances to fall out of step. It runs solely
   // while something is merging and is cleared the moment the last row goes, so a
   // cockpit sitting idle redraws exactly as often as it did before.
+  //
+  // Scoped to what this tab draws, not to the marks as a whole: a mark now
+  // waits for its own tab to be opened, so an untouched tab would otherwise
+  // keep the ticker running against rows nobody can see.
   const [sparkFrame, setSparkFrame] = useState(0)
-  const sparkling = (mergedUrls?.length ?? 0) > 0 || (transients?.size ?? 0) > 0
+  const sparkling =
+    (mergedUrls?.length ?? 0) > 0 ||
+    (!!transients?.size &&
+      section.items.some((item) => transientOf(transients, item)))
   useEffect(() => {
     if (!sparkling) return
     const id = setInterval(() => setSparkFrame((f) => f + 1), MERGED_FRAME_MS)
@@ -2649,7 +2666,7 @@ const BrowseScreen = ({
         (activeItem.kind === "pr" || activeItem.kind === "issue")
       ) {
         const { repo } = activeItem
-        const branch = activeItem.kind === "pr" ? activeItem.branch ?? "" : ""
+        const branch = activeItem.kind === "pr" ? (activeItem.branch ?? "") : ""
         showFlash(`⋯ Opening ${repo}…`)
         void jumpToRepo(repo, branch, login)
           .then(() => showFlash(`↗ Opened ${repo} in new tab`))
@@ -2809,16 +2826,16 @@ const BrowseScreen = ({
                 // sum viewStart + i is stable per underlying item across scroll.
                 key={`${viewStart + i}:${
                   item.kind === "task"
-                    ? item.instanceKey ?? item.key
+                    ? (item.instanceKey ?? item.key)
                     : item.kind === "repo-header"
-                    ? `header:${item.repo}`
-                    : item.kind === "subgroup-header"
-                    ? `subgroup:${item.label}`
-                    : item.kind === "show-more"
-                    ? `show-more:${item.hidden[0]?.repo ?? i}`
-                    : item.kind === "show-less"
-                    ? `show-less:${item.toHide[0]?.repo ?? i}`
-                    : `${item.repo}/${item.number}`
+                      ? `header:${item.repo}`
+                      : item.kind === "subgroup-header"
+                        ? `subgroup:${item.label}`
+                        : item.kind === "show-more"
+                          ? `show-more:${item.hidden[0]?.repo ?? i}`
+                          : item.kind === "show-less"
+                            ? `show-less:${item.toHide[0]?.repo ?? i}`
+                            : `${item.repo}/${item.number}`
                 }`}
                 item={item}
                 active={viewStart + i === cursor}
@@ -3069,13 +3086,11 @@ export const App = ({
   const displayedSections = useRef<Section[]>([])
   const [transients, setTransients] =
     useState<Map<string, Transient>>(NO_TRANSIENTS)
-  const transitTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  useEffect(
-    () => () => {
-      if (transitTimer.current) clearTimeout(transitTimer.current)
-    },
-    [],
-  )
+  // Which tab each marked row sits in. A ref, not state: it is read inside the
+  // hold's effect, which already reruns whenever the marks themselves change.
+  const transitTabs = useRef<Map<string, string>>(new Map())
+  // The tab the reader is actually looking at, reported up by BrowseScreen.
+  const [visibleTab, setVisibleTab] = useState("")
 
   /* The one funnel where the displayed list changes, which makes it the one
      place that can say what changed. Applying used to swap one list for another
@@ -3092,31 +3107,91 @@ export const App = ({
     // First paint has nothing to have changed FROM. Every row is technically
     // new and flagging them all says nothing, so it opens quiet.
     if (before.length === 0) {
+      transitTabs.current = new Map()
       setTransients(NO_TRANSIENTS)
       setState({ phase: "browse", sections, login })
       return
     }
 
-    const { transients: marks, union } = diffSections(before, sections)
+    const { transients: fresh, union } = diffSections(before, sections)
+    // Marks no tab has shown yet survive into this refresh. The hold is spent
+    // per tab, so an unseen marker is a promise the cockpit has not kept —
+    // dropping it here would make a second `r` the way to lose the news the
+    // first one brought.
+    const marks = new Map(fresh)
+    for (const [key, mark] of transients)
+      if (!marks.has(key)) marks.set(key, mark)
+    // A carried-forward mark whose row is nowhere in the new union has no tab
+    // left to settle it, and nothing on screen to attach to. Drop it.
+    const tabs = tabsOfMarks(union, marks)
+    for (const key of [...marks.keys()]) if (!tabs.has(key)) marks.delete(key)
+
     if (marks.size === 0) {
+      transitTabs.current = new Map()
+      setTransients(NO_TRANSIENTS)
       setState({ phase: "browse", sections, login })
       return
     }
 
-    // Render the union — departing rows still standing where they were — then
-    // settle onto the real list once the hold is up.
+    // Render the union — departing rows still standing where they were. Each
+    // tab settles onto the real list on its own clock, once it has been seen.
+    transitTabs.current = tabs
     setTransients(marks)
     setState({ phase: "browse", sections: union, login })
-    if (transitTimer.current) clearTimeout(transitTimer.current)
-    transitTimer.current = setTimeout(() => {
-      setTransients(NO_TRANSIENTS)
-      setState((prev) =>
-        prev.phase === "browse" && prev.sections === union
-          ? { ...prev, sections }
-          : prev,
-      )
-    }, TRANSIT_HOLD_MS)
   }
+
+  /* Spend one tab's hold and settle it.
+     Only the departing rows separate the union from the real list, so settling
+     is dropping them — not restoring the section wholesale, which would also
+     undo any optimistic removal made during the hold. */
+  const settleTab = (tabId: string, marks: Map<string, Transient>) => {
+    const keys = [...transitTabs.current]
+      .filter(([, tab]) => tab === tabId)
+      .map(([key]) => key)
+    for (const key of keys) transitTabs.current.delete(key)
+    const gone = new Set(keys.filter((key) => marks.get(key) === "out"))
+    setTransients((prev) => {
+      const next = new Map(prev)
+      for (const key of keys) next.delete(key)
+      return next.size === 0 ? NO_TRANSIENTS : next
+    })
+    setState((prev) =>
+      prev.phase !== "browse"
+        ? prev
+        : {
+            ...prev,
+            sections: prev.sections.map((section) =>
+              section.id !== tabId
+                ? section
+                : {
+                    ...section,
+                    items: section.items.filter((item) => {
+                      const key = keyOf(item)
+                      return !(key && gone.has(key))
+                    }),
+                  },
+            ),
+          },
+    )
+  }
+
+  /* The hold runs on the tab you are looking at, never on a global clock.
+     A row that changed in another tab used to run out its 2.5s behind your
+     back, so the refresh with news for you was the one that showed you nothing.
+     Switching away cancels the timer rather than settling early — you get the
+     full hold whenever you arrive, however long it took you to get there. */
+  useEffect(() => {
+    if (transients.size === 0) return
+    // Behind a drill view there is no list to read the markers off.
+    if (state.phase !== "browse" || !visibleTab) return
+    if (![...transitTabs.current.values()].includes(visibleTab)) return
+    const timer = setTimeout(
+      () => settleTab(visibleTab, transients),
+      TRANSIT_HOLD_MS,
+    )
+    return () => clearTimeout(timer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [transients, visibleTab, state.phase])
 
   // What is waiting behind `r`, in words, so the indicator is worth its keypress.
   const pendingSummary = useMemo(
@@ -3303,7 +3378,7 @@ export const App = ({
           login=""
           work={
             workToggle && state.phase === "loading"
-              ? initialIncludeWork ?? true
+              ? (initialIncludeWork ?? true)
               : undefined
           }
           loading={state.phase === "loading"}
@@ -3328,14 +3403,14 @@ export const App = ({
     state.phase === "pr"
       ? { kind: "pr" as const, item: state.item }
       : state.phase === "issue"
-      ? { kind: "issue" as const, item: state.item }
-      : state.phase === "ext"
-      ? {
-          kind: "ext" as const,
-          extId: state.extId,
-          target: state.target,
-        }
-      : null
+        ? { kind: "issue" as const, item: state.item }
+        : state.phase === "ext"
+          ? {
+              kind: "ext" as const,
+              extId: state.extId,
+              target: state.target,
+            }
+          : null
   const toBrowse = () =>
     setState({ phase: "browse", sections: state.sections, login: state.login })
 
@@ -3390,6 +3465,7 @@ export const App = ({
         hidden={overlay !== null}
         mergedUrls={mergedUrls}
         transients={transients}
+        onTabChange={setVisibleTab}
         ciStatusState={hasCiStatus ? ciStatusState : undefined}
         ciJob={ciJob}
         tabHelp={tabHelp}
