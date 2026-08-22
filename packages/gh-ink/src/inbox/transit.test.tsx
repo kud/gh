@@ -6,7 +6,7 @@ import { join } from "node:path"
 import React from "react"
 import { render } from "ink"
 import { App, TAB_MARK, tabLabel, TRANSIT_HOLD_MS } from "./inbox.js"
-import type { GHItem, Section } from "./inbox.js"
+import type { GHItem, Section, TaskRow } from "./inbox.js"
 
 /*
  * The manual refresh gate is deliberate: nothing repaints until you press `r`,
@@ -413,5 +413,119 @@ describe("the tab marker", () => {
     expect(tabLabel("Open", marked, "open")).toBe("  Open")
     // And no dead indent at all on a bar with nothing to report.
     expect(tabLabel("Open", new Set(), "open")).toBe("Open")
+  })
+})
+
+/*
+ * The same vocabulary on a task row.
+ *
+ * `ItemRow`'s task branch returned before ever reaching the transient
+ * rendering, so a surface built entirely from task rows — `life`, which is
+ * Todoist and Notion — applied a refresh in total silence: the list changed
+ * and nothing on screen admitted it. These pin the words, since the glyph
+ * animates and the words are what a person actually reads.
+ */
+
+const task = (key: string, summary: string, status: string): TaskRow => ({
+  kind: "task",
+  key,
+  summary,
+  url: `https://app.todoist.com/app/task/${encodeURIComponent(summary)}`,
+  status,
+  age: "",
+  indent: false,
+})
+
+const T_STAYS = "a chore that sits still throughout"
+const T_MOVES = "a chore whose priority changed"
+const T_LEAVES = "a chore ticked off elsewhere"
+const T_ARRIVES = "a chore added elsewhere"
+
+const mountTasks = async () => {
+  const stdout = new FakeStdout(120, 44)
+  const stdin = new FakeStdin()
+  let call = 0
+  const instance = render(
+    <App
+      fetcher={async () => ({
+        sections: [
+          {
+            id: "today",
+            label: "Today",
+            items:
+              call++ === 0
+                ? [
+                    task("Flat", T_STAYS, "p2"),
+                    task("Flat", T_MOVES, "p3"),
+                    task("Flat", T_LEAVES, "p4"),
+                  ]
+                : [
+                    task("Flat", T_STAYS, "p2"),
+                    task("Flat", T_MOVES, "p1"),
+                    task("Flat", T_ARRIVES, "p2"),
+                  ],
+          },
+        ],
+        login: "kud",
+      })}
+      title="life"
+    />,
+    {
+      stdout: stdout as never,
+      stdin: stdin as never,
+      debug: true,
+      exitOnCtrlC: false,
+      patchConsole: false,
+    },
+  )
+  await settle()
+  await settle()
+  return {
+    stdout,
+    stdin,
+    stop: () => {
+      instance.unmount()
+      instance.cleanup()
+    },
+  }
+}
+
+describe("applying a refresh on task rows", () => {
+  it("says what it did to each row, in words", async () => {
+    const { stdout, stdin, stop } = await mountTasks()
+    stdin.press("r")
+    await settle()
+    await settle()
+    await after(50)
+    stdin.press("r")
+    await settle()
+    await settle()
+
+    const frame = stdout.lastFrame()
+    expect(frame).toContain("NEW")
+    expect(frame).toContain("GONE")
+    expect(frame).toContain("UPDATED")
+    expect(frame).toContain(T_ARRIVES)
+    stop()
+  })
+
+  it("leaves the row that did not move unmarked", async () => {
+    const { stdout, stdin, stop } = await mountTasks()
+    stdin.press("r")
+    await settle()
+    await settle()
+    await after(50)
+    stdin.press("r")
+    await settle()
+    await settle()
+
+    const line = stdout
+      .lastFrame()
+      .split("\n")
+      .find((l) => l.includes(T_STAYS))
+    expect(line).toBeTruthy()
+    expect(line).not.toContain("UPDATED")
+    expect(line).not.toContain("NEW")
+    stop()
   })
 })
