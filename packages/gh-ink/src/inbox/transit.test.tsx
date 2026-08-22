@@ -23,7 +23,10 @@ import type { GHItem, Section } from "./inbox.js"
 
 class FakeStdout extends EventEmitter {
   frames: string[] = []
-  constructor(public columns: number, public rows: number) {
+  constructor(
+    public columns: number,
+    public rows: number,
+  ) {
     super()
   }
   write = (frame: string) => {
@@ -261,6 +264,110 @@ describe("the stamp file", () => {
     const { stdout, stop } = await mount()
     await after(600)
     expect(stdout.lastFrame()).not.toContain("r apply")
+    stop()
+  })
+})
+
+/*
+ * The hold is per tab, and its clock only runs while that tab is on screen.
+ * Without that, a refresh whose only news lived in a tab you were not on spent
+ * its 2.5s behind your back — you switched over to a list that had already
+ * settled and looked exactly like it did before.
+ */
+const OTHER_STAYS = "a row in the second tab that sits still"
+const OTHER_MOVES = "a row in the second tab whose health changed"
+
+const twoTabsBefore: Section[] = [
+  { id: "open", label: "Open", items: [pr(1, STAYS, "approved")] },
+  {
+    id: "review",
+    label: "Review",
+    items: [pr(5, OTHER_STAYS, "approved"), pr(6, OTHER_MOVES, "approved")],
+  },
+]
+const twoTabsAfter: Section[] = [
+  { id: "open", label: "Open", items: [pr(1, STAYS, "approved")] },
+  {
+    id: "review",
+    label: "Review",
+    items: [pr(5, OTHER_STAYS, "approved"), pr(6, OTHER_MOVES, "ci-fail")],
+  },
+]
+
+// What a keyboard actually sends for →, which is what Ink reads as a tab switch.
+const RIGHT_ARROW = "\u001B[C"
+
+const mountTwoTabs = async () => {
+  const stdout = new FakeStdout(120, 44)
+  const stdin = new FakeStdin()
+  let call = 0
+  const instance = render(
+    <App
+      fetcher={async () => ({
+        sections: call++ === 0 ? twoTabsBefore : twoTabsAfter,
+        login: "kud",
+      })}
+      title="cockpit"
+      detailFor={() => null}
+    />,
+    {
+      stdout: stdout as never,
+      stdin: stdin as never,
+      debug: true,
+      exitOnCtrlC: false,
+      patchConsole: false,
+    },
+  )
+  await settle()
+  await settle()
+  // Fetch the second list, then apply it — the same two presses a person makes.
+  stdin.press("r")
+  await settle()
+  await settle()
+  await after(50)
+  stdin.press("r")
+  await settle()
+  await settle()
+  return {
+    stdout,
+    stdin,
+    stop: () => {
+      instance.unmount()
+      instance.cleanup()
+    },
+  }
+}
+
+describe("a change in a tab you are not on", () => {
+  it("keeps its marker until that tab is displayed", async () => {
+    const { stdout, stdin, stop } = await mountTwoTabs()
+    await after(TRANSIT_HOLD_MS + 500)
+
+    // The guard: the row is not merely unmarked here, it is not on screen at
+    // all — so a passing assertion has to come from the OTHER tab.
+    expect(stdout.lastFrame()).not.toContain(OTHER_MOVES)
+
+    stdin.press(RIGHT_ARROW)
+    await settle()
+    await settle()
+
+    const frame = stdout.lastFrame()
+    expect(frame).toContain(OTHER_MOVES)
+    expect(frame).toContain("UPDATED")
+    stop()
+  })
+
+  it("settles once you have actually looked at it", async () => {
+    const { stdout, stdin, stop } = await mountTwoTabs()
+    stdin.press(RIGHT_ARROW)
+    await settle()
+    await after(TRANSIT_HOLD_MS + 500)
+
+    const frame = stdout.lastFrame()
+    expect(frame).not.toContain("UPDATED")
+    // Still the tab it settled on, not a blanked list.
+    expect(frame).toContain(OTHER_MOVES)
+    expect(frame).toContain(OTHER_STAYS)
     stop()
   })
 })

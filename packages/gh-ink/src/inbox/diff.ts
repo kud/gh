@@ -164,3 +164,24 @@ export const transientOf = (
   const key = keyOf(item)
   return key ? transients.get(key) : undefined
 }
+
+/**
+ * Row key → the id of the section (tab) the row sits in, for every key in
+ * `marks`.
+ *
+ * Built from the union rather than from `next`, so a departing row is filed
+ * under the tab it is still standing in. The hold is spent per tab, and a tab
+ * cannot settle without knowing which rows belong to it.
+ */
+export const tabsOfMarks = (
+  sections: Section[],
+  marks: Map<string, Transient>,
+): Map<string, string> => {
+  const out = new Map<string, string>()
+  for (const section of sections)
+    for (const item of section.items) {
+      const key = keyOf(item)
+      if (key && marks.has(key)) out.set(key, section.id)
+    }
+  return out
+}
