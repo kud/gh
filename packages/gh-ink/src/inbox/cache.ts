@@ -32,8 +32,14 @@ export const CACHE_TTL_MS = 120_000
  * TTL lets an entry be *trusted*, a file written by an older `Section` shape
  * would deserialise into new code and render wrong. An unrecognised version is
  * a miss, which costs one cold fetch on upgrade.
+ *
+ * 2 — the `jira` row kind became `task`. A v1 cache full of `kind: "jira"` rows
+ * deserialised into a build that no longer has a branch for them, so every one
+ * fell through to the GitHub row and crashed on `healthDisplay[item.health]`.
+ * Not a degraded render: a full-screen React error on launch, cleared only by
+ * the refetch landing underneath it.
  */
-const CACHE_VERSION = 1
+const CACHE_VERSION = 2
 
 export type CachedCockpit = { sections: Section[]; login: string; at: number }
 
