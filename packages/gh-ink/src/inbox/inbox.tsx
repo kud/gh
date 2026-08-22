@@ -1,11 +1,12 @@
 import { $ } from "zx"
 import { spawn } from "child_process"
-import { existsSync, readdirSync, statSync } from "fs"
-import { join } from "path"
+import { existsSync, readdirSync, statSync, watch } from "fs"
+import { dirname, basename, join } from "path"
 import React, {
   useState,
   useEffect,
   useRef,
+  useMemo,
   createContext,
   useContext,
   type ReactNode,
@@ -13,6 +14,8 @@ import React, {
 import { Text as InkText, Box, useInput, useWindowSize } from "ink"
 import type { InboxExtension, ExtensionTarget } from "./extension.js"
 import { invalidateCache, isFresh, readCache, writeCache } from "./cache.js"
+import { diffSections, summariseDiff, transientOf } from "./diff.js"
+import type { Transient } from "./diff.js"
 import {
   FooterHints,
   LoadingScreen,
@@ -124,7 +127,12 @@ export type SubgroupHeader = {
 }
 
 export type AnyItem =
-  GHItem | JiraRow | RepoHeader | SubgroupHeader | ShowMore | ShowLess
+  | GHItem
+  | JiraRow
+  | RepoHeader
+  | SubgroupHeader
+  | ShowMore
+  | ShowLess
 
 // Standing status line for the "main pipeline we care about" — not a
 // browsable list item, just a glance shown above the tabs. Drilling in
@@ -206,15 +214,24 @@ const healthSentence = (item: GHItem): string => {
     case "draft":
       return `Still a draft (${glyph}), so no review is being asked for yet.`
     case "ci-fail":
-      return `CI is failing (${glyph}) — ${plural(d?.checksFail ?? 0, "check")} red.`
+      return `CI is failing (${glyph}) — ${plural(
+        d?.checksFail ?? 0,
+        "check",
+      )} red.`
     case "conflict":
       return `It conflicts with the base branch (${glyph}) and cannot merge until that is resolved.`
     case "changes-req":
       return `Changes were requested (${glyph}).`
     case "threads":
-      return `${plural(item.unresolved, "review thread")} still open (${glyph}).`
+      return `${plural(
+        item.unresolved,
+        "review thread",
+      )} still open (${glyph}).`
     case "pending":
-      return `${plural(d?.checksPending ?? 0, "check")} still running (${glyph}).`
+      return `${plural(
+        d?.checksPending ?? 0,
+        "check",
+      )} still running (${glyph}).`
     case "approved":
       return `Approved (${glyph}) and ready to merge.`
     case "waiting":
@@ -258,7 +275,9 @@ const turnSentences = (item: GHItem, login: string): string[] => {
   const lines = [`You spoke last (→), ${when}. The ball is with ${them}.`]
   if (d?.lastCommitAt && d.lastEventAt && d.lastCommitAt < d.lastEventAt)
     lines.push(
-      `Nothing has been pushed since ${relativeTime(d.lastCommitAt)} ago, so it is stalled on ${them}, not on you.`,
+      `Nothing has been pushed since ${relativeTime(
+        d.lastCommitAt,
+      )} ago, so it is stalled on ${them}, not on you.`,
     )
   return lines
 }
@@ -271,7 +290,9 @@ export const explainItem = (item: GHItem, login: string): ExplainSection[] => {
   if (checks) stands.push(checks)
   if (item.conversation > 0)
     stands.push(
-      `${item.conversation} comment${item.conversation === 1 ? "" : "s"} across the conversation and its threads.`,
+      `${item.conversation} comment${
+        item.conversation === 1 ? "" : "s"
+      } across the conversation and its threads.`,
     )
 
   return [
@@ -381,8 +402,8 @@ const searchText = (i: AnyItem): string =>
   i.kind === "pr" || i.kind === "issue"
     ? `${i.title} ${i.repo} #${i.number}`
     : i.kind === "jira"
-      ? `${i.summary} ${i.key}`
-      : ""
+    ? `${i.summary} ${i.key}`
+    : ""
 
 export const filterBySearch = (
   sections: Section[],
@@ -994,7 +1015,9 @@ export const buildActions = (
                   hint: "",
                   run: () => {
                     showFlash(`⋯ ${label} · ${resolution}…`)
-                    void quietly`jira issue move ${(item as JiraRow).key} ${state} --resolution ${resolution}`
+                    void quietly`jira issue move ${
+                      (item as JiraRow).key
+                    } ${state} --resolution ${resolution}`
                       .then(() => {
                         showFlash(`✓ ${label} · ${resolution}`)
                         ext?.onActed?.()
@@ -1008,7 +1031,9 @@ export const buildActions = (
                 hint: "",
                 run: () => {
                   showFlash(`⋯ Moving to ${label}…`)
-                  void quietly`jira issue move ${(item as JiraRow).key} ${state}`
+                  void quietly`jira issue move ${
+                    (item as JiraRow).key
+                  } ${state}`
                     .then(() => {
                       showFlash(`✓ Moved to ${label}`)
                       ext?.onActed?.()
@@ -1236,6 +1261,7 @@ const InboxHeader = ({
   quiet,
   refreshing,
   hasPending,
+  pendingSummary,
   fetchedAt,
 }: {
   sections: Section[]
@@ -1248,6 +1274,8 @@ const InboxHeader = ({
   quiet?: boolean
   refreshing?: boolean
   hasPending?: boolean
+  /** `2 new · 1 gone`, when a pending refresh is waiting. */
+  pendingSummary?: string
   fetchedAt?: number | null
 }) => {
   const total = sections.reduce((n, s) => n + topLevelCount(s), 0)
@@ -1261,19 +1289,21 @@ const InboxHeader = ({
   const countSeg = loading
     ? "      loading…  "
     : quiet
-      ? "  "
-      : `  ${String(total).padStart(3)} item${total !== 1 ? "s" : ""}  ·  `
+    ? "  "
+    : `  ${String(total).padStart(3)} item${total !== 1 ? "s" : ""}  ·  `
   const userSeg = loading || quiet ? "" : `@${login}  `
   const workLabel = work === undefined ? "" : " w work ●─○ home  "
 
   // Refresh status: pending (actionable) wins, then in-flight, then freshness.
+  // Naming the change is the whole argument for keeping the apply manual: the
+  // gate is only worth its keypress if it tells you what you would be applying.
   const [statusText, statusColor] = hasPending
-    ? ["● new · r apply", "#FF8700"]
+    ? [`● ${pendingSummary || "new"} · r apply`, "#FF8700"]
     : refreshing
-      ? ["↻ refreshing…", "cyan"]
-      : fetchedAt
-        ? [`updated ${agoText(fetchedAt)}`, undefined]
-        : ["", undefined]
+    ? ["↻ refreshing…", "cyan"]
+    : fetchedAt
+    ? [`updated ${agoText(fetchedAt)}`, undefined]
+    : ["", undefined]
   const statusSeg = statusText ? statusText + "  " : ""
 
   const fill = Math.max(
@@ -1318,7 +1348,9 @@ const InboxHeader = ({
 // A standing single-line row, always the same height (one line + marginBottom)
 // across loading/error/ready so the content below it never jumps.
 export type CiStatusState =
-  { kind: "loading" } | { kind: "error" } | { kind: "ready"; status: CiStatus }
+  | { kind: "loading" }
+  | { kind: "error" }
+  | { kind: "ready"; status: CiStatus }
 
 export const toCiStatusState = (status: CiStatus | null): CiStatusState =>
   status ? { kind: "ready", status } : { kind: "error" }
@@ -1428,12 +1460,40 @@ export const MERGED_FRAME_MS = 150
 const MERGED_FRAMES = ["✦", "✧", "✶", "✧"]
 const MERGED_COLOUR = "#A371F7"
 
+// How long a refreshed row stays flagged. Longer than the merge sparkle, which
+// celebrates something you did yourself a second ago and already knew about;
+// this is reporting work that happened in another window while you were reading
+// something else, so it has to survive being noticed rather than just seen.
+export const TRANSIT_HOLD_MS = 2500
+// One shared empty map, so clearing the marks compares equal to already-clear
+// and React skips the repaint instead of redrawing the list to change nothing.
+const NO_TRANSIENTS: Map<string, Transient> = new Map()
+// Dissolving and coalescing, so the direction of travel is in the SHAPE. Read
+// them as one animation played forwards and backwards: a row on its way out
+// thins to a dot, a row arriving fills in from one.
+const TRANSIT_OUT_FRAMES = ["◉", "◎", "○", "·"]
+const TRANSIT_IN_FRAMES = ["·", "○", "◎", "◉"]
+// Reinforcement only. NEW / GONE / UPDATED below are the actual signal, for the
+// same reason MERGED is a word: kud is colourblind, and a marker that lives only
+// in the hue is a marker he does not have.
+const TRANSIT_COLOUR: Record<Transient, string> = {
+  in: "#3FB950",
+  out: "#8B949E",
+  changed: "#FF8700",
+}
+const TRANSIT_LABEL: Record<Transient, string> = {
+  in: "NEW",
+  out: "GONE",
+  changed: "UPDATED",
+}
+
 const ItemRow = ({
   item,
   active,
   gap,
   login,
   merged,
+  transient,
   sparkFrame = 0,
 }: {
   item: AnyItem
@@ -1442,6 +1502,8 @@ const ItemRow = ({
   login?: string
   /** Just merged from this cockpit: sparkle in place, then the row is dropped. */
   merged?: boolean
+  /** What the refresh just did to this row, for the length of the hold. */
+  transient?: Transient
   sparkFrame?: number
 }) => {
   if (item.kind === "repo-header")
@@ -1495,10 +1557,24 @@ const ItemRow = ({
   // health column is one cell wide and every row's title is aligned off it, so
   // an extra glyph here would shift the title of exactly the row you are
   // watching. Health is also no longer the story — the PR is merged.
+  // A leaving row dissolves and an arriving one coalesces, in the health cell,
+  // for the same reason the merge sparkle does: that cell is one wide and every
+  // title on screen is aligned off it, so a marker anywhere else would shift the
+  // title of exactly the row being watched. `changed` deliberately KEEPS its
+  // health glyph - the health is usually the thing that changed, and hiding it
+  // to announce that it changed is the one substitution that costs information.
   const icon = merged
     ? (MERGED_FRAMES[sparkFrame % MERGED_FRAMES.length] as string)
+    : transient === "out"
+    ? (TRANSIT_OUT_FRAMES[sparkFrame % TRANSIT_OUT_FRAMES.length] as string)
+    : transient === "in"
+    ? (TRANSIT_IN_FRAMES[sparkFrame % TRANSIT_IN_FRAMES.length] as string)
     : healthIcon
-  const color = merged ? MERGED_COLOUR : healthColor
+  const color = merged
+    ? MERGED_COLOUR
+    : transient
+    ? TRANSIT_COLOUR[transient]
+    : healthColor
   // Whose turn it is, in its own fixed cell. Arrows rather than the nerd-font
   // comment glyph because this column sits in the aligned zone left of the
   // title: a PUA codepoint that renders double-width in some fonts would shift
@@ -1508,8 +1584,8 @@ const ItemRow = ({
     !login || !item.lastActor
       ? [" ", "white"]
       : item.lastActor === login
-        ? ["→", "#888888"]
-        : ["←", "#FF8700"]
+      ? ["→", "#888888"]
+      : ["←", "#FF8700"]
   const numStr = `#${item.number}`.padEnd(7)
   // Hide "by me" — the author suffix is only signal when it's someone else.
   const showAuthor = !!item.author && item.author !== login
@@ -1527,11 +1603,15 @@ const ItemRow = ({
       ? `${item.activityAge} · ${item.age}`
       : item.age
   const mergedLabel = merged ? "MERGED" : ""
+  // Never both: a row merged from here is already being announced, and stacking
+  // GONE onto MERGED would report one departure twice.
+  const transitLabel = merged || !transient ? "" : TRANSIT_LABEL[transient]
   const suffix = [
     ageLabel || "",
     unresolvedLabel,
     showAuthor ? `by ${item.author}` : "",
     mergedLabel,
+    transitLabel,
   ]
     .filter(Boolean)
     .join("  ")
@@ -1558,7 +1638,13 @@ const ItemRow = ({
         {turnIcon + " "}
       </Text>
       <Text color="#FF8700">{numStr}</Text>
-      <Text bold={active}>{truncate(item.title, titleMax) + "  "}</Text>
+      <Text
+        bold={active || transient === "in"}
+        dimColor={transient === "out"}
+        strikethrough={transient === "out"}
+      >
+        {truncate(item.title, titleMax) + "  "}
+      </Text>
       {repoLabel ? <Text dimColor>{repoLabel}</Text> : null}
       {unresolvedLabel ? (
         <Text bold color="#FF8700">
@@ -1576,6 +1662,11 @@ const ItemRow = ({
       {mergedLabel ? (
         <Text bold color={MERGED_COLOUR}>
           {"  " + mergedLabel}
+        </Text>
+      ) : null}
+      {transitLabel ? (
+        <Text bold color={TRANSIT_COLOUR[transient!]}>
+          {"  " + transitLabel}
         </Text>
       ) : null}
     </Box>
@@ -1636,8 +1727,8 @@ export const ActionMenu = ({
     item.kind === "jira"
       ? item.key
       : item.kind === "pr" || item.kind === "issue"
-        ? `#${item.number}`
-        : ""
+      ? `#${item.number}`
+      : ""
   return (
     <Box
       flexDirection="column"
@@ -2009,6 +2100,7 @@ const BrowseScreen = ({
   onActed,
   refreshing,
   hasPending,
+  pendingSummary,
   fetchedAt,
   refreshError,
   workToggle,
@@ -2024,12 +2116,15 @@ const BrowseScreen = ({
   initialIncludeWork,
   brand,
   mergedUrls,
+  transients,
 }: {
   brand: string
   sections: Section[]
   login: string
   /** URLs of rows merged from this cockpit, still inside their hold. */
   mergedUrls?: string[]
+  /** What the refresh just did to each row, for the length of the hold. */
+  transients?: Map<string, Transient>
   isWorkRepo?: (repo: string) => boolean
   initialIncludeWork?: boolean
   tabHelp?: [string, string][]
@@ -2041,6 +2136,7 @@ const BrowseScreen = ({
   onActed?: () => void
   refreshing?: boolean
   hasPending?: boolean
+  pendingSummary?: string
   fetchedAt?: number | null
   // A background revalidate that failed. Carries `at` so two identical failures
   // in a row are still two distinct values — a bare string would compare equal
@@ -2063,7 +2159,7 @@ const BrowseScreen = ({
 }) => {
   const { rows } = useWindowSize()
   const [includeWork, setIncludeWork] = useState(() =>
-    workToggle ? (initialIncludeWork ?? true) : true,
+    workToggle ? initialIncludeWork ?? true : true,
   )
   // Symmetric work ⇄ home switch: ☑ = work only, ☐ = home only. Only active
   // when workToggle is set (the work-profile cockpit); off elsewhere.
@@ -2192,7 +2288,7 @@ const BrowseScreen = ({
   // while something is merging and is cleared the moment the last row goes, so a
   // cockpit sitting idle redraws exactly as often as it did before.
   const [sparkFrame, setSparkFrame] = useState(0)
-  const sparkling = (mergedUrls?.length ?? 0) > 0
+  const sparkling = (mergedUrls?.length ?? 0) > 0 || (transients?.size ?? 0) > 0
   useEffect(() => {
     if (!sparkling) return
     const id = setInterval(() => setSparkFrame((f) => f + 1), MERGED_FRAME_MS)
@@ -2522,7 +2618,7 @@ const BrowseScreen = ({
         (activeItem.kind === "pr" || activeItem.kind === "issue")
       ) {
         const { repo } = activeItem
-        const branch = activeItem.kind === "pr" ? (activeItem.branch ?? "") : ""
+        const branch = activeItem.kind === "pr" ? activeItem.branch ?? "" : ""
         showFlash(`⋯ Opening ${repo}…`)
         void jumpToRepo(repo, branch, login)
           .then(() => showFlash(`↗ Opened ${repo} in new tab`))
@@ -2633,6 +2729,7 @@ const BrowseScreen = ({
         work={workToggle ? includeWork : undefined}
         refreshing={refreshing}
         hasPending={hasPending}
+        pendingSummary={pendingSummary}
         fetchedAt={fetchedAt}
       />
 
@@ -2656,14 +2753,16 @@ const BrowseScreen = ({
           <Text color="cyan">{"  / "}</Text>
           <Text>{search}</Text>
           {searchInput ? <Text color="cyan">▏</Text> : null}
-          <Text
-            dimColor
-          >{`   ${matchCount} match${matchCount !== 1 ? "es" : ""}${searchInput ? "  ↵ accept · esc clear" : "  esc clear"}`}</Text>
+          <Text dimColor>{`   ${matchCount} match${
+            matchCount !== 1 ? "es" : ""
+          }${searchInput ? "  ↵ accept · esc clear" : "  esc clear"}`}</Text>
         </Box>
       ) : repoFilter.size > 0 ? (
         <Box marginBottom={1}>
           <Text color="#FF8700">{"  ◉ "}</Text>
-          <Text>{`${repoFilter.size} repo${repoFilter.size !== 1 ? "s" : ""}`}</Text>
+          <Text>{`${repoFilter.size} repo${
+            repoFilter.size !== 1 ? "s" : ""
+          }`}</Text>
           <Text dimColor>{"   f edit · esc clear"}</Text>
         </Box>
       ) : null}
@@ -2678,16 +2777,16 @@ const BrowseScreen = ({
                 // sum viewStart + i is stable per underlying item across scroll.
                 key={`${viewStart + i}:${
                   item.kind === "jira"
-                    ? (item.instanceKey ?? item.key)
+                    ? item.instanceKey ?? item.key
                     : item.kind === "repo-header"
-                      ? `header:${item.repo}`
-                      : item.kind === "subgroup-header"
-                        ? `subgroup:${item.label}`
-                        : item.kind === "show-more"
-                          ? `show-more:${item.hidden[0]?.repo ?? i}`
-                          : item.kind === "show-less"
-                            ? `show-less:${item.toHide[0]?.repo ?? i}`
-                            : `${item.repo}/${item.number}`
+                    ? `header:${item.repo}`
+                    : item.kind === "subgroup-header"
+                    ? `subgroup:${item.label}`
+                    : item.kind === "show-more"
+                    ? `show-more:${item.hidden[0]?.repo ?? i}`
+                    : item.kind === "show-less"
+                    ? `show-less:${item.toHide[0]?.repo ?? i}`
+                    : `${item.repo}/${item.number}`
                 }`}
                 item={item}
                 active={viewStart + i === cursor}
@@ -2696,6 +2795,7 @@ const BrowseScreen = ({
                   (item.kind === "pr" || item.kind === "issue") &&
                   !!mergedUrls?.includes(item.url)
                 }
+                transient={transientOf(transients, item)}
                 sparkFrame={sparkFrame}
                 gap={
                   // Window-relative, never `viewStart + i`. fitCount prices the
@@ -2841,6 +2941,8 @@ export const App = ({
   ciJob,
   ciFetcher,
   ciPollMs = 60_000,
+  watchPath,
+  watchDebounceMs = 400,
   extensions,
   tabHelp,
   emptyHint,
@@ -2886,6 +2988,14 @@ export const App = ({
   // it refreshes on its own timer rather than waiting for a full inbox refresh.
   ciFetcher?: () => Promise<CiStatus | null>
   ciPollMs?: number
+  /**
+   * A file something else touches when it has changed GitHub on your behalf —
+   * a Claude session closing an issue, a script merging a PR. Touching it makes
+   * the inbox refetch; it never repaints on its own.
+   */
+  watchPath?: string
+  /** Bursts of writes to collapse into one refetch. */
+  watchDebounceMs?: number
   // Domain extensions the host can mount as full-screen overlays (their -ink
   // assembled bodies). Proven with Jenkins; the browse glances follow.
   extensions?: InboxExtension[]
@@ -2920,13 +3030,72 @@ export const App = ({
   // Serialised sections currently on screen — so "is fresh different?" compares
   // against what the user is looking at, not against the (already-stale) cache.
   const displayedKey = useRef<string>("")
+  // The sections themselves, for the same reason one level finer: the key says
+  // THAT the list moved, these say which rows did. A ref rather than reading
+  // `state`, because showData is called from callbacks that closed over an
+  // older render and would diff against a list nobody is looking at.
+  const displayedSections = useRef<Section[]>([])
+  const [transients, setTransients] =
+    useState<Map<string, Transient>>(NO_TRANSIENTS)
+  const transitTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(
+    () => () => {
+      if (transitTimer.current) clearTimeout(transitTimer.current)
+    },
+    [],
+  )
 
+  /* The one funnel where the displayed list changes, which makes it the one
+     place that can say what changed. Applying used to swap one list for another
+     and leave you to spot the difference against a frame the terminal had
+     already scrolled away — the reason the manual gate felt like a cost rather
+     than a control. */
   const showData = (sections: Section[], login: string) => {
+    const before = displayedSections.current
+    displayedSections.current = sections
     displayedKey.current = signatureOf(sections)
     setPending(null)
     setFetchedAt(Date.now())
-    setState({ phase: "browse", sections, login })
+
+    // First paint has nothing to have changed FROM. Every row is technically
+    // new and flagging them all says nothing, so it opens quiet.
+    if (before.length === 0) {
+      setTransients(NO_TRANSIENTS)
+      setState({ phase: "browse", sections, login })
+      return
+    }
+
+    const { transients: marks, union } = diffSections(before, sections)
+    if (marks.size === 0) {
+      setState({ phase: "browse", sections, login })
+      return
+    }
+
+    // Render the union — departing rows still standing where they were — then
+    // settle onto the real list once the hold is up.
+    setTransients(marks)
+    setState({ phase: "browse", sections: union, login })
+    if (transitTimer.current) clearTimeout(transitTimer.current)
+    transitTimer.current = setTimeout(() => {
+      setTransients(NO_TRANSIENTS)
+      setState((prev) =>
+        prev.phase === "browse" && prev.sections === union
+          ? { ...prev, sections }
+          : prev,
+      )
+    }, TRANSIT_HOLD_MS)
   }
+
+  // What is waiting behind `r`, in words, so the indicator is worth its keypress.
+  const pendingSummary = useMemo(
+    () =>
+      pending
+        ? summariseDiff(
+            diffSections(displayedSections.current, pending.sections).counts,
+          )
+        : "",
+    [pending],
+  )
 
   const revalidate = (manual = false) => {
     if (manual) setRefreshing(true)
@@ -2984,6 +3153,7 @@ export const App = ({
     const painted = !!cached && cached.sections.length > 0
     if (painted && cached) {
       displayedKey.current = signatureOf(cached.sections)
+      displayedSections.current = cached.sections
       setFetchedAt(cached.at)
       setState({
         phase: "browse",
@@ -3023,6 +3193,52 @@ export const App = ({
     }
   }, [hasCiStatus, ciFetcher, ciPollMs])
 
+  /* The signal path, and where it deliberately stops.
+   *
+   * A poller asks "has anything changed?" on a fixed beat and is wrong twice:
+   * it burns quota on the long stretches where nothing has, and it is still up
+   * to a full interval late when something does. A stamp file inverts it — the
+   * thing that made the change says so, and this fires only then.
+   *
+   * It ends at `revalidate()`, NOT `onActed()`. The fetch is free to happen in
+   * the background; the REPAINT is not, and stays behind `r`. A list that
+   * reshuffles itself while you are reading it is the thing the manual gate
+   * exists to prevent, and a signal that bypassed the gate would reintroduce
+   * exactly that, just with better timing.
+   *
+   * Watch the DIRECTORY, not the file. A file that does not exist yet cannot be
+   * watched at all, and an atomic write (write-temp-then-rename, which is what
+   * anything careful does) replaces the inode — so a file watch goes deaf after
+   * the first signal it receives, which is the worst available failure: it works
+   * once, in testing, and never again.
+   */
+  useEffect(() => {
+    if (!watchPath) return
+    const dir = dirname(watchPath)
+    const name = basename(watchPath)
+    if (!existsSync(dir)) return
+    let timer: ReturnType<typeof setTimeout> | null = null
+    let live = true
+    let watcher: ReturnType<typeof watch>
+    try {
+      watcher = watch(dir, (_event, changed) => {
+        if (!live || (changed && changed !== name)) return
+        // Coalesce: one `touch` raises several events, and a burst of closed
+        // issues should cost one fetch, not one each.
+        if (timer) clearTimeout(timer)
+        timer = setTimeout(() => live && revalidate(), watchDebounceMs)
+      })
+    } catch {
+      // An unwatchable directory costs the signal, never the inbox.
+      return
+    }
+    return () => {
+      live = false
+      if (timer) clearTimeout(timer)
+      watcher.close()
+    }
+  }, [watchPath, watchDebounceMs])
+
   // Merged rows live here rather than in BrowseScreen because the row has to
   // survive the trip back from the drill view, and BrowseScreen is remounted by
   // that navigation — state parked there would be gone before the first frame.
@@ -3055,7 +3271,7 @@ export const App = ({
           login=""
           work={
             workToggle && state.phase === "loading"
-              ? (initialIncludeWork ?? true)
+              ? initialIncludeWork ?? true
               : undefined
           }
           loading={state.phase === "loading"}
@@ -3080,14 +3296,14 @@ export const App = ({
     state.phase === "pr"
       ? { kind: "pr" as const, item: state.item }
       : state.phase === "issue"
-        ? { kind: "issue" as const, item: state.item }
-        : state.phase === "ext"
-          ? {
-              kind: "ext" as const,
-              extId: state.extId,
-              target: state.target,
-            }
-          : null
+      ? { kind: "issue" as const, item: state.item }
+      : state.phase === "ext"
+      ? {
+          kind: "ext" as const,
+          extId: state.extId,
+          target: state.target,
+        }
+      : null
   const toBrowse = () =>
     setState({ phase: "browse", sections: state.sections, login: state.login })
 
@@ -3100,7 +3316,6 @@ export const App = ({
       sections: withoutItem(state.sections, target),
       login: state.login,
     })
-
 
   // Back to the list first, so the sparkle happens where you can see it — the
   // drill view is still up at the moment the merge resolves, and a celebration
@@ -3134,6 +3349,7 @@ export const App = ({
         onActed={onActed}
         refreshing={refreshing}
         hasPending={pending !== null}
+        pendingSummary={pendingSummary}
         fetchedAt={fetchedAt}
         refreshError={refreshError ?? undefined}
         workToggle={workToggle}
@@ -3141,6 +3357,7 @@ export const App = ({
         initialIncludeWork={initialIncludeWork}
         hidden={overlay !== null}
         mergedUrls={mergedUrls}
+        transients={transients}
         ciStatusState={hasCiStatus ? ciStatusState : undefined}
         ciJob={ciJob}
         tabHelp={tabHelp}
