@@ -5,7 +5,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import React from "react"
 import { render } from "ink"
-import { App, TRANSIT_HOLD_MS } from "./inbox.js"
+import { App, TAB_MARK, tabLabel, TRANSIT_HOLD_MS } from "./inbox.js"
 import type { GHItem, Section } from "./inbox.js"
 
 /*
@@ -369,5 +369,49 @@ describe("a change in a tab you are not on", () => {
     expect(frame).toContain(OTHER_MOVES)
     expect(frame).toContain(OTHER_STAYS)
     stop()
+  })
+})
+
+describe("the tab marker", () => {
+  // The row markers are the signal; this is the pointer to them. A tab you are
+  // not on draws none of its rows, so without a marker on the tab itself the
+  // hold keeps its promise to a screen nobody is looking at.
+  const tabBar = (frame: string): string =>
+    frame
+      .split("\n")
+      .find((line) => line.includes("Open") && line.includes("Review")) ?? ""
+
+  it("sits on the tab holding news, and nowhere else", async () => {
+    const { stdout, stop } = await mountTwoTabs()
+    await after(TRANSIT_HOLD_MS + 500)
+
+    const bar = tabBar(stdout.lastFrame())
+    expect(bar).toBeTruthy()
+    expect(bar).toContain(`${TAB_MARK} Review`)
+    // Not on the tab you are already reading, which has nothing to report.
+    expect(bar).not.toContain(`${TAB_MARK} Open`)
+    stop()
+  })
+
+  it("goes once that tab has been read", async () => {
+    const { stdout, stdin, stop } = await mountTwoTabs()
+    stdin.press(RIGHT_ARROW)
+    await settle()
+    await after(TRANSIT_HOLD_MS + 500)
+
+    const bar = tabBar(stdout.lastFrame())
+    expect(bar).toBeTruthy()
+    expect(bar).not.toContain(TAB_MARK)
+    stop()
+  })
+
+  it("reserves its cell on every tab while any tab wears one", () => {
+    const marked = new Set(["review"])
+    expect(tabLabel("Review", marked, "review")).toBe(`${TAB_MARK} Review`)
+    // Same indent on the unmarked tab, so the bar does not shift sideways
+    // every time one of them settles.
+    expect(tabLabel("Open", marked, "open")).toBe("  Open")
+    // And no dead indent at all on a bar with nothing to report.
+    expect(tabLabel("Open", new Set(), "open")).toBe("Open")
   })
 })

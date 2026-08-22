@@ -1507,6 +1507,20 @@ const TRANSIT_LABEL: Record<Transient, string> = {
   out: "GONE",
   changed: "UPDATED",
 }
+// A tab still holding marks wears a dot. Presence, not hue — Tabs dims every
+// inactive label to the same grey, so a coloured marker would be no marker at
+// all on exactly the tabs this exists to point at.
+export const TAB_MARK = "●"
+
+// The dot's cell is reserved on EVERY tab for as long as any tab wears one, so
+// the bar moves twice per refresh — once when the news lands, once when the
+// last tab settles — instead of twitching sideways each time a tab is read.
+export const tabLabel = (
+  label: string,
+  marked: Set<string>,
+  id: string,
+): string =>
+  marked.size === 0 ? label : `${marked.has(id) ? TAB_MARK : " "} ${label}`
 
 const ItemRow = ({
   item,
@@ -2316,6 +2330,17 @@ const BrowseScreen = ({
     setTimeout(() => setFlash(null), 2000)
   }
 
+  // Which tabs are still holding news nobody has read. The marker itself lives
+  // on the row, in a tab that may not be open — so without this the hold keeps
+  // its promise perfectly and nothing ever tells you to go and collect on it.
+  const markedTabs = useMemo(() => {
+    const out = new Set<string>()
+    if (!transients?.size) return out
+    for (const s of localSections)
+      if (s.items.some((item) => transientOf(transients, item))) out.add(s.id)
+    return out
+  }, [localSections, transients])
+
   // ONE interval for every sparkling row, not one per row: the frame is shared,
   // so N timers would only produce N chances to fall out of step. It runs solely
   // while something is merging and is cleared the moment the last row goes, so a
@@ -2791,7 +2816,7 @@ const BrowseScreen = ({
           active={section.id}
           items={localSections.map((s) => ({
             value: s.id,
-            label: s.label,
+            label: tabLabel(s.label, markedTabs, s.id),
             count: topLevelCount(s),
           }))}
         />
