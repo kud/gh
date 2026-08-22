@@ -1576,15 +1576,50 @@ const ItemRow = ({
 
   if (item.kind === "task") {
     const note = item.note ?? ""
-    const titleMax = Math.max(20, COLS - item.key.length - note.length - 10)
+    // Same refresh vocabulary the GitHub row has always had, which this branch
+    // returned before ever reaching: a row arriving coalesces, a row leaving
+    // dissolves, and either way it says which in words. Without it a refresh on
+    // a task-only surface (`life`) repainted silently — the list changed and
+    // nothing on screen admitted it.
+    //
+    // The glyph gets a fixed cell of its own, present even when empty, for the
+    // reason the GitHub row puts it in the health cell: every key and title on
+    // screen is aligned off this column, so a marker that appears and vanishes
+    // would shift the very row being watched.
+    const transitIcon = !transient
+      ? " "
+      : transient === "out"
+        ? (TRANSIT_OUT_FRAMES[sparkFrame % TRANSIT_OUT_FRAMES.length] as string)
+        : transient === "in"
+          ? (TRANSIT_IN_FRAMES[sparkFrame % TRANSIT_IN_FRAMES.length] as string)
+          : "\u25C9"
+    const transitLabel = transient ? TRANSIT_LABEL[transient] : ""
+    const titleMax = Math.max(
+      20,
+      COLS - item.key.length - note.length - transitLabel.length - 12,
+    )
     return (
       <Box marginTop={gap ? 1 : 0}>
         <Text color="cyan">{active ? "❯ " : "  "}</Text>
+        <Text bold color={transient ? TRANSIT_COLOUR[transient] : undefined}>
+          {transitIcon + " "}
+        </Text>
         <Text color="#FF8700" bold={active}>
           {item.key + "  "}
         </Text>
-        <Text bold={active}>{truncate(item.summary, titleMax)}</Text>
+        <Text
+          bold={active || transient === "in"}
+          dimColor={transient === "out"}
+          strikethrough={transient === "out"}
+        >
+          {truncate(item.summary, titleMax)}
+        </Text>
         {note ? <Text dimColor>{` ${note}`}</Text> : null}
+        {transitLabel ? (
+          <Text bold color={TRANSIT_COLOUR[transient!]}>
+            {"  " + transitLabel}
+          </Text>
+        ) : null}
       </Box>
     )
   }
