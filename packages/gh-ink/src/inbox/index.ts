@@ -48,7 +48,7 @@ export {
   type SubgroupHeader,
   type ShowMore,
   type ShowLess,
-  type JiraRow,
+  type TaskRow,
   type JiraTransition,
   type CiStatus,
   type CiStatusState,
