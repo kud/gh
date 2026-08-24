@@ -73,3 +73,47 @@ describe("sortItems", () => {
     expect(headers).toHaveLength(2)
   })
 })
+
+/*
+ * The 2026-08-24 case: a draft PR on theorchard/abacus-monorepo with kud
+ * requested as a reviewer led the Review tab, six days old, above a genuine
+ * open PR that had been waiting a fortnight. A draft is not asking, so it
+ * sinks — but stays visible, because a draft you were asked to look at early
+ * is exactly the one you must not lose.
+ */
+describe("draft ordering", () => {
+  it("sinks a draft below open rows of the same repo, however fresh", () => {
+    const draft = item({
+      repo: "theorchard/abacus-monorepo",
+      number: 10,
+      ts: 9_000,
+      health: "draft",
+    })
+    const open = item({
+      repo: "theorchard/abacus-monorepo",
+      number: 4,
+      ts: 2_000,
+    })
+
+    expect(sortItems([draft, open]).map((i) => i.number)).toEqual([4, 10])
+  })
+
+  it("keeps recency between two drafts", () => {
+    const older = item({ repo: "kud/ambre", number: 1, ts: 1, health: "draft" })
+    const newer = item({ repo: "kud/ambre", number: 2, ts: 9, health: "draft" })
+
+    expect(sortItems([older, newer]).map((i) => i.number)).toEqual([2, 1])
+  })
+
+  it("never lets a draft cross a repo boundary", () => {
+    // Sinking is a WITHIN-repo key. If it outranked the repo keys a draft would
+    // fall out of its own group and orphan a header.
+    const draft = item({ repo: "kud/ambre", number: 1, ts: 1, health: "draft" })
+    const open = item({ repo: "kud/shui", number: 2, ts: 9 })
+
+    expect(sortItems([draft, open]).map((i) => i.repo)).toEqual([
+      "kud/ambre",
+      "kud/shui",
+    ])
+  })
+})

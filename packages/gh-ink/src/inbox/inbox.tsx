@@ -342,8 +342,17 @@ export const repoPriority = (repo: string): number => {
 // Repo grouping is the OUTER key and is deliberately unchanged — priority tier,
 // then repo name — because insertRepoHeaders below depends on same-repo items
 // staying adjacent, and a strict recency sort scatters a repo down the list.
-// Recency breaks the tie WITHIN a repo, which is the one place it can reorder
-// rows without costing the grouping.
+// Within a repo, two keys break the tie: draft-ness, then recency — the one
+// place either can reorder rows without costing the grouping.
+//
+// Draft sinks because a draft is not asking. Every tab but `draft` itself is a
+// RELATIONSHIP ("they requested you", "it's on your repo"), and a draft row
+// answers the only question those tabs pose with "not yet" — including the case
+// that reads worst, a PR that had you requested and was then converted BACK to
+// draft. Recency alone floated exactly that row to the top of the list, since a
+// fresh draft outranks an open PR someone has genuinely been waiting on for a
+// fortnight. Sunk, not filtered: a draft you were deliberately asked to look at
+// early must still be visible, and it keeps its `~` glyph either way.
 //
 // Sorting on `ts` and not on `age`: `age` is a rendered string ("23h", "2d") and
 // sorts lexicographically, which puts "2d" before "23h".
@@ -352,7 +361,9 @@ export const sortItems = (items: GHItem[]): GHItem[] =>
     const pd = repoPriority(a.repo) - repoPriority(b.repo)
     if (pd !== 0) return pd
     const rd = a.repo.localeCompare(b.repo)
-    return rd !== 0 ? rd : b.ts - a.ts
+    if (rd !== 0) return rd
+    const dd = Number(a.health === "draft") - Number(b.health === "draft")
+    return dd !== 0 ? dd : b.ts - a.ts
   })
 
 // Flat, newest-first ordering. Repos are *not* clustered — an item's repo
