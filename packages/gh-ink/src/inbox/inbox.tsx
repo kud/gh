@@ -1887,46 +1887,91 @@ const legendLayout = (
   return [cols]
 }
 
+// A group is flattened to its printed lines before anything renders it, because
+// the modal has to be able to show a WINDOW of itself: a terminal short enough
+// clips the panel from the top (Ink overflows upward inside the frame), which
+// eats the "Legend" heading and the first rows without leaving any sign it did.
+// Slicing a line list is the only way to scroll a layout whose columns each
+// carry their own headings — margins cannot be sliced, so the blank line
+// between stacked columns becomes a line of its own here.
+type LegendLine =
+  | { kind: "gap" }
+  | { kind: "title"; text: string }
+  | { kind: "row"; row: LegendRow; cellWidth: number }
+
+const groupLines = (group: LegendColumn[]): LegendLine[] =>
+  group.flatMap((col, index) => {
+    const cellWidth = cellWidthOf(col)
+    const head: LegendLine[] = index === 0 ? [] : [{ kind: "gap" }]
+    return [
+      ...head,
+      { kind: "title", text: col.title } as LegendLine,
+      ...col.rows.map((row): LegendLine => ({ kind: "row", row, cellWidth })),
+    ]
+  })
+
+// Which column heading the window has scrolled PAST, so it can be reprinted
+// above the slice. Without it a scrolled legend is a wall of glyphs and letters
+// with nothing left saying which column is which — shorter, and no easier to
+// read, which was the whole complaint.
+const scrolledPastTitle = (lines: LegendLine[], offset: number) => {
+  let seen: string | null = null
+  for (let i = 0; i <= offset && i < lines.length; i++) {
+    const line = lines[i]!
+    if (line.kind === "title") seen = i === offset ? null : line.text
+  }
+  return seen
+}
+
 const LegendGroup = ({
-  group,
+  lines,
+  pinned,
   width,
   marginRight,
 }: {
-  group: LegendColumn[]
+  lines: LegendLine[]
+  // null still renders a blank row: every group has to reserve the same height
+  // or the columns beside it slide out of step with each other.
+  pinned?: string | null
   width: number
   marginRight: number
 }) => (
   <Box flexDirection="column" width={width} marginRight={marginRight}>
-    {group.map((col, index) => {
-      const cellWidth = cellWidthOf(col)
-      return (
-        <Box
-          key={col.title}
-          flexDirection="column"
-          marginTop={index === 0 ? 0 : 1}
-        >
-          <Text bold dimColor>
-            {col.title}
+    {pinned !== undefined ? (
+      <Text bold dimColor>
+        {pinned ?? " "}
+      </Text>
+    ) : null}
+    {lines.map((line, index) =>
+      line.kind === "gap" ? (
+        <Text key={index}> </Text>
+      ) : line.kind === "title" ? (
+        <Text key={index} bold dimColor>
+          {line.text}
+        </Text>
+      ) : (
+        <Box key={index}>
+          <Text color={line.row.color as any} bold={line.row.bold}>
+            {line.row.cell.padEnd(line.cellWidth)}
           </Text>
-          {col.rows.map((row) => (
-            <Box key={col.title + row.cell + row.label}>
-              <Text color={row.color as any} bold={row.bold}>
-                {row.cell.padEnd(cellWidth)}
-              </Text>
-              <Text wrap="truncate-end">{row.label}</Text>
-            </Box>
-          ))}
+          <Text wrap="truncate-end">{line.row.label}</Text>
         </Box>
-      )
-    })}
+      ),
+    )}
   </Box>
 )
+
+const LEGEND_FOOTNOTE =
+  "Each item lands in the FIRST tab that claims it, so counts are residuals rather than totals."
 
 export const HelpModal = ({
   workToggle,
   extensions,
   hasJira,
   tabHelp,
+  maxRows,
+  scroll = 0,
+  onScrollRange,
 }: {
   workToggle?: boolean
   // The extensions themselves, not a `hasCi` boolean. A flag could only ever say
@@ -1934,11 +1979,17 @@ export const HelpModal = ({
   extensions?: InboxExtension[]
   hasJira?: boolean
   tabHelp?: [string, string][]
+  // Rows the panel may occupy — the caller's list budget, not the terminal's
+  // height, since the modal sits inside the frame with the header and tabs above
+  // it. Absent (a standalone mount) it takes the terminal.
+  maxRows?: number
+  scroll?: number
+  onScrollRange?: (maxScroll: number, bodyRows: number) => void
 }) => {
   // Read live rather than through the module-level COLS, which is sampled once at
   // import and so cannot answer after a resize — the one thing this modal has to
   // get right.
-  const { columns } = useWindowSize()
+  const { columns, rows } = useWindowSize()
   const available = Math.max(
     20,
     columns - FRAME_CHROME_COLS - MODAL_CHROME_COLS,
@@ -2018,6 +2069,55 @@ export const HelpModal = ({
   const widths = groups.map((g) => Math.min(groupWidth(g), available))
   const contentWidth = Math.min(available, layoutWidth(groups))
 
+  // The width ladder cannot help here: every rung is exactly as tall as its
+  // tallest column, and the narrow rungs are the TALLER ones. So once the height
+  // runs out there is nothing left to lay out differently — the panel shows a
+  // window of itself and says so, rather than being silently topped.
+  const lines = groups.map(groupLines)
+  const totalRows = Math.max(0, ...lines.map((l) => l.length))
+  const footnoteRows = tabHelp
+    ? Math.ceil(LEGEND_FOOTNOTE.length / Math.max(1, contentWidth))
+    : 0
+  const chromeRows =
+    2 /* border */ + 1 /* Legend */ + 1 /* blank */ + 1 /* esc */
+  // Measured twice, because the panel spends its rows differently once it turns
+  // out to be scrolling — and whether it is scrolling depends on how it spent
+  // them. Roomy, it keeps the footnote; cramped, that gloss on the tab counts
+  // gives up its two or three rows to the reprinted column heading, which is
+  // load-bearing where the footnote is not.
+  const fitWithin = (extra: number) => {
+    const body = Math.max(3, (maxRows ?? rows) - chromeRows - extra)
+    return { body, max: Math.max(0, totalRows - body) }
+  }
+  const loose = fitWithin(footnoteRows)
+  const { body: bodyRows, max: maxScroll } =
+    loose.max > 0 ? fitWithin(1) : loose
+  const offset = Math.min(scroll, maxScroll)
+  const scrollable = maxScroll > 0
+  // When every group's window opens ON its own heading — the top of the legend,
+  // and only there — the reprinted row IS that heading, so the slice starts past
+  // it. Anywhere else the groups disagree about what sits at `offset`, and
+  // skipping a line in one but not its neighbour slides the columns out of step.
+  const headAligned =
+    scrollable && lines.every((l) => l[offset]?.kind === "title")
+  const pinnedOf = (l: LegendLine[]) => {
+    const at = l[offset]
+    return headAligned && at?.kind === "title"
+      ? at.text
+      : scrolledPastTitle(l, offset)
+  }
+  const bodyStart = offset + (headAligned ? 1 : 0)
+  const shown = Math.min(totalRows - offset, bodyRows + (headAligned ? 1 : 0))
+
+  // The window's bounds are reported UP rather than the keys being handled here,
+  // the way RepoPicker's cursor already works: the inbox owns the one useInput
+  // in this tree, and a second one inside a modal would need raw mode the moment
+  // it mounted — which a test harness renders without, taking the whole panel
+  // down to a blank line rather than failing where the mistake is.
+  useEffect(() => {
+    onScrollRange?.(maxScroll, bodyRows)
+  }, [maxScroll, bodyRows])
+
   return (
     <Box
       flexDirection="column"
@@ -2027,26 +2127,33 @@ export const HelpModal = ({
       paddingX={1}
       width={contentWidth + MODAL_CHROME_COLS}
     >
-      <Text color="cyan" bold>
-        Legend
-      </Text>
+      <Box>
+        <Text color="cyan" bold>
+          Legend
+        </Text>
+        {scrollable ? (
+          <Text dimColor>
+            {`   ${offset + 1}–${offset + shown} of ${totalRows}`}
+          </Text>
+        ) : null}
+      </Box>
       <Box marginTop={1} width={contentWidth}>
         {groups.map((group, index) => (
           <LegendGroup
             key={group[0]?.title ?? index}
-            group={group}
+            lines={lines[index]!.slice(bodyStart, bodyStart + bodyRows)}
+            pinned={scrollable ? pinnedOf(lines[index]!) : undefined}
             width={widths[index]!}
             marginRight={index === groups.length - 1 ? 0 : COL_GAP}
           />
         ))}
       </Box>
-      {tabHelp ? (
-        <Text dimColor>
-          Each item lands in the FIRST tab that claims it, so counts are
-          residuals rather than totals.
-        </Text>
+      {tabHelp && !scrollable ? (
+        <Text dimColor>{LEGEND_FOOTNOTE}</Text>
       ) : null}
-      <Text dimColor>esc · ? close</Text>
+      <Text dimColor>
+        {scrollable ? "↑↓ scroll · esc · ? close" : "esc · ? close"}
+      </Text>
     </Box>
   )
 }
@@ -2274,6 +2381,10 @@ const BrowseScreen = ({
   const [repoFilter, setRepoFilter] = useState<Set<string>>(new Set())
   const [repoPicker, setRepoPicker] = useState(false)
   const [help, setHelp] = useState(false)
+  // Only ever non-zero on a terminal too short for the whole legend; the modal
+  // reports what it can actually show and this follows it.
+  const [helpScroll, setHelpScroll] = useState(0)
+  const [helpRange, setHelpRange] = useState({ max: 0, page: 1 })
   const [explain, setExplain] = useState(false)
   const filterActive = search != null || repoFilter.size > 0
   // The CI row occupies 2 rows (content + margin); reserve them out of the
@@ -2452,12 +2563,22 @@ const BrowseScreen = ({
     if (key.ctrl || key.meta) return
 
     // Help legend is a pure overlay: any key dismisses it, and nothing else
-    // is processed while it's up.
+    // is processed while it's up — bar the four that scroll it, and only while
+    // it is actually taller than the room it was given.
     if (help) {
+      if (helpRange.max > 0) {
+        const step = (n: number) =>
+          setHelpScroll((s) => Math.min(helpRange.max, Math.max(0, s + n)))
+        if (key.upArrow) return step(-1)
+        if (key.downArrow) return step(1)
+        if (key.pageUp) return step(-helpRange.page)
+        if (key.pageDown) return step(helpRange.page)
+      }
       setHelp(false)
       return
     }
     if (input === "?") {
+      setHelpScroll(0)
       setHelp(true)
       return
     }
@@ -2807,6 +2928,9 @@ const BrowseScreen = ({
       extensions={extensions}
       hasJira={!!jiraBase}
       tabHelp={tabHelp}
+      maxRows={listHeight}
+      scroll={helpScroll}
+      onScrollRange={(max, page) => setHelpRange({ max, page })}
     />
   ) : explain &&
     activeItem &&

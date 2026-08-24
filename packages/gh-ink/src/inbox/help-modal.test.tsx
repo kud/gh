@@ -47,10 +47,20 @@ const TAB_HELP: [string, string][] = [
   ["Done", "your PRs closed < 14d"],
 ]
 
-const frameAt = (columns: number) => {
+const frameAt = (
+  columns: number,
+  opts: { maxRows?: number; scroll?: number } = {},
+) => {
   const stdout = new FakeStdout(columns)
   const instance = render(
-    <HelpModal workToggle hasJira extensions={EXTENSIONS} tabHelp={TAB_HELP} />,
+    <HelpModal
+      workToggle
+      hasJira
+      extensions={EXTENSIONS}
+      tabHelp={TAB_HELP}
+      maxRows={opts.maxRows}
+      scroll={opts.scroll}
+    />,
     {
       stdout: stdout as never,
       debug: true,
@@ -63,6 +73,8 @@ const frameAt = (columns: number) => {
   instance.cleanup()
   return frame
 }
+
+const tallest = (frame: string) => frame.split("\n").filter(Boolean).length
 
 // Every label the legend promises, spelled as the reader sees it. A row that
 // wraps splits one of these across two lines, so a substring test over the whole
@@ -110,5 +122,33 @@ describe("HelpModal", () => {
       .find((line) => line.includes("Status"))
     expect(heading).toContain("Keys")
     expect(heading).not.toContain("Tabs")
+  })
+
+  // A short terminal used to clip the panel from the TOP — heading, borders and
+  // the first rows gone, with nothing on screen admitting it. The window is the
+  // fix; these pin the three things that make it readable rather than merely
+  // shorter.
+  describe("on a terminal too short for the whole legend", () => {
+    it("stays inside the rows it was given", () => {
+      expect(tallest(frameAt(100, { maxRows: 16 }))).toBeLessThanOrEqual(16)
+    })
+
+    it("keeps the heading and the close hint", () => {
+      const frame = frameAt(100, { maxRows: 16 })
+      expect(frame).toContain("Legend")
+      expect(frame).toContain("↑↓ scroll")
+      expect(frame).toContain("esc · ? close")
+    })
+
+    it("reaches the rows the first screen cut off", () => {
+      const top = frameAt(100, { maxRows: 16 })
+      const bottom = frameAt(100, { maxRows: 16, scroll: 99 })
+      expect(top).not.toContain("Copy prompt to clipboard")
+      expect(bottom).toContain("Copy prompt to clipboard")
+    })
+
+    it("says nothing about scrolling when it all fits", () => {
+      expect(frameAt(100, { maxRows: 40 })).not.toContain("↑↓ scroll")
+    })
   })
 })
