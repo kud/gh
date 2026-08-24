@@ -1652,10 +1652,11 @@ const ItemRow = ({
   // title: a PUA codepoint that renders double-width in some fonts would shift
   // only the rows that carry one, and a fixed cell exists precisely so the
   // title never moves. ← and → are already proven in this UI's footer hints.
+  const spokeLast = !!login && !!item.lastActor && item.lastActor === login
   const [turnIcon, turnColor] =
     !login || !item.lastActor
       ? [" ", "white"]
-      : item.lastActor === login
+      : spokeLast
         ? ["→", "#888888"]
         : ["←", "#FF8700"]
   const numStr = `#${item.number}`.padEnd(7)
@@ -1718,8 +1719,16 @@ const ItemRow = ({
         {truncate(item.title, titleMax) + "  "}
       </Text>
       {repoLabel ? <Text dimColor>{repoLabel}</Text> : null}
+      {/* Follows the turn arrow, because an unresolved thread is not by itself
+          a claim on you: GitHub keeps a thread open until someone clicks
+          Resolve conversation, so replying leaves the count exactly where it
+          was. Loud while the other side spoke last, quiet once you have
+          answered — otherwise this cell reads "your turn" in orange one column
+          from the arrow reading "not your turn" in grey. Never dimmed on an
+          unknown turn (no login, no lastActor): a count we cannot attribute is
+          still worth seeing. */}
       {unresolvedLabel ? (
-        <Text bold color="#FF8700">
+        <Text bold={!spokeLast} color={spokeLast ? "#888888" : "#FF8700"}>
           {"  " + unresolvedLabel}
         </Text>
       ) : null}
@@ -2148,9 +2157,7 @@ export const HelpModal = ({
           />
         ))}
       </Box>
-      {tabHelp && !scrollable ? (
-        <Text dimColor>{LEGEND_FOOTNOTE}</Text>
-      ) : null}
+      {tabHelp && !scrollable ? <Text dimColor>{LEGEND_FOOTNOTE}</Text> : null}
       <Text dimColor>
         {scrollable ? "↑↓ scroll · esc · ? close" : "esc · ? close"}
       </Text>
