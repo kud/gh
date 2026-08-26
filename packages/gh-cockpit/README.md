@@ -20,7 +20,7 @@
 - 🎯 **Whose-move bands** — every tab splits into `Your move` and `Their move`, so the two rows you can act on stop hiding among the eighteen you can't
 - 🧭 **Standing, not guesswork** — the same `✗` is your afternoon on a PR you wrote and the author's on one you were asked to review; the band knows which
 - 🔍 **`--here` scoping** — resolves the repo from your git remote and scopes every search server-side, so other repos are never fetched at all
-- 🎛 **Pattern filtering** — `--include acme/*,me/acme-*` and `--exclude`, replacing any built-in notion of which repos are "yours"
+- 🎛️ **Pattern filtering** — `--include acme/*,me/acme-*` and `--exclude`, replacing any built-in notion of which repos are "yours"
 - 🔌 **Bring your own CI** — GitHub Actions logs are built in; register a drill-in for anything else, or let it open in a browser
 - ♿ **Readable without colour** — every state carries its own glyph, so the list survives being piped, logged, or read by someone who can't separate green from orange
 - 🪶 **No opinions baked in** — repo ranking, checkout locations and cache lifetime are all supplied by the host; the defaults are empty on purpose
@@ -150,7 +150,7 @@ src/
   extensions/      opt-in extensions, exported separately
 ```
 
-## 🏗 Tech Stack
+## 🏗️ Tech Stack
 
 |                                                          |                                                    |
 | -------------------------------------------------------- | -------------------------------------------------- |
