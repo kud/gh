@@ -390,12 +390,77 @@ export const insertRepoHeaders = (items: GHItem[]): AnyItem[] => {
   return result
 }
 
-// Lay out a section's GH items: the Done tab is a flat newest-first list, every
-// other tab stays grouped by repo. Repo headers are inserted either way.
-export const layoutGHItems = (items: GHItem[], sectionId: string): AnyItem[] =>
-  insertRepoHeaders(
-    sectionId === "done" ? sortByRecency(items) : sortItems(items),
-  )
+// Tabs whose rows are items you own — you wrote the PR, or it was handed to you.
+// Everything else is a tab where you are the reviewer and someone else owns the
+// branch. The distinction is the tab's, not the row's, and there is no field on
+// GHItem that carries it: `review` and `open` can hold the same health token
+// meaning opposite things.
+const AUTHORED_SECTIONS = new Set(["open", "draft", "assigned", "issues"])
+
+// Whose move it is, which is the question a tab does NOT answer. Every tab is a
+// relationship ("they requested you", "it's on your repo"), so it says who is
+// standing where — never whether there is anything for you to do once you get
+// there. A `✗` on a PR you wrote is your afternoon; the same `✗` on one you were
+// asked to review is the author's, and you can do nothing but wait for it.
+//
+// Two tokens never flip. `threads` is literally "your reply is owed" and
+// `approved` is either merge it or the review is moot — both are yours from
+// either side. The rest mirror: the mechanical blockers (ci-fail, conflict,
+// changes-req) are yours only on your own PR, and the review-queue states
+// (waiting, pending) are yours only when you are the one being waited on.
+//
+// `draft`, `none` and the terminal states fall through to "them" — a draft is
+// not asking, which is the same reason sortItems sinks one.
+export const whoseMove = (
+  health: Health,
+  sectionId: string,
+): "you" | "them" => {
+  if (health === "threads" || health === "approved") return "you"
+  const yours: Health[] = AUTHORED_SECTIONS.has(sectionId)
+    ? ["ci-fail", "conflict", "changes-req"]
+    : ["waiting", "pending"]
+  return yours.includes(health) ? "you" : "them"
+}
+
+const BAND_LABEL: Record<"you" | "them", string> = {
+  you: "Your move",
+  them: "Their move",
+}
+
+// Lay out a section's GH items. The Done tab is a flat newest-first list; every
+// other tab splits into two whose-move bands, each keeping its own repo grouping
+// so the outer key stays legible inside a band. Repo headers are inserted in
+// every case, and restart per band — a repo with work on both sides of the line
+// appears under each.
+//
+// One band is not a band: a tab whose rows all land on the same side gains two
+// header rows and no information, so it keeps the plain list. That is not an
+// edge case, it is the Draft and Issues tabs by construction — every row there
+// carries the same health token, so the split has nothing to say.
+export const layoutGHItems = (
+  items: GHItem[],
+  sectionId: string,
+): AnyItem[] => {
+  if (sectionId === "done") return insertRepoHeaders(sortByRecency(items))
+
+  const sorted = sortItems(items)
+  const bands = (["you", "them"] as const).map((side) => ({
+    side,
+    rows: sorted.filter((i) => whoseMove(i.health, sectionId) === side),
+  }))
+  const filled = bands.filter((b) => b.rows.length > 0)
+  if (filled.length < 2) return insertRepoHeaders(sorted)
+
+  return filled.flatMap(({ side, rows }) => [
+    {
+      kind: "subgroup-header" as const,
+      label: `${BAND_LABEL[side]} (${rows.length})`,
+      age: "",
+      indent: false,
+    },
+    ...insertRepoHeaders(rows),
+  ])
+}
 
 // Keep only work- or only home-origin GitHub items, leaving non-GH rows
 // (task) untouched. Mirrors filterByRepos' gh/other split.

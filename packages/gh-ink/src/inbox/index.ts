@@ -7,6 +7,7 @@ export {
   useActionMenu,
   CiStatusLine,
   layoutGHItems,
+  whoseMove,
   insertRepoHeaders,
   sortItems,
   sortByRecency,
