@@ -82,6 +82,13 @@ describe("whoseMove", () => {
     }
   })
 
+  it("reads a folded `mine` tab exactly like `open` and `draft`", () => {
+    // Folding your own PRs into one tab must not change any row's band — the
+    // draft-ness the old split expressed is already on the row.
+    for (const h of ["ci-fail", "waiting", "approved", "draft"] as const)
+      expect(whoseMove(h, "mine")).toBe(whoseMove(h, "open"))
+  })
+
   it("treats an unrecognised tab as a review queue", () => {
     // A host adding a tab gets the reviewer reading, never the authored one —
     // over-claiming a stranger's PR as your work is the worse wrong guess.
