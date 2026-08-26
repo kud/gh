@@ -390,37 +390,48 @@ export const insertRepoHeaders = (items: GHItem[]): AnyItem[] => {
   return result
 }
 
-// Tabs whose rows are items you own — you wrote the PR, or it was handed to you.
-// Everything else is a tab where you are the reviewer and someone else owns the
-// branch. The distinction is the tab's, not the row's, and there is no field on
-// GHItem that carries it: `review` and `open` can hold the same health token
-// meaning opposite things.
-const AUTHORED_SECTIONS = new Set(["open", "draft", "assigned", "issues"])
+// Where you stand relative to a row, which the TAB knows and the ROW cannot.
+// `health` is a fact about the PR; the same token means opposite things
+// depending on which side of it you are on, and nothing on GHItem records the
+// side. Three positions, not two:
+//
+//   authored  you own the branch — its problems are your afternoon
+//   queued    someone else owns it and a review is still wanted from YOU
+//   spoken    someone else owns it and you have already given your review
+//
+// `spoken` is not a shade of `queued`, which is the mistake this started as.
+// The `reviewed` search is `reviewed-by:@me -author:@me -review-requested:@me`:
+// that last exclusion means GitHub is provably not waiting on you, and a PR you
+// reviewed that gets re-requested LEAVES the tab for `review`. Banding it like a
+// queue put "awaiting review" and "approved" under Your move on the one tab
+// where both are certainly somebody else's.
+type Standing = "authored" | "queued" | "spoken"
 
-// Whose move it is, which is the question a tab does NOT answer. Every tab is a
-// relationship ("they requested you", "it's on your repo"), so it says who is
-// standing where — never whether there is anything for you to do once you get
-// there. A `✗` on a PR you wrote is your afternoon; the same `✗` on one you were
-// asked to review is the author's, and you can do nothing but wait for it.
-//
-// Two tokens never flip. `threads` is literally "your reply is owed" and
-// `approved` is either merge it or the review is moot — both are yours from
-// either side. The rest mirror: the mechanical blockers (ci-fail, conflict,
-// changes-req) are yours only on your own PR, and the review-queue states
-// (waiting, pending) are yours only when you are the one being waited on.
-//
-// `draft`, `none` and the terminal states fall through to "them" — a draft is
-// not asking, which is the same reason sortItems sinks one.
-export const whoseMove = (
-  health: Health,
-  sectionId: string,
-): "you" | "them" => {
-  if (health === "threads" || health === "approved") return "you"
-  const yours: Health[] = AUTHORED_SECTIONS.has(sectionId)
-    ? ["ci-fail", "conflict", "changes-req"]
-    : ["waiting", "pending"]
-  return yours.includes(health) ? "you" : "them"
+const STANDING: Record<string, Standing> = {
+  open: "authored",
+  draft: "authored",
+  assigned: "authored",
+  issues: "authored",
+  review: "queued",
+  incoming: "queued",
+  reviewed: "spoken",
 }
+
+// What is YOURS from each position. Read down a column and the flips are the
+// point: the mechanical blockers (ci-fail, conflict, changes-req) are yours only
+// on your own PR, and the queue states (waiting, pending) only while a review is
+// still wanted from you. `threads` alone is yours from all three — it is
+// literally "your reply is owed", and it is the only thing left on a PR you have
+// already reviewed. Everything unlisted, `draft` and `none` included, is theirs:
+// a draft is not asking, which is why sortItems sinks one too.
+const YOURS: Record<Standing, Health[]> = {
+  authored: ["ci-fail", "conflict", "changes-req", "threads", "approved"],
+  queued: ["waiting", "pending", "threads", "approved"],
+  spoken: ["threads"],
+}
+
+export const whoseMove = (health: Health, sectionId: string): "you" | "them" =>
+  YOURS[STANDING[sectionId] ?? "queued"].includes(health) ? "you" : "them"
 
 const BAND_LABEL: Record<"you" | "them", string> = {
   you: "Your move",
