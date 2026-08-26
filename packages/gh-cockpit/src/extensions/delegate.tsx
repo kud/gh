@@ -12,9 +12,9 @@ const isDelegatable = (item?: AnyItem): item is GHItem =>
 
 // The overlay mounts before anything can check whether the active row is one we
 // can act on — the browse screen underneath is hidden and stops handling input, so
-// returning null would strand the user on a blank screen with no way back. A Jira
-// row is the case that actually reaches here on the work cockpit. Hand focus back
-// instead.
+// returning null would strand the user on a blank screen with no way back. A row
+// that is neither a PR nor an issue — a host's own task row — is what reaches
+// here. Hand focus back instead.
 const DelegateScreen = ({
   item,
   login,
