@@ -58,18 +58,35 @@ describe("whoseMove", () => {
     expect(whoseMove("pending", "review")).toBe("you")
   })
 
-  it("keeps threads and approval yours from either side", () => {
+  it("keeps threads and approval yours while a review is still wanted", () => {
     for (const tab of ["open", "review", "incoming", "assigned"]) {
       expect(whoseMove("threads", tab)).toBe("you")
       expect(whoseMove("approved", tab)).toBe("you")
     }
   })
 
+  it("claims nothing but threads on a PR you have already reviewed", () => {
+    // `reviewed` is `reviewed-by:@me -author:@me -review-requested:@me`, so
+    // GitHub is provably not waiting on you there and a re-request moves the
+    // row to `review`. Only an open thread is still yours; an approval is the
+    // author's to merge and "awaiting review" is somebody else's queue.
+    expect(whoseMove("threads", "reviewed")).toBe("you")
+    for (const h of ["waiting", "pending", "approved", "ci-fail"] as const)
+      expect(whoseMove(h, "reviewed")).toBe("them")
+  })
+
   it("never claims a draft or an unknown", () => {
-    for (const tab of ["open", "review"]) {
+    for (const tab of ["open", "review", "reviewed"]) {
       expect(whoseMove("draft", tab)).toBe("them")
       expect(whoseMove("none", tab)).toBe("them")
     }
+  })
+
+  it("treats an unrecognised tab as a review queue", () => {
+    // A host adding a tab gets the reviewer reading, never the authored one —
+    // over-claiming a stranger's PR as your work is the worse wrong guess.
+    expect(whoseMove("waiting", "some-new-tab")).toBe("you")
+    expect(whoseMove("ci-fail", "some-new-tab")).toBe("them")
   })
 })
 
