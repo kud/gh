@@ -15,8 +15,8 @@ import { useCachedResource } from "./cache.js"
 
 type Tab = "health" | "conversation"
 
-// Where an activated check drills to — a GitHub Actions job log or a Jenkins
-// build console. Derived here (cockpit-specific routing) from the check the
+// Where an activated check drills to — a GitHub Actions job log, or whatever a
+// host registered through registerCheckDrills. Derived here from the check the
 // shared, UI-only HealthPanel reports via onOpenCheck.
 type LogTarget = { repo: string; jobId: string; name: string; url: string }
 

@@ -11,8 +11,9 @@ const isCopyable = (item?: AnyItem): item is GHItem =>
 
 // Same guard as delegate's, for the same reason: the overlay mounts before
 // anything can check the row is one we can act on, and the browse screen
-// underneath has already stopped handling input. A Jira row is what reaches here
-// on the work cockpit — hand focus back rather than strand it on a blank screen.
+// underneath has already stopped handling input. A row that is neither a PR nor
+// an issue is what reaches here — hand focus back rather than strand it on a
+// blank screen.
 const CopyPromptScreen = ({
   item,
   onExit,
