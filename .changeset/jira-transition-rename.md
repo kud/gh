@@ -1,5 +1,5 @@
 ---
-"@kud/gh-ink": major
+"@kud/gh-ink": minor
 ---
 
 Rename `JiraTransition.state` to `transition`
