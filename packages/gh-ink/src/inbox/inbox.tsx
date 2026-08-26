@@ -208,8 +208,20 @@ export type Action = {
 }
 
 export type JiraTransition = {
+  /** What the action menu shows. Yours to word; nothing matches on it. */
   label: string
-  state: string
+  /**
+   * The TRANSITION name, passed verbatim to `jira issue move`. Not the
+   * destination status, and the two are routinely different strings — jira-cli
+   * matches `t.name.toLowerCase() === wanted`, so a status name here matches no
+   * transition, the move silently does nothing, and the row simply does not
+   * budge. This field was called `state`, which is what invited exactly that:
+   * cockpit had `{ label: "UAT", state: "UAT" }` against an ACC workflow whose
+   * transition is named "Ready for QA" and whose status is "In Testing (QA)" —
+   * no "UAT" anywhere, and no error either.
+   */
+  transition: string
+  /** Offered as a second step when the transition asks for a resolution. */
   resolutions?: string[]
 }
 
@@ -1141,7 +1153,7 @@ export const buildActions = (
         label: "Move status",
         hint: "t",
         run: () => {},
-        subActions: jiraTransitions.map(({ label, state, resolutions }) =>
+        subActions: jiraTransitions.map(({ label, transition, resolutions }) =>
           resolutions && resolutions.length > 0
             ? {
                 label,
@@ -1154,7 +1166,7 @@ export const buildActions = (
                     showFlash(`⋯ ${label} · ${resolution}…`)
                     void quietly`jira issue move ${
                       (item as TaskRow).ticket
-                    } ${state} --resolution ${resolution}`
+                    } ${transition} --resolution ${resolution}`
                       .then(() => {
                         showFlash(`✓ ${label} · ${resolution}`)
                         ext?.onActed?.()
@@ -1170,7 +1182,7 @@ export const buildActions = (
                   showFlash(`⋯ Moving to ${label}…`)
                   void quietly`jira issue move ${
                     (item as TaskRow).ticket
-                  } ${state}`
+                  } ${transition}`
                     .then(() => {
                       showFlash(`✓ Moved to ${label}`)
                       ext?.onActed?.()
@@ -2987,7 +2999,7 @@ const BrowseScreen = ({
     ) {
       const jiraKey = activeItem.ticket
       const actions: Action[] = jiraTransitions.map(
-        ({ label, state, resolutions }) =>
+        ({ label, transition, resolutions }) =>
           resolutions && resolutions.length > 0
             ? {
                 label,
@@ -2999,7 +3011,7 @@ const BrowseScreen = ({
                   run: () => {
                     menu.close()
                     showFlash(`⋯ ${label} · ${resolution}…`)
-                    quietly`jira issue move ${jiraKey} ${state} --resolution ${resolution}`
+                    quietly`jira issue move ${jiraKey} ${transition} --resolution ${resolution}`
                       .then(() => {
                         showFlash(`✓ ${label} · ${resolution}`)
                         onActed?.()
@@ -3014,7 +3026,7 @@ const BrowseScreen = ({
                 run: () => {
                   menu.close()
                   showFlash(`⋯ Moving to ${label}…`)
-                  quietly`jira issue move ${jiraKey} ${state}`
+                  quietly`jira issue move ${jiraKey} ${transition}`
                     .then(() => {
                       showFlash(`✓ Moved to ${label}`)
                       onActed?.()
