@@ -109,22 +109,22 @@ describe("layoutGHItems bands", () => {
   it("splits a mixed tab into two counted bands, yours first", () => {
     const rows = [
       item({
-        repo: "theorchard/graphql-abacus",
+        repo: "acme/api-gateway",
         number: 1496,
         health: "ci-fail",
       }),
       item({
-        repo: "theorchard/graphql-abacus",
+        repo: "acme/api-gateway",
         number: 1495,
         health: "threads",
       }),
       item({
-        repo: "theorchard/graphql-abacus",
+        repo: "acme/api-gateway",
         number: 1449,
         health: "conflict",
       }),
       item({
-        repo: "theorchard/ows-abacus-event",
+        repo: "acme/event-bus",
         number: 290,
         health: "waiting",
       }),

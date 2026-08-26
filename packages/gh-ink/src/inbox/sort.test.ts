@@ -75,22 +75,22 @@ describe("sortItems", () => {
 })
 
 /*
- * The 2026-08-24 case: a draft PR on theorchard/abacus-monorepo with kud
- * requested as a reviewer led the Review tab, six days old, above a genuine
- * open PR that had been waiting a fortnight. A draft is not asking, so it
+ * The 2026-08-24 case: a draft PR on a work monorepo with kud requested as a
+ * reviewer led the Review tab, six days old, above a genuine open PR that had
+ * been waiting a fortnight. A draft is not asking, so it
  * sinks — but stays visible, because a draft you were asked to look at early
  * is exactly the one you must not lose.
  */
 describe("draft ordering", () => {
   it("sinks a draft below open rows of the same repo, however fresh", () => {
     const draft = item({
-      repo: "theorchard/abacus-monorepo",
+      repo: "acme/monorepo",
       number: 10,
       ts: 9_000,
       health: "draft",
     })
     const open = item({
-      repo: "theorchard/abacus-monorepo",
+      repo: "acme/monorepo",
       number: 4,
       ts: 2_000,
     })
