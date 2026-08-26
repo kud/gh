@@ -11,7 +11,7 @@
 
 **A configurable GitHub cockpit for the terminal — your PRs, reviews and issues in one Ink TUI, grouped by whose move it is.**
 
-[Features](#-features) • [Quick Start](#-quick-start) • [API Reference](#-api-reference) • [Development](#-development)
+[Features](#-features) • [Quick Start](#-quick-start) • [Build a CLI](#️-build-your-own-cli) • [API Reference](#-api-reference)
 
 </div>
 
@@ -31,38 +31,9 @@
 npm install @kud/gh-cockpit
 ```
 
-It is a library, not a CLI — you write the entry point, because which searches become tabs and which repos rank first are not portable decisions.
+It is a library, not a CLI — there is no `bin`, because which searches become tabs and which repos rank first are not portable decisions. You write a short entry point; see [Build your own CLI](#️-build-your-own-cli) for a complete one.
 
-```tsx
-import { render } from "ink"
-import { App, configureInbox, defineCockpit, detailFor } from "@kud/gh-cockpit"
-import { delegateExtension } from "@kud/gh-cockpit/extensions"
-
-configureInbox({
-  repoPriority: ["acme/monorepo", "acme/", "me/"],
-  checkoutDir: `${process.env.HOME}/src`,
-})
-
-export default defineCockpit({
-  tabs: [
-    { label: "Mine", help: "your PRs", searches: ["is:open author:@me"] },
-    {
-      label: "Review",
-      help: "theirs — asked of you, or you reviewed",
-      searches: [
-        { q: "is:open review-requested:@me", standing: "queued" },
-        {
-          q: "is:open reviewed-by:@me -author:@me -review-requested:@me",
-          standing: "spoken",
-        },
-      ],
-    },
-  ],
-  extensions: [delegateExtension],
-})
-```
-
-Which renders:
+What it renders:
 
 ```console
 $ cockpit
@@ -87,13 +58,111 @@ $ cockpit
   !   #1449  guard null ids before per-id fetches          6w
 ```
 
+## 🛠️ Build your own CLI
+
+The package has no `bin`, so this is the file you write. It is short — fetch, assemble, render — and everything opinionated lives in it rather than in the package.
+
+```tsx
+#!/usr/bin/env node
+import { $ } from "zx"
+import React from "react"
+import { render } from "ink"
+import {
+  App,
+  buildInboxQuery,
+  configureInbox,
+  detailFor,
+  layoutGHItems,
+  signalPath,
+  toGHItem,
+  withRetry,
+  type Section,
+} from "@kud/gh-cockpit"
+
+$.verbose = false
+
+// Everything the library refuses to assume. Call once, before rendering.
+configureInbox({
+  repoPriority: ["acme/monorepo", "acme/", "me/"],
+  checkoutDir: `${process.env.HOME}/src`,
+  cacheNamespace: "my-cockpit",
+  cacheTtlMs: 20 * 60_000,
+})
+
+// One GraphQL round trip for every tab. `withRetry` matters: GitHub returns 502
+// under load, and a 502 is the server declining to compute an answer, not an answer.
+const fetchCockpit = async (): Promise<{ sections: Section[]; login: string }> => {
+  const result = await withRetry(() =>
+    $`gh api graphql -f query=${buildInboxQuery({})}`.quiet(),
+  )
+  const data = JSON.parse(result.stdout).data
+
+  const rows = (nodes: any[], standing?: "authored" | "queued" | "spoken") =>
+    (nodes ?? []).map((n) => ({ ...toGHItem(n), ...(standing ? { standing } : {}) }))
+
+  return {
+    login: data.viewer.login,
+    sections: [
+      {
+        id: "mine",
+        label: "Mine",
+        items: layoutGHItems(rows(data.myPRs.nodes, "authored"), "mine"),
+      },
+      {
+        // Two searches, one tab. `standing` is stamped per search because nothing
+        // on a row can tell them apart afterwards.
+        id: "review",
+        label: "Review",
+        items: layoutGHItems(
+          [
+            ...rows(data.reviewRequests.nodes, "queued"),
+            ...rows(data.reviewed.nodes, "spoken"),
+          ],
+          "review",
+        ),
+      },
+      { id: "done", label: "Done", items: layoutGHItems(rows(data.recentlyDone.nodes), "done") },
+    ].filter((s) => s.items.some((i) => i.kind !== "repo-header")),
+  }
+}
+
+render(
+  <App
+    fetcher={fetchCockpit}
+    cacheKey="cockpit"
+    title="cockpit"
+    detailFor={detailFor}
+    tabHelp={[
+      ["Mine", "your PRs, draft and open"],
+      ["Review", "theirs — asked of you, or you reviewed"],
+      ["Done", "your PRs closed < 14d"],
+    ]}
+    emptyHint="Nothing open across your repos."
+    watchPath={signalPath()}
+    watchDebounceMs={2_000}
+  />,
+  { alternateScreen: true },
+)
+```
+
+Point a `bin` at it in your own `package.json` and it is a command.
+
+### Refreshing without polling
+
+`watchPath` is a file the cockpit watches; writing a byte to it makes every open cockpit refetch, debounced. Have whatever mutates GitHub on your behalf — a merge script, an editor hook — write to `signalPath()`.
+
+A poller is wrong twice over: it spends quota on the long stretches where nothing changed, and it is still up to a full interval late when something did. The filesystem is the whole broker — no daemon, no socket, and the fan-out is free.
+
+> [!IMPORTANT]
+> Write a byte rather than `touch`ing. At second-granularity mtime with no size change, two touches inside the same second are indistinguishable and some watch backends coalesce them away.
+
 ## 📖 API Reference
 
 | Export                                   | Purpose                                                                                  |
 | ---------------------------------------- | ---------------------------------------------------------------------------------------- |
-| `defineCockpit(config)`                  | Typed config — a wrong tab or standing fails at build, not at runtime                    |
+| `defineCockpit(config)` | Types your own config object. A convenience for hosts — nothing internal reads it |
 | `configureInbox(config)`                 | Host opinions: `repoPriority`, `profiles`, `checkoutDir`, `cacheNamespace`, `cacheTtlMs` |
-| `parseArgs(argv)`                        | `--here`, `--include`, `--exclude`, and a positional named filter                        |
+| `parseArgs(argv)` | Parses `--here`, `--include`, `--exclude` and a positional filter name. You decide what they mean |
 | `registerCheckDrills(drills)`            | Where a CI check drills in; unregistered checks open in a browser                        |
 | `detailFor(ctx)`                         | The drill-in view for a row — `PrView` or `IssueView`                                    |
 | `PrView` · `IssueView`                   | The drill-in views themselves, if you want to wrap them                                  |
