@@ -20,7 +20,7 @@ import {
 
 const KEY = "test-glance"
 const cacheFile = () =>
-  join(process.env.XDG_CACHE_HOME ?? "", "ambre", `${KEY}.json`)
+  join(process.env.XDG_CACHE_HOME ?? "", "gh-ink", `${KEY}.json`)
 
 const sections = [{ title: "Open", items: [] }] as never
 

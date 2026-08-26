@@ -60,3 +60,12 @@ export {
 } from "./inbox.js"
 export type { InboxExtension, ExtensionTarget } from "./extension.js"
 export { readCache, writeCache } from "./cache.js"
+export {
+  configureInbox,
+  inboxConfig,
+  resetInboxConfig,
+  profileOf,
+  checkoutDirs,
+  type InboxConfig,
+  type RepoProfile,
+} from "./config.js"
