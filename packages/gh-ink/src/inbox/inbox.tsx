@@ -408,6 +408,11 @@ export const insertRepoHeaders = (items: GHItem[]): AnyItem[] => {
 type Standing = "authored" | "queued" | "spoken"
 
 const STANDING: Record<string, Standing> = {
+  mine: "authored",
+  // `open` and `draft` predate `mine` and are the same standing: a host that
+  // still splits its own PRs by draft-ness keeps working, and one that folds
+  // them into a single tab (as cockpit does — the band already sinks a draft,
+  // so the split said it twice) gets the same reading.
   open: "authored",
   draft: "authored",
   assigned: "authored",
