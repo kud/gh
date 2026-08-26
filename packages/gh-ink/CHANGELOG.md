@@ -1,5 +1,38 @@
 # @kud/gh-ink
 
+## 0.21.0
+
+### Minor Changes
+
+- 14a7ca4: Make the inbox cache TTL host-configurable, default 10 minutes
+
+  It was a fixed 120s, chosen to bound the pathological case — thirty launches an
+  hour — rather than the typical one. That inverted the cost: nobody launches
+  thirty times an hour, but a reader who opens the cockpit every few minutes missed
+  the cache on essentially every launch and paid the full eight-search query each
+  time, which is also what draws `HTTP 502` out of the API.
+
+  `cacheTtlMs` on `configureInbox`, defaulting to 10 minutes. That still bounds the
+  pathological case comfortably — six full fetches an hour whatever the launch
+  rate — while making the ordinary glance-close-glance rhythm free. Staleness is
+  bounded from the other end regardless: acting on a row drops the cache entry, and
+  `r` refetches on demand.
+
+- 10473fc: Add pattern-based repo filtering
+
+  `matchesFilter(repo, { include, exclude })` with `parsePatterns` for
+  comma-separated flag values. `*` matches within one path segment and never
+  across the `/`, a bare owner is sugar for all its repos, exclude is applied after
+  include and wins.
+
+  Groundwork for replacing the built-in two-way repo split, which was never a
+  concept — it was two hard-coded filter presets and a `w` key, unable to express a
+  third slice or the common case of having one. Its tests pin that the old split is
+  reproducible as data (`include: [org/*, me/org-*]` and the same list under
+  `exclude`), covering every repo between them with no overlap.
+
+  The split itself is unchanged for now; nothing consumes this yet.
+
 ## 0.20.0
 
 ### Minor Changes
