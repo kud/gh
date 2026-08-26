@@ -75,9 +75,9 @@ describe("sortItems", () => {
 })
 
 /*
- * The 2026-08-24 case: a draft PR on acme/monorepo with kud
- * requested as a reviewer led the Review tab, six days old, above a genuine
- * open PR that had been waiting a fortnight. A draft is not asking, so it
+ * The 2026-08-24 case: a draft PR on a work monorepo with kud requested as a
+ * reviewer led the Review tab, six days old, above a genuine open PR that had
+ * been waiting a fortnight. A draft is not asking, so it
  * sinks — but stays visible, because a draft you were asked to look at early
  * is exactly the one you must not lose.
  */

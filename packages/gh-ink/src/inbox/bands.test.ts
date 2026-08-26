@@ -109,17 +109,17 @@ describe("layoutGHItems bands", () => {
   it("splits a mixed tab into two counted bands, yours first", () => {
     const rows = [
       item({
-        repo: "acme/graphql-api",
+        repo: "acme/api-gateway",
         number: 1496,
         health: "ci-fail",
       }),
       item({
-        repo: "acme/graphql-api",
+        repo: "acme/api-gateway",
         number: 1495,
         health: "threads",
       }),
       item({
-        repo: "acme/graphql-api",
+        repo: "acme/api-gateway",
         number: 1449,
         health: "conflict",
       }),
