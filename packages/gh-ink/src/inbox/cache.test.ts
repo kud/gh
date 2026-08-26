@@ -1,10 +1,11 @@
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
+import { configureInbox, resetInboxConfig } from "./config.js"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 
 import {
-  CACHE_TTL_MS,
+  cacheTtlMs,
   invalidateCache,
   isFresh,
   readCache,
@@ -47,7 +48,18 @@ describe("glance cache", () => {
   it("treats an entry older than the TTL as stale", async () => {
     writeCache(KEY, { sections, login: "kud" })
     const cached = readCache(KEY)
-    expect(isFresh(cached, Date.now() + CACHE_TTL_MS + 1)).toBe(false)
+    expect(isFresh(cached, Date.now() + cacheTtlMs() + 1)).toBe(false)
+  })
+
+  it("takes the TTL from the host, not a compiled-in constant", () => {
+    // A reader who opens the cockpit every few minutes missed a fixed 120s cache
+    // on essentially every launch and paid the full eight-search query each
+    // time. The knob is the point; the default merely has to be sane.
+    configureInbox({ cacheTtlMs: 1_000 })
+    const cached = { sections: [], login: "me", at: Date.now() }
+    expect(isFresh(cached, Date.now() + 500)).toBe(true)
+    expect(isFresh(cached, Date.now() + 1_500)).toBe(false)
+    resetInboxConfig()
   })
 
   it("treats a missing entry as stale rather than fresh", async () => {

@@ -18,12 +18,20 @@ import { inboxConfig } from "./config.js"
  * mount and then refetched unconditionally, so it bought a fast first frame and
  * saved nothing at all: a cache that records rather than prevents.
  *
- * 120s bounds the pathological case rather than the typical one. Nobody launches
- * the cockpit thirty times an hour — but at 120s even that ceiling is 3330
- * points, inside budget, and "nobody does that" is exactly what was believed
- * about the process that exhausted this pool on 2026-08-14.
+ * Host-configurable via `cacheTtlMs`, defaulting to 10 minutes.
+ *
+ * It was a fixed 120s, chosen to bound the pathological case — thirty launches
+ * an hour — rather than the typical one. That inverted the cost: nobody launches
+ * thirty times an hour, but a reader who opens the cockpit every few minutes
+ * missed the cache on essentially every launch and paid the full eight-search
+ * query each time, which is also what draws 502s out of the API.
+ *
+ * 10 minutes still bounds the pathological case comfortably (six full fetches an
+ * hour, whatever the launch rate), while making the ordinary rhythm — glance,
+ * close, glance again — free. Staleness is bounded from the other end anyway:
+ * acting on a row drops the entry, and `r` forces a refetch.
  */
-export const CACHE_TTL_MS = 120_000
+export const cacheTtlMs = (): number => inboxConfig().cacheTtlMs
 
 /**
  * Bump when `CachedCockpit`'s shape changes.
@@ -68,7 +76,7 @@ export const readCache = (key: string): CachedCockpit | null => {
 export const isFresh = (
   cached: CachedCockpit | null,
   now = Date.now(),
-): boolean => !!cached && now - cached.at < CACHE_TTL_MS
+): boolean => !!cached && now - cached.at < cacheTtlMs()
 
 export const writeCache = (
   key: string,

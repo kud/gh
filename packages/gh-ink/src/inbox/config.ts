@@ -56,12 +56,26 @@ export type InboxConfig = {
    * one machine would otherwise share a cache keyed only by section name.
    */
   cacheNamespace: string
+  /**
+   * How long a cached inbox is trusted before a launch refetches. Every launch
+   * past it pays the full query — eight searches with check rollups — so this is
+   * the single knob between "always current" and "always slow, and drawing 502s
+   * from the API".
+   *
+   * It can be generous because staleness is bounded from the other end: acting
+   * on a row drops the entry outright, and `r` refetches on demand. What the TTL
+   * actually governs is how long a change made ELSEWHERE — someone approving
+   * your PR while you were not looking — can go unseen, which is a glance
+   * arriving late, not a wrong action taken.
+   */
+  cacheTtlMs: number
 }
 
 const EMPTY: InboxConfig = {
   repoPriority: [],
   profiles: [],
   cacheNamespace: "gh-ink",
+  cacheTtlMs: 600_000,
 }
 
 let current: InboxConfig = EMPTY
