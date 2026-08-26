@@ -1,6 +1,6 @@
 {
   "name": "@kud/gh-cockpit",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "A configurable GitHub cockpit for the terminal \u2014 your PRs, reviews and issues in one Ink TUI, grouped by whose move it is.",
   "type": "module",
   "main": "dist/index.js",
