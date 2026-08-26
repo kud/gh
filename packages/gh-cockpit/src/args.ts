@@ -35,8 +35,14 @@ export const parseArgs = (argv: readonly string[]): CockpitArgs => {
       continue
     }
     if (arg === "--include" || arg === "--exclude") {
-      const value = argv[++i] ?? ""
-      ;(arg === "--include" ? include : exclude).push(...parsePatterns(value))
+      // Only consume the next argument if it could actually BE a value.
+      // `--include --here` is a typo, and swallowing the flag as a pattern lost
+      // the flag and produced a filter matching nothing — a blank cockpit with
+      // no error, which reads as "nothing open" rather than "you mistyped".
+      const next = argv[i + 1]
+      if (next === undefined || next.startsWith("-")) continue
+      i++
+      ;(arg === "--include" ? include : exclude).push(...parsePatterns(next))
       continue
     }
     if (!arg.startsWith("-") && !named) named = arg
