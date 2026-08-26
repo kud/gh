@@ -92,6 +92,15 @@ export type GHItem = {
   // at render time to decide whose turn it is.
   lastActor?: string
   detail?: GHDetail
+  /**
+   * Where YOU stand on this row, when the host knows it per row rather than per
+   * tab. Set it and the whose-move band reads it instead of inferring from the
+   * section id — which is what lets one tab hold rows of mixed standing: a
+   * review asked of you and one you have already given differ only in whether
+   * the ball comes back, and that is a fact about the search a row came from,
+   * never about the PR. Left unset, the section id decides as before.
+   */
+  standing?: Standing
   indent: boolean
 }
 
@@ -390,10 +399,10 @@ export const insertRepoHeaders = (items: GHItem[]): AnyItem[] => {
   return result
 }
 
-// Where you stand relative to a row, which the TAB knows and the ROW cannot.
-// `health` is a fact about the PR; the same token means opposite things
-// depending on which side of it you are on, and nothing on GHItem records the
-// side. Three positions, not two:
+// Where you stand relative to a row. `health` is a fact about the PR; the same
+// token means opposite things depending on which side of it you are on, and the
+// side is not on the PR — it is a property of the SEARCH the row arrived from.
+// Three positions, not two:
 //
 //   authored  you own the branch — its problems are your afternoon
 //   queued    someone else owns it and a review is still wanted from YOU
@@ -402,11 +411,14 @@ export const insertRepoHeaders = (items: GHItem[]): AnyItem[] => {
 // `spoken` is not a shade of `queued`, which is the mistake this started as.
 // The `reviewed` search is `reviewed-by:@me -author:@me -review-requested:@me`:
 // that last exclusion means GitHub is provably not waiting on you, and a PR you
-// reviewed that gets re-requested LEAVES the tab for `review`. Banding it like a
-// queue put "awaiting review" and "approved" under Your move on the one tab
+// reviewed that gets re-requested leaves that search for `review-requested:@me`.
+// Banding it like a queue put "awaiting review" and "approved" under Your move
 // where both are certainly somebody else's.
-type Standing = "authored" | "queued" | "spoken"
+export type Standing = "authored" | "queued" | "spoken"
 
+// The per-TAB fallback, for a host whose every row in a tab shares a standing.
+// A host that merges two searches into one tab sets `standing` on the rows
+// instead, and this is never consulted for them.
 const STANDING: Record<string, Standing> = {
   mine: "authored",
   // `open` and `draft` predate `mine` and are the same standing: a host that
@@ -435,8 +447,17 @@ const YOURS: Record<Standing, Health[]> = {
   spoken: ["threads"],
 }
 
-export const whoseMove = (health: Health, sectionId: string): "you" | "them" =>
-  YOURS[STANDING[sectionId] ?? "queued"].includes(health) ? "you" : "them"
+// The row's own standing wins where the host set one; the tab decides otherwise,
+// and an unrecognised tab reads as `queued` — over-claiming a stranger's PR as
+// your work is the worse wrong guess.
+export const whoseMove = (
+  health: Health,
+  sectionId: string,
+  standing?: Standing,
+): "you" | "them" =>
+  YOURS[standing ?? STANDING[sectionId] ?? "queued"].includes(health)
+    ? "you"
+    : "them"
 
 const BAND_LABEL: Record<"you" | "them", string> = {
   you: "Your move",
@@ -462,7 +483,9 @@ export const layoutGHItems = (
   const sorted = sortItems(items)
   const bands = (["you", "them"] as const).map((side) => ({
     side,
-    rows: sorted.filter((i) => whoseMove(i.health, sectionId) === side),
+    rows: sorted.filter(
+      (i) => whoseMove(i.health, sectionId, i.standing) === side,
+    ),
   }))
   const filled = bands.filter((b) => b.rows.length > 0)
   if (filled.length < 2) return insertRepoHeaders(sorted)

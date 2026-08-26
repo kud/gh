@@ -89,6 +89,14 @@ describe("whoseMove", () => {
       expect(whoseMove(h, "mine")).toBe(whoseMove(h, "open"))
   })
 
+  it("lets a row's own standing beat the tab's", () => {
+    // One tab, two searches. `review-requested:@me` rows still want your review;
+    // `reviewed-by:@me` rows do not, and only an owed reply is left on them.
+    expect(whoseMove("waiting", "review", "queued")).toBe("you")
+    expect(whoseMove("waiting", "review", "spoken")).toBe("them")
+    expect(whoseMove("threads", "review", "spoken")).toBe("you")
+  })
+
   it("treats an unrecognised tab as a review queue", () => {
     // A host adding a tab gets the reviewer reading, never the authored one —
     // over-claiming a stranger's PR as your work is the worse wrong guess.
@@ -163,6 +171,30 @@ describe("layoutGHItems bands", () => {
       (r) => r.kind === "repo-header",
     )
     expect(headers).toHaveLength(2)
+  })
+
+  it("bands one tab holding rows of two standings", () => {
+    // The merged Review tab: a PR asking for your review and one you have
+    // already reviewed, both `waiting`, both on the same tab. Nothing about the
+    // rows themselves separates them — only where they came from.
+    const rows = [
+      item({
+        repo: "kud/ambre",
+        number: 1,
+        health: "waiting",
+        standing: "spoken",
+      }),
+      item({
+        repo: "kud/ambre",
+        number: 2,
+        health: "waiting",
+        standing: "queued",
+      }),
+    ]
+
+    const laid = layoutGHItems(rows, "review")
+    expect(labels(laid)).toEqual(["Your move (1)", "Their move (1)"])
+    expect(numbers(laid)).toEqual([2, 1])
   })
 
   it("never bands the Done tab", () => {

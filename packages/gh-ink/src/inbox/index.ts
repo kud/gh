@@ -42,6 +42,7 @@ export {
   sameCiStatusState,
   COLS,
   type GHItem,
+  type Standing,
   type GHDetail,
   type Section,
   type AnyItem,
