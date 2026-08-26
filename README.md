@@ -6,13 +6,14 @@ and every surface (standalone command, cockpit dashboard, MCP) consumes it.
 
 ## Packages
 
-| Package                                                | Role                                                                                           | Status   |
-| ------------------------------------------------------ | ---------------------------------------------------------------------------------------------- | -------- |
-| [`@kud/gh`](packages/gh)                               | **core** — `gh` CLI primitives, PR review comments, health, webhook logic                      | 🟢 0.2.0 |
-| [`@kud/gh-ink`](packages/gh-ink)                       | **components** — controlled Ink panels (health, comments) + the inbox shell + token→colour map | 🟢 0.5.0 |
-| [`@kud/gh-pr-comments`](packages/gh-pr-comments)       | CLI — browse / reply / resolve review threads                                                  | 🟢 0.1.5 |
-| [`@kud/gh-pr-health`](packages/gh-pr-health)           | CLI — checks / reviews / merge-state for a PR                                                  | 🟢 0.1.5 |
-| [`@kud/gh-webhook-replay`](packages/gh-webhook-replay) | CLI — replay the latest `pull_request` webhook delivery                                        | 🟢 0.1.1 |
+| Package | Role | Version |
+| --- | --- | --- |
+| [`@kud/gh`](packages/gh) | **core** — `gh` CLI primitives, PR review comments, health, webhook logic | ![npm](https://img.shields.io/npm/v/@kud/gh?style=flat-square&label=&color=CB3837) |
+| [`@kud/gh-ink`](packages/gh-ink) | **components** — controlled Ink panels, the inbox shell, whose-move banding, token→colour map | ![npm](https://img.shields.io/npm/v/@kud/gh-ink?style=flat-square&label=&color=CB3837) |
+| [`@kud/gh-cockpit`](packages/gh-cockpit) | **app** — a configurable cockpit: your PRs, reviews and issues in one TUI | ![npm](https://img.shields.io/npm/v/@kud/gh-cockpit?style=flat-square&label=&color=CB3837) |
+| [`@kud/gh-pr-comments`](packages/gh-pr-comments) | CLI — browse / reply / resolve review threads | ![npm](https://img.shields.io/npm/v/@kud/gh-pr-comments?style=flat-square&label=&color=CB3837) |
+| [`@kud/gh-pr-health`](packages/gh-pr-health) | CLI — checks / reviews / merge-state for a PR | ![npm](https://img.shields.io/npm/v/@kud/gh-pr-health?style=flat-square&label=&color=CB3837) |
+| [`@kud/gh-webhook-replay`](packages/gh-webhook-replay) | CLI — replay the latest `pull_request` webhook delivery | ![npm](https://img.shields.io/npm/v/@kud/gh-webhook-replay?style=flat-square&label=&color=CB3837) |
 
 ## Design
 
@@ -20,10 +21,17 @@ and every surface (standalone command, cockpit dashboard, MCP) consumes it.
   `ghGraphql` / `ghRest` primitives every tool used to reinvent now live here.
 - **Ink layer** (`tsup`): presentation-only components — props in, no fetching,
   no input. The consuming surface owns selection, navigation, and loading.
+- **App** (`@kud/gh-cockpit`): the cockpit's views and config surface, with no
+  opinion about whose repos matter or which searches are tabs — the host says.
 - **CLIs**: arg-parsing + mounting the Ink body over a core client.
 
 The core emits **semantic tokens**; the Ink layer maps token → colour. Same seam
 as `@kud/jenkins` → `@kud/jenkins-ink`.
+
+Every layer's defaults are **empty rather than convenient**. A library that ranks
+its author's repos first, or guesses where checkouts live, is wrong for its
+second reader — so the host supplies all of it through `configureInbox`. See
+[building a cockpit](packages/gh-cockpit#-build-your-own-cli).
 
 ## Development
 
