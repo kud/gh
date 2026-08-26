@@ -1,5 +1,43 @@
 # @kud/gh-ink
 
+## 0.18.0
+
+### Minor Changes
+
+- 84604c6: Let a row carry its own whose-move standing
+
+  `GHItem.standing` ("authored" | "queued" | "spoken") now overrides the per-tab
+  inference in `whoseMove`, so one tab can hold rows from two searches and still
+  band each correctly. That is what lets a host fold "review asked of you" and
+  "you already reviewed" into a single tab: the two differ only in whether the ball
+  comes back, which is a fact about the search a row arrived from and never about
+  the PR.
+
+  `whoseMove` takes the standing as an optional third argument; leaving it unset
+  keeps the existing tab-derived behaviour. `Standing` is exported.
+
+### Patch Changes
+
+- 1f680d9: Recognise a folded `mine` tab as an authored standing
+
+  A host that merges its own open PRs and drafts into one tab — the split says
+  draft-ness twice, since the band already sinks a draft — would otherwise fall
+  through to the `queued` default and band every row backwards. `open` and `draft`
+  keep working unchanged.
+
+- b38f3d5: Fix the whose-move band on the Reviewed tab
+
+  `reviewed` was classified as an ordinary reviewer tab, so "awaiting review",
+  "checks running" and "approved" all landed under **Your move** there. Its search
+  is `reviewed-by:@me -author:@me -review-requested:@me` — that last exclusion means
+  GitHub is provably not waiting on you, and a PR you reviewed that gets
+  re-requested leaves the tab for `review`. The band was claiming work that was
+  certainly somebody else's.
+
+  `whoseMove` now reads three standings rather than two — `authored`, `queued` and
+  `spoken` — and on `spoken` only `threads` (your reply is owed) is yours. An
+  unrecognised tab defaults to `queued`.
+
 ## 0.17.0
 
 ### Minor Changes
