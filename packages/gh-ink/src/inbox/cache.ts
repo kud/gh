@@ -3,6 +3,7 @@ import { homedir } from "node:os"
 import { join } from "node:path"
 import { useState, useEffect } from "react"
 import type { Section } from "./inbox.js"
+import { inboxConfig } from "./config.js"
 
 // On-disk cache for the inbox glance, so launch renders instantly from the last
 // known state while the network revalidates in the background. One file per
@@ -44,7 +45,10 @@ const CACHE_VERSION = 2
 export type CachedCockpit = { sections: Section[]; login: string; at: number }
 
 const cacheDir = (): string =>
-  join(process.env.XDG_CACHE_HOME || join(homedir(), ".cache"), "ambre")
+  join(
+    process.env.XDG_CACHE_HOME || join(homedir(), ".cache"),
+    inboxConfig().cacheNamespace,
+  )
 
 const cacheFile = (key: string): string =>
   join(cacheDir(), `${key.replace(/[^a-z0-9._-]/gi, "-")}.json`)

@@ -14,6 +14,7 @@ import React, {
 import { Text as InkText, Box, useInput, useWindowSize } from "ink"
 import type { InboxExtension, ExtensionTarget } from "./extension.js"
 import { invalidateCache, isFresh, readCache, writeCache } from "./cache.js"
+import { checkoutDirs, inboxConfig, profileOf } from "./config.js"
 import {
   diffSections,
   keyOf,
@@ -349,15 +350,16 @@ export const explainItem = (item: GHItem, login: string): ExplainSection[] => {
   ]
 }
 
+// Rank from the host's ordered list rather than a compiled-in one. An entry
+// ending in `/` matches an owner; anything else must equal `owner/name`, so a
+// single repo can be pinned above the owner containing it. Unmatched repos share
+// the last rank, which leaves the name tiebreak in sortItems to order them.
 export const repoPriority = (repo: string): number => {
-  const profile = process.env.OS_PROFILE ?? ""
-  if (profile === "work") {
-    if (repo === "theorchard/orchardgo") return 0
-    if (repo.startsWith("theorchard/")) return 1
-    if (repo.startsWith("kud/")) return 2
-    return 3
-  }
-  return repo.startsWith("kud/") ? 0 : 1
+  const order = inboxConfig().repoPriority
+  const i = order.findIndex((p) =>
+    p.endsWith("/") ? repo.startsWith(p) : repo === p,
+  )
+  return i === -1 ? order.length : i
 }
 
 // Repo grouping is the OUTER key and is deliberately unchanged — priority tier,
@@ -768,19 +770,12 @@ export const buildCheckoutCmd = async (
   login: string,
 ): Promise<string> => {
   const [repoOwner, repoName] = repoFull.split("/")
-  const projects = process.env.PROJECTS_DIR ?? `${process.env.HOME}/Projects`
-  const profile = process.env.OS_PROFILE ?? ""
-  const isWorkRepo =
-    profile === "work" &&
-    (repoFull.startsWith("theorchard/") ||
-      (repoFull.startsWith("kud/") &&
-        (repoName ?? "").startsWith("theorchard-")))
+  // Where a clone lands is the host's call: the profile claiming this repo, if it
+  // keeps its own directory, else the configured fallback. Nothing is inferred
+  // from the repo's owner.
+  const searchDirs = checkoutDirs()
   const cloneBase =
-    profile === "work"
-      ? `${projects}/${isWorkRepo ? "work" : "home"}`
-      : projects
-  const searchDirs =
-    profile === "work" ? [`${projects}/work`, `${projects}/home`] : [projects]
+    profileOf(repoFull)?.checkoutDir ?? inboxConfig().checkoutDir ?? ""
 
   let repoPath = ""
   outer: for (const searchDir of searchDirs) {
@@ -844,10 +839,7 @@ export const buildCheckoutCmd = async (
 export const resolveRepoPath = async (
   repoFull: string,
 ): Promise<string | null> => {
-  const projects = process.env.PROJECTS_DIR ?? `${process.env.HOME}/Projects`
-  const profile = process.env.OS_PROFILE ?? ""
-  const searchDirs =
-    profile === "work" ? [`${projects}/work`, `${projects}/home`] : [projects]
+  const searchDirs = checkoutDirs()
   for (const searchDir of searchDirs) {
     if (!existsSync(searchDir)) continue
     let entries: string[]
