@@ -5,7 +5,7 @@
 Move host-specific opinions out of the library into `configureInbox`
 
 `repoPriority` ranked one specific owner's repos first, with one specific repo
-above them; `resolveRepoPath` and the clone path read `OS_PROFILE` and assumed a
+above them; `resolveRepoPath` and the clone path read an environment variable and assumed a
 particular two-directory checkout layout; the cache claimed a directory named
 after one consuming tool. All of it compiled in, and all of it published — a
 ranking baked in at build time ranks its author's repos above its reader's, and
