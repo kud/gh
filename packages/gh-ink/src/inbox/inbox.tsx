@@ -1766,31 +1766,6 @@ export const tabLabel = (
 ): string =>
   marked.size === 0 ? label : `${marked.has(id) ? TAB_MARK : " "} ${label}`
 
-/**
- * Indexes of task rows whose row has already appeared higher up the same list.
- *
- * A ticket with one PR needing you and another in review lands in two bands,
- * which is right — the band reads each PR, not the ticket. What was wrong was
- * drawing the second occurrence identically to the first, so one ticket read as
- * two. The repeat keeps its key and drops its summary.
- *
- * Identity is the URL, never `key`. `key` is a LABEL, and on a task surface that
- * is not a tracker (`life`, whose keys are categories like "Flat") one label
- * legitimately heads several unrelated rows — keying on it hid the summary of
- * every row but the first. A row with no url is never a repeat, because nothing
- * identifies it.
- */
-export const repeatedTaskRows = (items: readonly AnyItem[]): Set<number> => {
-  const seen = new Set<string>()
-  const repeats = new Set<number>()
-  items.forEach((row, i) => {
-    if (row.kind !== "task" || !row.url) return
-    if (seen.has(row.url)) repeats.add(i)
-    else seen.add(row.url)
-  })
-  return repeats
-}
-
 // A row hanging off the one above it. `show-more` counts: it sits inside the
 // group and closes it, so the last VISIBLE PR above it is a tee, not a corner.
 const isChildRow = (item?: AnyItem): boolean =>
@@ -1808,7 +1783,6 @@ const ItemRow = ({
   transient,
   lastChild,
   parent,
-  repeat,
   sparkFrame = 0,
 }: {
   item: AnyItem
@@ -1825,14 +1799,6 @@ const ItemRow = ({
   lastChild?: boolean
   /** This row has indented children hanging off it, so it opens the branch. */
   parent?: boolean
-  /**
-   * This ticket has already appeared higher up the same tab. Its PRs straddle
-   * two bands, and the band is a fact about each PR rather than about the
-   * ticket — so being in both is correct. Rendered at full weight it read as a
-   * SECOND ticket, which is the one thing it is not; dimmed and key-only it
-   * reads as the continuation it is.
-   */
-  repeat?: boolean
   /** Just merged from this cockpit: sparkle in place, then the row is dropped. */
   merged?: boolean
   /** What the refresh just did to this row, for the length of the hold. */
@@ -1914,23 +1880,22 @@ const ItemRow = ({
         <Text bold color={transient ? TRANSIT_COLOUR[transient] : undefined}>
           {transitIcon + " "}
         </Text>
-        <Text color={repeat ? undefined : "#FF8700"} dimColor={repeat} bold={active}>
+        {/* Stated in full every time, including when the same ticket heads two
+            bands. Its PRs genuinely straddle them — the band reads each PR, not
+            the ticket — and a dimmed key-only repeat was tried and dropped: it
+            made the second band's heading harder to read for a duplication that
+            was never actually confusing. */}
+        <Text color="#FF8700" bold={active}>
           {item.key + "  "}
         </Text>
-        {/* The summary is stated once per tab. Repeating it is what made one
-            ticket look like two, and the key alone is enough to tie the branch
-            back to the row above — they are a few lines apart, in the same tab,
-            under a heading that says why this half is separate. */}
-        {repeat ? null : (
-          <Text
-            bold={active || transient === "in"}
-            dimColor={transient === "out"}
-            strikethrough={transient === "out"}
-          >
-            {truncate(item.summary, titleMax)}
-          </Text>
-        )}
-        {note && !repeat ? <Text dimColor>{` ${note}`}</Text> : null}
+        <Text
+          bold={active || transient === "in"}
+          dimColor={transient === "out"}
+          strikethrough={transient === "out"}
+        >
+          {truncate(item.summary, titleMax)}
+        </Text>
+        {note ? <Text dimColor>{` ${note}`}</Text> : null}
         {transitLabel ? (
           <Text bold color={TRANSIT_COLOUR[transient!]}>
             {"  " + transitLabel}
@@ -2789,11 +2754,6 @@ const BrowseScreen = ({
   //
   // Over section.items rather than the visible slice, so scrolling past the
   // first occurrence does not promote the second into a fresh-looking ticket.
-  const repeatedTasks = useMemo(
-    () => repeatedTaskRows(section.items),
-    [section.items],
-  )
-
   const viewStart = viewStarts[activeId] ?? 0
   const visibleCount = windowCount(section.items, viewStart, listHeight)
   const visibleItems = section.items.slice(viewStart, viewStart + visibleCount)
@@ -3387,7 +3347,6 @@ const BrowseScreen = ({
                   item.kind === "task" &&
                   isChildRow(section.items[viewStart + i + 1])
                 }
-                repeat={repeatedTasks.has(viewStart + i)}
                 sparkFrame={sparkFrame}
                 gap={
                   // Window-relative, never `viewStart + i`. fitCount prices the
