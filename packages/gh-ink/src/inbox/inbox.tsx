@@ -481,10 +481,26 @@ export const whoseMove = (
   health: Health,
   sectionId: string,
   standing?: Standing,
+  theySpokeLast?: boolean,
 ): "you" | "them" =>
-  YOURS[standing ?? STANDING[sectionId] ?? "queued"].includes(health)
+  // Somebody else having the last word outranks every review state below. It is
+  // the plainest claim on you there is — a question asked, an objection raised,
+  // a "can you rebase" — and none of it shows up as a health, because a bare
+  // comment approves nothing, fails nothing and opens no thread.
+  //
+  // The row already SAID this and the band disagreed with it: the turn arrow
+  // reads lastActor and drew `←`, and the explain panel spelled out "X spoke
+  // last, your reply is owed", while the band filed it under Their move. Two
+  // signals on one row, pointing opposite ways, until 2026-08-27.
+  //
+  // Only in that direction. YOU having spoken last does not hand the row over —
+  // red CI on your own PR is yours whether or not you commented after it — so
+  // that case falls through to the table.
+  theySpokeLast
     ? "you"
-    : "them"
+    : YOURS[standing ?? STANDING[sectionId] ?? "queued"].includes(health)
+      ? "you"
+      : "them"
 
 const BAND_LABEL: Record<"you" | "them", string> = {
   you: "Your move",
@@ -504,6 +520,10 @@ const BAND_LABEL: Record<"you" | "them", string> = {
 export const layoutGHItems = (
   items: GHItem[],
   sectionId: string,
+  // Needed to read `lastActor`, which is only meaningful against somebody. Left
+  // out, the bands fall back to health and standing alone — the behaviour every
+  // caller had before, so an un-updated host degrades rather than breaks.
+  login?: string,
 ): AnyItem[] => {
   if (sectionId === "done") return insertRepoHeaders(sortByRecency(items))
 
@@ -511,7 +531,13 @@ export const layoutGHItems = (
   const bands = (["you", "them"] as const).map((side) => ({
     side,
     rows: sorted.filter(
-      (i) => whoseMove(i.health, sectionId, i.standing) === side,
+      (i) =>
+        whoseMove(
+          i.health,
+          sectionId,
+          i.standing,
+          !!login && !!i.lastActor && i.lastActor !== login,
+        ) === side,
     ),
   }))
   const filled = bands.filter((b) => b.rows.length > 0)
