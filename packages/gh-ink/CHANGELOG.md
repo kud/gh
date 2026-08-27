@@ -1,5 +1,52 @@
 # @kud/gh-ink
 
+## 0.25.0
+
+### Minor Changes
+
+- e0c7f1a: One signal, one fetch — however many cockpits are open
+
+  A mutation signal wakes every running cockpit, and each paid the full query for
+  the same answer. Three open cockpits turned one closed issue into three fetches,
+  at 111 GraphQL points each: about fifteen signals an hour and a 5,000-point
+  budget is gone.
+
+  The cache is already shared on disk and keyed per scope, so a sibling that has
+  refetched since the signal holds exactly what we would pay for. The watch path
+  now adopts that instead of refetching — strictly _after_ the signal, since an
+  entry written before it is stale by definition.
+
+  Two details make it work rather than merely look right. A new `watchJitterMs`
+  staggers the woken instances, or they would all check in the same millisecond,
+  all miss, and all fetch — the very behaviour this replaces. A lost race degrades
+  to the old behaviour, never worse. And an adopted result goes through the same
+  path as a fetched one, so it still passes the manual-apply gate rather than
+  reshuffling the list under you.
+
+  `watchJitterMs` defaults to **0**: a package that adds randomness to its own
+  timing makes every host's tests flaky, and how many instances you run is a thing
+  only you know. Set it to comfortably more than one round trip if you keep
+  several cockpits open.
+
+  No daemon, no socket, no process to own: the file is the broker, as it already
+  was for the signal itself.
+
+### Patch Changes
+
+- 189b758: Action failures say what went wrong, and cost less to attempt
+
+  `✗ Unsubscribe failed` is not a message, it is a shrug — and the first time it
+  mattered the reason was a spent GraphQL quota, recoverable and twenty minutes
+  away, which the flash had thrown on the floor. Every action failure now names
+  the cause and keeps gh's raw line on the end, so an unmapped one stays
+  diagnosable. The fetch path learned this when `gh: HTTP 502` was landing under
+  the frame; the actions never did.
+
+  Unsubscribe also resolves the node id over REST rather than `gh pr view --json`,
+  which is GraphQL. It was spending the scarcer of the two budgets twice for one
+  action — and on the day it first failed, GraphQL was at zero while REST still
+  had 4,996 of 5,000.
+
 ## 0.24.0
 
 ### Minor Changes
