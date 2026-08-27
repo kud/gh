@@ -1,5 +1,40 @@
 # @kud/gh-ink
 
+## 0.22.0
+
+### Minor Changes
+
+- 812676e: Retire the in-app work ⇄ home toggle
+
+  **Breaking**: `workToggle` is gone and `initialIncludeWork` is now `includeWork`.
+  A host that used to pass `workToggle={cond}` with `initialIncludeWork={side}`
+  passes `includeWork={cond ? side : undefined}` — `undefined` means no split at
+  all, which is what a falsy `workToggle` used to mean.
+
+  Which side you are looking at is decided when the command starts, from the
+  directory it was run in. A key that flipped it afterwards could only ever put
+  the inbox out of step with the scope it was launched in, with nothing on screen
+  to explain the disagreement — and it made `w` a promise the scoped runs
+  (`--here`, the home profile) could not keep.
+
+  The header keeps a static `work` / `home` label where the switch used to be.
+  Every row on screen depends on which side you are on, and the two inboxes look
+  alike enough that dropping the word entirely would leave "where are my other
+  PRs" unanswerable.
+
+- d670704: Unsubscribe from a PR or issue, on `u`
+
+  A row you no longer want to hear about had to be dealt with on github.com, which
+  means leaving the inbox to do the one thing the inbox is for. `u` — and an
+  `Unsubscribe` entry in the `↵` menu — drops your notification subscription in
+  place.
+
+  It resolves the node id when the action runs rather than carrying one on every
+  row: `updateSubscription` is GraphQL-only, and widening the inbox query to serve
+  a single action would cost every fetch. The state is `UNSUBSCRIBED`, never
+  `IGNORED` — ignoring is sticky in a way that is hard to notice months later, and
+  repo-level unwatching is a different verb this deliberately does not offer.
+
 ## 0.21.0
 
 ### Minor Changes
