@@ -6,7 +6,8 @@ import { layoutGHItems, whoseMove, type GHItem } from "./inbox.js"
  * The 2026-08-26 case: the Review tab held 20 rows across five repos, of which
  * exactly two could be reviewed. The other eighteen were red CI, merge
  * conflicts and drafts — all of them the author's problem, none of them
- * yours, and all of them interleaved with the two that were.
+ * yours, and all of them interleaved with the two that were. (Where YOU are
+ * the author, that same draft is yours: see the draft case below.)
  *
  * Repo grouping cannot express that, because it is the wrong axis: the tab
  * already says which relationship you are looking at, and nothing said whether
@@ -75,11 +76,25 @@ describe("whoseMove", () => {
       expect(whoseMove(h, "reviewed")).toBe("them")
   })
 
-  it("never claims a draft or an unknown", () => {
-    for (const tab of ["open", "review", "reviewed"]) {
-      expect(whoseMove("draft", tab)).toBe("them")
+  it("claims YOUR draft and nobody else's", () => {
+    // The band asks whose move it is, and on a draft you wrote there is no one
+    // else in the room: nobody can advance it and nobody has been asked to.
+    // Filing it under Their move said the opposite of what was true.
+    expect(whoseMove("draft", "open")).toBe("you")
+    expect(whoseMove("draft", "mine")).toBe("you")
+    expect(whoseMove("draft", "draft")).toBe("you")
+
+    // Somebody else's draft you were pointed at is still theirs to finish —
+    // which is why this lives on `authored` alone and not on all three.
+    expect(whoseMove("draft", "review")).toBe("them")
+    expect(whoseMove("draft", "reviewed")).toBe("them")
+  })
+
+  it("never claims an unknown, from any position", () => {
+    // An issue has no review state to read, so claiming it would be a guess
+    // rather than a reading — including on a tab of your own work.
+    for (const tab of ["open", "mine", "review", "reviewed"])
       expect(whoseMove("none", tab)).toBe("them")
-    }
   })
 
   it("reads a folded `mine` tab exactly like `open` and `draft`", () => {

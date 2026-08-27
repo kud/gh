@@ -453,10 +453,23 @@ const STANDING: Record<string, Standing> = {
 // on your own PR, and the queue states (waiting, pending) only while a review is
 // still wanted from you. `threads` alone is yours from all three — it is
 // literally "your reply is owed", and it is the only thing left on a PR you have
-// already reviewed. Everything unlisted, `draft` and `none` included, is theirs:
-// a draft is not asking, which is why sortItems sinks one too.
+// already reviewed.
+//
+// `draft` is yours ONLY when you authored it, and that asymmetry is the whole
+// point of listing it here. The band asks whose move it is, and on your own
+// draft there is no one else in the room — nobody can advance it, nobody has
+// been asked to, and filing it under Their move said the opposite of what was
+// true. Somebody else's draft you were pointed at stays theirs, which is why
+// this appears in `authored` and not in the other two.
+//
+// It is still SUNK to the bottom of its band by sortItems: yours to finish is
+// not the same as yours to finish now, and a fresh draft must not outrank a PR
+// somebody has genuinely been waiting on. Visible as yours, ranked last.
+//
+// `none` remains unlisted from every position — an issue has no review state to
+// read, so claiming it would be a guess rather than a reading.
 const YOURS: Record<Standing, Health[]> = {
-  authored: ["ci-fail", "conflict", "changes-req", "threads", "approved"],
+  authored: ["ci-fail", "conflict", "changes-req", "threads", "approved", "draft"],
   queued: ["waiting", "pending", "threads", "approved"],
   spoken: ["threads"],
 }
