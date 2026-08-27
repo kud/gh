@@ -528,12 +528,42 @@ export const layoutGHItems = (
   ])
 }
 
-// Keep only work- or only home-origin GitHub items, leaving non-GH rows
-// (task) untouched. Mirrors filterByRepos' gh/other split.
+/**
+ * A two-way repo split, when a host has one. `undefined` — the ordinary case —
+ * means no split at all: every row stands.
+ *
+ * The package deliberately does not NAME the sides. It hardcoded "work" and
+ * "home" until 2026-08-27: one reader's two lives compiled into a library
+ * anyone can install, printed in a header where no other host would recognise
+ * the word. The predicate, the side, and the word are all yours.
+ *
+ * Chosen once, by the host, before the first paint. There is no in-app toggle,
+ * because a key that flipped it could only ever put the inbox out of step with
+ * the scope the command was started in, with nothing on screen to explain the
+ * disagreement.
+ */
+export type OriginSplit = {
+  /** Rows whose repo this matches are one side; everything else is the other. */
+  match: (repo: string) => boolean
+  /** Which side to show. */
+  show: "matched" | "rest"
+  /** What to call the visible side in the header. Omitted, nothing is shown. */
+  label?: string
+}
+
+/**
+ * Keep only one side of a two-way repo split, leaving non-GH rows (task)
+ * untouched. Mirrors filterByRepos' gh/other split.
+ *
+ * `keep` is positional — "the ones that matched" or "the rest" — and never a
+ * name. This took the literal strings "work" and "home" until 2026-08-27, which
+ * is one reader's life compiled into a published library: no other host has
+ * those two categories, and several have none at all.
+ */
 export const filterByOrigin = (
   sections: Section[],
-  keep: "work" | "home",
-  isWorkRepo: (repo: string) => boolean,
+  keep: "matched" | "rest",
+  match: (repo: string) => boolean,
 ): Section[] =>
   sections
     .map((s) => {
@@ -544,9 +574,9 @@ export const filterByOrigin = (
           i.kind !== "show-more" &&
           i.kind !== "show-less" &&
           (i.kind === "pr" || i.kind === "issue"
-            ? keep === "work"
-              ? isWorkRepo(i.repo)
-              : !isWorkRepo(i.repo)
+            ? keep === "matched"
+              ? match(i.repo)
+              : !match(i.repo)
             : true),
       )
       const gh = kept.filter(
@@ -1452,7 +1482,7 @@ const InboxHeader = ({
   sections,
   login,
   brand,
-  work,
+  scopeLabel,
   loading,
   quiet,
   refreshing,
@@ -1465,7 +1495,8 @@ const InboxHeader = ({
   // The name in the top-left, host-supplied. It is also measured for the rule
   // that fills the rest of the line, so it cannot be a hardcoded literal.
   brand: string
-  work?: boolean
+  /** The active scope, in the host's words. Absent, nothing is shown. */
+  scopeLabel?: string
   loading?: boolean
   quiet?: boolean
   refreshing?: boolean
@@ -1488,13 +1519,16 @@ const InboxHeader = ({
       ? "  "
       : `  ${String(total).padStart(3)} item${total !== 1 ? "s" : ""}  ·  `
   const userSeg = loading || quiet ? "" : `@${login}  `
-  // A LABEL, not a control. Which side you are on is decided when the command
-  // starts — from the directory you ran it in — and there is no way back from
-  // here, so a switch would advertise a keypress that does nothing. It still has
-  // to be on screen: every row you can see depends on it, and a work inbox and a
-  // home inbox look alike enough that "where are my other PRs" is the question
-  // this one word answers.
-  const workLabel = work === undefined ? "" : `  ${work ? "work" : "home"}  `
+  // A LABEL, not a control, and the HOST'S WORD rather than one of ours. Which
+  // side you are on is settled when the command starts, so a switch here would
+  // advertise a keypress that does nothing — but it still has to be on screen,
+  // because every row you can see depends on it and two sides of a split look
+  // alike enough that "where are my other PRs" is the question this answers.
+  //
+  // The package has no opinion on what the sides are called. It printed "work"
+  // and "home" until 2026-08-27, which was one reader's vocabulary showing
+  // through a library anyone can install.
+  const workLabel = scopeLabel ? `  ${scopeLabel}  ` : ""
 
   // Refresh status: pending (actionable) wins, then in-flight, then freshness.
   // Naming the change is the whole argument for keeping the apply manual: the
@@ -1524,7 +1558,7 @@ const InboxHeader = ({
       </Text>
       <Text dimColor>{countSeg}</Text>
       {userSeg ? <Text>{userSeg}</Text> : null}
-      {work !== undefined ? <Text dimColor>{workLabel}</Text> : null}
+      {scopeLabel ? <Text dimColor>{workLabel}</Text> : null}
       {statusText ? (
         <Text
           color={statusColor as any}
@@ -2467,8 +2501,7 @@ const BrowseScreen = ({
   ciStatusState,
   ciJob,
   tabHelp,
-  isWorkRepo,
-  includeWork,
+  origin,
   brand,
   mergedUrls,
   transients,
@@ -2483,14 +2516,7 @@ const BrowseScreen = ({
   transients?: Map<string, Transient>
   /** Which tab is on screen, so the host can spend the hold per tab. */
   onTabChange?: (sectionId: string) => void
-  isWorkRepo?: (repo: string) => boolean
-  /**
-   * Which side of the work ⇄ home split to show, decided by the HOST when the
-   * command starts — there is no in-app toggle, because the answer comes from
-   * the directory you launched in and that cannot change under you.
-   * `undefined` means there is no split at all: show everything.
-   */
-  includeWork?: boolean
+  origin?: OriginSplit
   tabHelp?: [string, string][]
   jiraBase?: string
   jiraKeyRe?: RegExp
@@ -2530,9 +2556,7 @@ const BrowseScreen = ({
   // the time the inbox is on screen that is settled: a toggle could only ever
   // disagree with the scope you actually chose.
   const applyWork = (secs: Section[]): Section[] =>
-    includeWork === undefined || !isWorkRepo
-      ? secs
-      : filterByOrigin(secs, includeWork ? "work" : "home", isWorkRepo)
+    origin ? filterByOrigin(secs, origin.show, origin.match) : secs
   const initialSections = applyWork(sections)
 
   const [localSections, setLocalSections] = useState(initialSections)
@@ -3137,7 +3161,7 @@ const BrowseScreen = ({
         brand={brand}
         sections={localSections}
         login={login}
-        work={includeWork}
+        scopeLabel={origin?.label}
         refreshing={refreshing}
         hasPending={hasPending}
         pendingSummary={pendingSummary}
@@ -3342,8 +3366,7 @@ export const App = ({
   cacheKey,
   title = "inbox",
   detailFor,
-  isWorkRepo,
-  includeWork,
+  origin,
   jiraBase,
   jiraKeyRe,
   jiraTransitions,
@@ -3370,21 +3393,11 @@ export const App = ({
   // reason `extensions` is: the shell knows a row was opened, not what a PR or a
   // mission should look like once it is.
   detailFor?: (ctx: DetailContext) => React.ReactNode
-  // Splitting rows by origin is a two-account concern. Without this predicate
-  // there is nothing to sort by, so `includeWork` alone does nothing.
-  isWorkRepo?: (repo: string) => boolean
-  /**
-   * Which side of the split to show, chosen ONCE by the host at launch — there
-   * is no in-app toggle. `undefined` means no split: every row stands.
-   *
-   * The host decides from where the command was run, so the answer is settled
-   * before the first paint and cannot change under the reader. A `w` key used to
-   * flip it mid-session, which meant the inbox could disagree with the scope the
-   * command had been started in, with nothing on screen explaining why.
-   */
-  includeWork?: boolean
+  /** A two-way repo split, and what to call the side on screen. See OriginSplit. */
+  origin?: OriginSplit
   // One-line meaning per tab, for the ? legend. Supplied by the host because the
-  // tabs themselves are: home's are GitHub searches, work's are Jira statuses.
+  // tabs themselves are: one cockpit's are GitHub searches, another's are board
+  // stages — and only the host knows which it built.
   tabHelp?: [string, string][]
   // One line naming what came back empty, shown under "Nothing open." Host-
   // supplied for the same reason `title` is: the shell knows the list is empty,
@@ -3745,7 +3758,7 @@ export const App = ({
           brand={brandOf(title)}
           sections={[]}
           login=""
-          work={state.phase === "loading" ? includeWork : undefined}
+          scopeLabel={state.phase === "loading" ? origin?.label : undefined}
           loading={state.phase === "loading"}
           quiet={state.phase !== "loading"}
         />
@@ -3824,8 +3837,7 @@ export const App = ({
         pendingSummary={pendingSummary}
         fetchedAt={fetchedAt}
         refreshError={refreshError ?? undefined}
-        isWorkRepo={isWorkRepo}
-        includeWork={includeWork}
+        origin={origin}
         hidden={overlay !== null}
         mergedUrls={mergedUrls}
         transients={transients}
