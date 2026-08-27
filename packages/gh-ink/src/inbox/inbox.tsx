@@ -1899,17 +1899,21 @@ const ItemRow = ({
     return (
       <Box marginTop={gap ? 1 : 0}>
         <Text color="cyan">{active ? "❯ " : "  "}</Text>
+        {/* The branch this ticket opens, and it must come BEFORE the transit
+            cell: the children draw `├─ ` immediately after their own cursor
+            cell, so anything between the cursor and this glyph pushes the trunk
+            off the stem below it. Sat after the transit cell for one release and
+            read as a stray character beside the ticket rather than the top of
+            the branch.
+            `parent` is a fact about the row BELOW, which is why the list
+            supplies it: a ticket whose PRs are all hidden behind `show-more`, or
+            one with none at all, correctly draws no branch. The cell is
+            fixed-width either way, so nothing shifts when a ticket gains or
+            loses its last PR. */}
+        <Text dimColor>{parent ? "┬ " : "  "}</Text>
         <Text bold color={transient ? TRANSIT_COLOUR[transient] : undefined}>
           {transitIcon + " "}
         </Text>
-        {/* The branch this ticket opens. Without it the PRs below hung off
-            nothing — three corners in a column with no trunk above them, so the
-            eye had to infer the grouping from indentation alone. `parent` is a
-            fact about the row BELOW, which is why the list supplies it: a
-            ticket whose PRs are all hidden behind `show-more`, or one with none
-            at all, correctly draws no branch. The cell is fixed-width either
-            way, so nothing shifts when a ticket gains or loses its last PR. */}
-        <Text dimColor>{parent ? "┬ " : "  "}</Text>
         <Text color={repeat ? undefined : "#FF8700"} dimColor={repeat} bold={active}>
           {item.key + "  "}
         </Text>
