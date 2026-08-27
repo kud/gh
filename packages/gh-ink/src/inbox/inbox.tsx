@@ -3745,6 +3745,11 @@ export const App = ({
   // assembled bodies). Proven with Jenkins; the browse glances follow.
   extensions?: InboxExtension[]
 }) => {
+  // App's own, because the loading and empty frames render HERE rather than in
+  // BrowseScreen and need the same height budget it uses — otherwise the frame
+  // hugs one line until the fetch lands and then snaps open.
+  const { rows } = useWindowSize()
+
   const [state, setState] = useState<AppState>({ phase: "loading" })
   const [pending, setPending] = useState<{
     sections: Section[]
@@ -4162,15 +4167,30 @@ export const App = ({
         {hasCiStatus ? (
           <CiStatusLine state={ciStatusState} job={ciJob} />
         ) : null}
-        {state.phase === "loading" ? (
-          <LoadingScreen label={`Fetching ${title}…`} />
-        ) : (
-          <NoRowsScreen
-            reason={state.phase === "empty" ? "empty" : "failed"}
-            detail={state.phase === "failed" ? state.message : emptyHint}
-            onRetry={() => revalidate(true)}
-          />
-        )}
+        {/* Same height budget the browse screen gives its list, so the frame
+            fills the terminal from the first paint instead of hugging one line
+            and then snapping open when the fetch lands. A frame that resizes
+            under you reads as a redraw glitch rather than as data arriving —
+            and on a cold launch this is the ONLY thing on screen, so it is also
+            the first impression the cockpit makes.
+
+            -10 for the same reasons BrowseScreen documents: eight rows of
+            chrome plus the frame's two border rows. The CI line is reserved
+            when it will be there, since it is rendered above this. */}
+        <Box
+          flexDirection="column"
+          minHeight={Math.max(5, rows - 10 - (hasCiStatus ? 2 : 0))}
+        >
+          {state.phase === "loading" ? (
+            <LoadingScreen label={`Fetching ${title}…`} />
+          ) : (
+            <NoRowsScreen
+              reason={state.phase === "empty" ? "empty" : "failed"}
+              detail={state.phase === "failed" ? state.message : emptyHint}
+              onRetry={() => revalidate(true)}
+            />
+          )}
+        </Box>
       </Box>
     )
 
