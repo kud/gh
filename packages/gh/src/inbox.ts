@@ -20,6 +20,28 @@
  * beneath each one. A caller that renders a title and a link was paying for
  * every check run on every open PR. At 111 a poller gets 45 refreshes an hour.
  */
+/**
+ * How many of your own open PRs to ask for.
+ *
+ * This is the single biggest lever on the query's cost, because connections
+ * MULTIPLY: the health and conversation fragments hang ~80 nodes off each PR
+ * (`reviewThreads(first: 50)`, `statusCheckRollup.contexts(first: 20)`,
+ * `labels(first: 10)`), so the outer number is a multiplier on all of them.
+ * GitHub scores a call by the nodes it could return, not by how many calls you
+ * make — which is why batching queries saves nothing here and this saves a lot.
+ *
+ * It was 100, against ~25,550 total nodes and a measured 111 points. 100 × 80 is
+ * 8,000 of those nodes from this one search, and it was 100 for no reason beyond
+ * the search API's own maximum — every other search here already asks for 20-30.
+ * At 30 this search costs 2,400 nodes instead of 8,000, roughly halving the whole
+ * query.
+ *
+ * `issueCount` is fetched alongside so the cap can never drop rows in silence: a
+ * scalar costs nothing, and a host that knows the true total can say what it is
+ * not showing.
+ */
+export const MY_PRS_LIMIT = 30
+
 export type InboxShape = "full" | "minimal"
 
 /** A repo-scoped or account-wide inbox. */
@@ -136,7 +158,8 @@ export const buildInboxQuery = ({
 {
   rateLimit { cost nodeCount remaining resetAt }
   viewer { login }
-  myPRs: search(query: "${scope}is:pr is:open author:@me", type: ISSUE, first: 100) {
+  myPRs: search(query: "${scope}is:pr is:open author:@me", type: ISSUE, first: ${MY_PRS_LIMIT}) {
+    issueCount
     nodes { __typename ... on PullRequest {
       number title createdAt url headRefName isDraft
       repository { nameWithOwner }
