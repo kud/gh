@@ -16,6 +16,7 @@ export {
   explainItem,
   filterByOrigin,
   signatureOf,
+  repeatedTaskRows,
   filterBySearch,
   filterByRepos,
   withoutItem,
