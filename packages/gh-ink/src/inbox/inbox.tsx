@@ -490,25 +490,37 @@ export const whoseMove = (
   sectionId: string,
   standing?: Standing,
   theySpokeLast?: boolean,
-): "you" | "them" =>
-  // Somebody else having the last word outranks every review state below. It is
-  // the plainest claim on you there is — a question asked, an objection raised,
-  // a "can you rebase" — and none of it shows up as a health, because a bare
-  // comment approves nothing, fails nothing and opens no thread.
+): "you" | "them" => {
+  const position = standing ?? STANDING[sectionId] ?? "queued"
+
+  // Somebody else having the last word is a claim on you — a question asked, an
+  // objection raised, a "can you rebase" — and none of it shows up as a health,
+  // because a bare comment approves nothing, fails nothing and opens no thread.
+  // The row already said so and the band disagreed: the turn arrow reads
+  // lastActor and drew `←`, the explain panel spelled out "X spoke last, your
+  // reply is owed", and the band filed it under Their move.
   //
-  // The row already SAID this and the band disagreed with it: the turn arrow
-  // reads lastActor and drew `←`, and the explain panel spelled out "X spoke
-  // last, your reply is owed", while the band filed it under Their move. Two
-  // signals on one row, pointing opposite ways, until 2026-08-27.
+  // ON YOUR OWN PR ONLY, though. Read unconditionally it destroys the very
+  // distinction the table below is built on — the mechanical blockers (ci-fail,
+  // conflict, changes-req) are yours on your PR and theirs on theirs — so a
+  // stranger's failing build became your move the moment they commented on it.
+  // Shipped that way for one release on 2026-08-27; eleven rows of somebody
+  // else's work turned up under Your move, which is exactly the noise the bands
+  // exist to prevent.
   //
-  // Only in that direction. YOU having spoken last does not hand the row over —
-  // red CI on your own PR is yours whether or not you commented after it — so
-  // that case falls through to the table.
-  theySpokeLast
-    ? "you"
-    : YOURS[standing ?? STANDING[sectionId] ?? "queued"].includes(health)
-      ? "you"
-      : "them"
+  // The other two positions need no help from it: a review actually wanted from
+  // you is `waiting`/`pending`, and a conversation you are in is `threads`, both
+  // already listed. What is deliberately NOT claimed is a plain reply on a PR
+  // you reviewed once — real, but indistinguishable from the author saying
+  // "rebased" to nobody in particular.
+  //
+  // One direction only, even here: YOU having spoken last does not hand the row
+  // over, since red CI on your own PR is yours whether or not you commented
+  // after it.
+  if (theySpokeLast && position === "authored") return "you"
+
+  return YOURS[position].includes(health) ? "you" : "them"
+}
 
 const BAND_LABEL: Record<"you" | "them", string> = {
   you: "Your move",
