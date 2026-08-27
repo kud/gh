@@ -15,6 +15,7 @@ export {
   relativeTime,
   explainItem,
   filterByOrigin,
+  signatureOf,
   filterBySearch,
   filterByRepos,
   withoutItem,

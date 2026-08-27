@@ -1275,6 +1275,42 @@ export const buildActions = (
     },
   })
 
+  // Only where a review was actually REQUESTED of you — `queued` is exactly
+  // that, and the one standing where removing yourself does anything. On a PR
+  // you already reviewed (`spoken`) there is no request left to withdraw, and
+  // `gh pr edit` would fail on someone who is not a reviewer.
+  //
+  // This is the answer to "stop showing me this PR" that Unsubscribe is NOT.
+  // Unsubscribing stops notifications and leaves every search matching, because
+  // `review-requested:@me` does not consult subscription state — the row comes
+  // straight back. Dropping the request removes the row at its cause.
+  //
+  // Two things can undo it, and neither is a bug here: a CODEOWNERS rule
+  // covering the touched paths re-requests you on the next push, and a request
+  // that arrived through a TEAM cannot be withdrawn for you alone.
+  if (item.kind === "pr" && item.standing === "queued" && login) {
+    actions.push({
+      label: "Remove me as reviewer",
+      hint: "x",
+      run: () => {
+        // Optimistic, then restored by a refresh if GitHub refuses — the same
+        // shape Close uses. A row that vanishes and returns reads as a failure;
+        // one that lingers for a round trip reads as a broken keypress.
+        onRemove?.(item as GHItem)
+        showFlash(`⋯ Removing you from #${item.number}…`)
+        void quietly`gh pr edit ${item.number} --repo ${item.repo} --remove-reviewer ${login}`
+          .then(() => {
+            showFlash(`✓ Removed you as reviewer on #${item.number}`)
+            ext?.onActed?.()
+          })
+          .catch(() => {
+            showFlash(`✗ Could not remove you from #${item.number}`)
+            onRefresh?.()
+          })
+      },
+    })
+  }
+
   actions.push({
     label: "Unsubscribe",
     hint: "u",
@@ -1730,6 +1766,14 @@ export const tabLabel = (
 ): string =>
   marked.size === 0 ? label : `${marked.has(id) ? TAB_MARK : " "} ${label}`
 
+// A row hanging off the one above it. `show-more` counts: it sits inside the
+// group and closes it, so the last VISIBLE PR above it is a tee, not a corner.
+const isChildRow = (item?: AnyItem): boolean =>
+  !!item &&
+  (item.kind === "show-more" ||
+    item.kind === "show-less" ||
+    ("indent" in item && item.indent === true))
+
 const ItemRow = ({
   item,
   active,
@@ -1737,12 +1781,24 @@ const ItemRow = ({
   login,
   merged,
   transient,
+  lastChild,
+  parent,
   sparkFrame = 0,
 }: {
   item: AnyItem
   active: boolean
   gap?: boolean
   login?: string
+  /**
+   * This indented row is the last of its group, so it draws the corner and its
+   * siblings above draw the tee. A row cannot know this about itself — it is a
+   * fact about the row BELOW — so the list supplies it. Every child drew `└─`
+   * before, which made a ticket with three PRs draw three closing corners and
+   * no tree at all.
+   */
+  lastChild?: boolean
+  /** This row has indented children hanging off it, so it opens the branch. */
+  parent?: boolean
   /** Just merged from this cockpit: sparkle in place, then the row is dropped. */
   merged?: boolean
   /** What the refresh just did to this row, for the length of the hold. */
@@ -1812,6 +1868,14 @@ const ItemRow = ({
         <Text bold color={transient ? TRANSIT_COLOUR[transient] : undefined}>
           {transitIcon + " "}
         </Text>
+        {/* The branch this ticket opens. Without it the PRs below hung off
+            nothing — three corners in a column with no trunk above them, so the
+            eye had to infer the grouping from indentation alone. `parent` is a
+            fact about the row BELOW, which is why the list supplies it: a
+            ticket whose PRs are all hidden behind `show-more`, or one with none
+            at all, correctly draws no branch. The cell is fixed-width either
+            way, so nothing shifts when a ticket gains or loses its last PR. */}
+        <Text dimColor>{parent ? "┬ " : "  "}</Text>
         <Text color="#FF8700" bold={active}>
           {item.key + "  "}
         </Text>
@@ -1911,7 +1975,9 @@ const ItemRow = ({
   return (
     <Box>
       <Text color="cyan">{active ? "❯ " : "  "}</Text>
-      {item.indent ? <Text dimColor>{"└─ "}</Text> : null}
+      {item.indent ? (
+        <Text dimColor>{lastChild === false ? "├─ " : "└─ "}</Text>
+      ) : null}
       <Text color={color as any} bold>
         {icon + " "}
       </Text>
@@ -2223,6 +2289,7 @@ export const HelpModal = ({
     ["j", "open repo in new tab"],
     ["p", "open repo in new pane"],
     ["u", "unsubscribe from this item"],
+    ["x", "remove yourself as reviewer"],
     ...(hasJira
       ? ([["t", "Jira: move / open ticket"]] as [string, string][])
       : []),
@@ -3023,6 +3090,27 @@ const BrowseScreen = ({
         .catch(() => showFlash(`✗ Unsubscribe failed for #${activeItem.number}`))
       return
     }
+    // Mirrors the menu entry's guard exactly. A hint that renders on a row the
+    // keymap will not act on is worse than no hint — it reads as a broken key.
+    if (
+      input === "x" &&
+      activeItem.kind === "pr" &&
+      activeItem.standing === "queued" &&
+      login
+    ) {
+      removeItemFromSections(activeItem)
+      showFlash(`⋯ Removing you from #${activeItem.number}…`)
+      void quietly`gh pr edit ${activeItem.number} --repo ${activeItem.repo} --remove-reviewer ${login}`
+        .then(() => {
+          showFlash(`✓ Removed you as reviewer on #${activeItem.number}`)
+          onActed?.()
+        })
+        .catch(() => {
+          showFlash(`✗ Could not remove you from #${activeItem.number}`)
+          onRefresh?.()
+        })
+      return
+    }
     if (input === "b" && activeItem.kind === "pr" && activeItem.branch) {
       clipboard(activeItem.branch)
       showFlash(`✓ Copied ${activeItem.branch}`)
@@ -3231,6 +3319,18 @@ const BrowseScreen = ({
                   !!mergedUrls?.includes(item.url)
                 }
                 transient={transientOf(transients, item)}
+                // Computed against section.items, never the visible slice: a
+                // window boundary is not the end of a group, and slicing first
+                // would draw a closing corner wherever the scroll happens to cut.
+                lastChild={
+                  "indent" in item && item.indent
+                    ? !isChildRow(section.items[viewStart + i + 1])
+                    : undefined
+                }
+                parent={
+                  item.kind === "task" &&
+                  isChildRow(section.items[viewStart + i + 1])
+                }
                 sparkFrame={sparkFrame}
                 gap={
                   // Window-relative, never `viewStart + i`. fitCount prices the
@@ -3358,8 +3458,20 @@ type AppState =
 
 // `age` excluded: it's relative ("3d") and drifts each fetch, so it would flag
 // "new" as PRs merely get older.
-const signatureOf = (sections: Section[]): string =>
-  JSON.stringify(sections, (k, v) => (k === "age" ? undefined : v))
+// Every RELATIVE time is stripped, not just `age`. These are strings like "5m"
+// and "2d" rendered from a timestamp, so they drift on their own while nothing
+// on GitHub moves — and a signature that counts them turns the clock into a
+// change. `activityAge` was left in until 2026-08-27, which is why a cockpit
+// left open kept lighting up "● new · r apply" over an inbox nobody had touched:
+// a row that said 5m now said 6m, and that was the whole of it. `ts` stays in,
+// deliberately — it is the underlying timestamp, and when THAT moves something
+// really did happen.
+const RELATIVE_TIME_KEYS = new Set(["age", "activityAge"])
+
+export const signatureOf = (sections: Section[]): string =>
+  JSON.stringify(sections, (k, v) =>
+    RELATIVE_TIME_KEYS.has(k) ? undefined : v,
+  )
 
 export const App = ({
   fetcher,
@@ -3603,7 +3715,19 @@ export const App = ({
           }
           showData(fresh.sections, fresh.login)
         } else if (freshKey !== displayedKey.current) {
-          setPending(fresh)
+          // A changed signature is necessary but not sufficient. Belt and
+          // braces for the class of bug `activityAge` was one instance of: if
+          // the diff finds nothing entering, leaving or moving, then whatever
+          // drifted is something the reader cannot see, and asking them to
+          // press `r` to apply it spends attention on nothing. Swap silently
+          // and keep the fresher data.
+          const { counts } = diffSections(
+            displayedSections.current,
+            fresh.sections,
+          )
+          if (counts.added + counts.removed + counts.changed === 0)
+            showData(fresh.sections, fresh.login)
+          else setPending(fresh)
         } else {
           setPending(null)
         }
