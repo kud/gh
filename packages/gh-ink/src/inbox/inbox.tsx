@@ -1064,6 +1064,37 @@ const drillLabel = (item: AnyItem): string => {
   return "Drill in"
 }
 
+// Your own notification switch on one item, which GitHub exposes only as a
+// GraphQL mutation over the node id. The inbox query does not carry one, and
+// adding an id to every row to serve a single action is the wrong trade — so it
+// is resolved here, once, at the moment the action actually runs.
+//
+// UNSUBSCRIBE, not IGNORED: ignoring is sticky in a way that is hard to notice
+// later, and the row you are looking at is the one you want to stop hearing
+// about, not the whole repo. Repo-level unwatching is a different verb and
+// deliberately not offered here.
+//
+// Idempotent — unsubscribing twice succeeds, so the action does not need to know
+// whether you were subscribed in the first place.
+const UNSUBSCRIBE_MUTATION = `
+  mutation($id: ID!) {
+    updateSubscription(input: { subscribableId: $id, state: UNSUBSCRIBED }) {
+      subscribable { viewerSubscription }
+    }
+  }
+`
+
+const unsubscribeFrom = async (item: GHItem): Promise<void> => {
+  const view = item.kind === "pr" ? "pr" : "issue"
+  const found =
+    await quietly`gh ${view} view ${item.number} --repo ${item.repo} --json id --jq .id`
+  const id = found.stdout.trim()
+  // gh exits 0 having printed nothing when --jq finds no key, so an empty id is
+  // the shape a failure arrives in — not an exception.
+  if (!id) throw new Error(`no node id for ${item.repo}#${item.number}`)
+  await quietly`gh api graphql -f query=${UNSUBSCRIBE_MUTATION} -f id=${id}`
+}
+
 export const buildActions = (
   item: AnyItem,
   login: string,
@@ -1198,6 +1229,17 @@ export const buildActions = (
     run: () => {
       clipboard(item.repo)
       showFlash(`✓ Copied ${item.repo}`)
+    },
+  })
+
+  actions.push({
+    label: "Unsubscribe",
+    hint: "u",
+    run: () => {
+      showFlash(`⋯ Unsubscribing from #${item.number}…`)
+      void unsubscribeFrom(item as GHItem)
+        .then(() => showFlash(`✓ Unsubscribed from #${item.number}`))
+        .catch(() => showFlash(`✗ Unsubscribe failed for #${item.number}`))
     },
   })
 
@@ -2135,6 +2177,7 @@ export const HelpModal = ({
     ["s", "switch to branch here"],
     ["j", "open repo in new tab"],
     ["p", "open repo in new pane"],
+    ["u", "unsubscribe from this item"],
     ...(hasJira
       ? ([["t", "Jira: move / open ticket"]] as [string, string][])
       : []),
@@ -2944,6 +2987,16 @@ const BrowseScreen = ({
         void runInPane(cmd).catch(() => {})
         showFlash(`↗ ${drillLabel(activeItem)}`)
       }
+      return
+    }
+    if (
+      input === "u" &&
+      (activeItem.kind === "pr" || activeItem.kind === "issue")
+    ) {
+      showFlash(`⋯ Unsubscribing from #${activeItem.number}…`)
+      void unsubscribeFrom(activeItem)
+        .then(() => showFlash(`✓ Unsubscribed from #${activeItem.number}`))
+        .catch(() => showFlash(`✗ Unsubscribe failed for #${activeItem.number}`))
       return
     }
     if (input === "b" && activeItem.kind === "pr" && activeItem.branch) {
