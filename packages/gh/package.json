@@ -1,6 +1,6 @@
 {
   "name": "@kud/gh",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "description": "Surface-agnostic GitHub core — gh CLI primitives, PR review comments, health, and webhook logic.",
   "type": "module",
   "main": "dist/index.js",
