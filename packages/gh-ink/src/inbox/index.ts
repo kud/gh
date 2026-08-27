@@ -36,6 +36,7 @@ export {
   drillCmd,
   moveCursor,
   fitCount,
+  gapsAbove,
   windowCount,
   maxViewStart,
   withHeaders,
