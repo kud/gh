@@ -1,5 +1,34 @@
 # @kud/gh-ink
 
+## 0.23.3
+
+### Patch Changes
+
+- 4295ada: A blank line between ticket groups, and one rule that draws it
+
+  Ticket groups ran straight into each other: the last PR of one and the ticket
+  line of the next sat on adjacent rows, so several small trees read as one long
+  list — the grouping was in the glyphs and nowhere in the spacing. A ticket row
+  now takes a blank line above it. PR rows still take none, or the tree under a
+  ticket would be pulled apart by the very spacing meant to separate it from the
+  next.
+
+  Also fixes a latent overflow. The gap rule existed twice — the renderer drew it,
+  `fitCount` priced it — and they already disagreed: `fitCount` charged two lines
+  for headers only, while the renderer also gapped a task following a header. Any
+  tab with that shape drew one line more than the window had bought, and the frame
+  is sized to fill the terminal exactly, so it scrolled rather than clipped. Both
+  now call `gapsAbove`.
+
+- 48d06d8: Show a repeated ticket in full again
+
+  A ticket heading two bands rendered its second appearance dimmed and key-only.
+  Reverted: the duplication was never the confusing part, and cutting the summary
+  made the second band harder to read than the repetition ever was.
+
+  The split itself stands — a ticket with one PR needing you and another in review
+  belongs in both, because the band reads each PR rather than the ticket.
+
 ## 0.23.2
 
 ### Patch Changes
