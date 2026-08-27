@@ -21,8 +21,8 @@ class FakeStdout extends EventEmitter {
   lastFrame = () => this.frames.at(-1) ?? ""
 }
 
-// The widest legend either cockpit actually mounts: work adds Jira and the work
-// toggle, both carry the two global extensions, home supplies tab meanings.
+// The widest legend either cockpit actually mounts: work adds Jira, both carry
+// the two global extensions, home supplies tab meanings.
 const EXTENSIONS: InboxExtension[] = [
   {
     id: "delegate",
@@ -54,7 +54,6 @@ const frameAt = (
   const stdout = new FakeStdout(columns)
   const instance = render(
     <HelpModal
-      workToggle
       hasJira
       extensions={EXTENSIONS}
       tabHelp={TAB_HELP}
@@ -87,7 +86,13 @@ const LABELS = [
   "Jira: move / open ticket",
   "Copy prompt to clipboard",
   "Delegate to an agent",
+  "unsubscribe from this item",
 ]
+
+// The work ⇄ home split is chosen when the command starts, from the directory it
+// was run in. Advertising a key for it promises a way back that does not exist —
+// and a legend is the one place a reader goes to find out what they can press.
+const RETIRED_LABELS = ["toggle work / home"]
 
 const widest = (frame: string) =>
   Math.max(...frame.split("\n").map((line) => [...line].length))
@@ -101,6 +106,7 @@ describe("HelpModal", () => {
     it(`keeps every label intact at ${columns} columns`, () => {
       const frame = frameAt(columns)
       for (const label of LABELS) expect(frame).toContain(label)
+      for (const label of RETIRED_LABELS) expect(frame).not.toContain(label)
     })
 
     it(`stays inside ${columns} columns`, () => {

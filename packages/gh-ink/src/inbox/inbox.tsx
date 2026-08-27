@@ -1475,7 +1475,13 @@ const InboxHeader = ({
       ? "  "
       : `  ${String(total).padStart(3)} item${total !== 1 ? "s" : ""}  ·  `
   const userSeg = loading || quiet ? "" : `@${login}  `
-  const workLabel = work === undefined ? "" : " w work ●─○ home  "
+  // A LABEL, not a control. Which side you are on is decided when the command
+  // starts — from the directory you ran it in — and there is no way back from
+  // here, so a switch would advertise a keypress that does nothing. It still has
+  // to be on screen: every row you can see depends on it, and a work inbox and a
+  // home inbox look alike enough that "where are my other PRs" is the question
+  // this one word answers.
+  const workLabel = work === undefined ? "" : `  ${work ? "work" : "home"}  `
 
   // Refresh status: pending (actionable) wins, then in-flight, then freshness.
   // Naming the change is the whole argument for keeping the apply manual: the
@@ -1505,13 +1511,7 @@ const InboxHeader = ({
       </Text>
       <Text dimColor>{countSeg}</Text>
       {userSeg ? <Text>{userSeg}</Text> : null}
-      {work !== undefined ? (
-        <>
-          <Text dimColor>{" w "}</Text>
-          <Switch left="work" right="home" value={work ? "left" : "right"} />
-          <Text dimColor>{"  "}</Text>
-        </>
-      ) : null}
+      {work !== undefined ? <Text dimColor>{workLabel}</Text> : null}
       {statusText ? (
         <Text
           color={statusColor as any}
@@ -2135,7 +2135,6 @@ const LEGEND_FOOTNOTE =
   "Each item lands in the FIRST tab that claims it, so counts are residuals rather than totals."
 
 export const HelpModal = ({
-  workToggle,
   extensions,
   hasJira,
   tabHelp,
@@ -2143,7 +2142,6 @@ export const HelpModal = ({
   scroll = 0,
   onScrollRange,
 }: {
-  workToggle?: boolean
   // The extensions themselves, not a `hasCi` boolean. A flag could only ever say
   // "Jenkins exists", which is why a second extension went unlisted here.
   extensions?: InboxExtension[]
@@ -2184,9 +2182,6 @@ export const HelpModal = ({
     ["/", "search"],
     ["f", "filter by repo"],
     ["r", "refresh"],
-    ...(workToggle
-      ? ([["w", "toggle work / home"]] as [string, string][])
-      : []),
     ...extensionLegend(extensions),
     ["?", "this help"],
     ["q", "quit"],
@@ -2451,7 +2446,6 @@ const BrowseScreen = ({
   pendingSummary,
   fetchedAt,
   refreshError,
-  workToggle,
   hidden,
   onOpenPr,
   onOpenIssue,
@@ -2461,7 +2455,7 @@ const BrowseScreen = ({
   ciJob,
   tabHelp,
   isWorkRepo,
-  initialIncludeWork,
+  includeWork,
   brand,
   mergedUrls,
   transients,
@@ -2477,7 +2471,13 @@ const BrowseScreen = ({
   /** Which tab is on screen, so the host can spend the hold per tab. */
   onTabChange?: (sectionId: string) => void
   isWorkRepo?: (repo: string) => boolean
-  initialIncludeWork?: boolean
+  /**
+   * Which side of the work ⇄ home split to show, decided by the HOST when the
+   * command starts — there is no in-app toggle, because the answer comes from
+   * the directory you launched in and that cannot change under you.
+   * `undefined` means there is no split at all: show everything.
+   */
+  includeWork?: boolean
   tabHelp?: [string, string][]
   jiraBase?: string
   jiraKeyRe?: RegExp
@@ -2493,7 +2493,6 @@ const BrowseScreen = ({
   // in a row are still two distinct values — a bare string would compare equal
   // and the flash would fire only once, reading as "it recovered".
   refreshError?: { message: string; at: number }
-  workToggle?: boolean
   hidden?: boolean
   onOpenPr?: (item: GHItem) => void
   onOpenIssue?: (item: GHItem) => void
@@ -2509,18 +2508,19 @@ const BrowseScreen = ({
   ciJob?: string
 }) => {
   const { rows } = useWindowSize()
-  const [includeWork, setIncludeWork] = useState(() =>
-    workToggle ? (initialIncludeWork ?? true) : true,
-  )
-  // Symmetric work ⇄ home switch: ☑ = work only, ☐ = home only. Only active
-  // when workToggle is set (the work-profile cockpit); off elsewhere.
-  // Both directions of the toggle are the same filter with `keep` flipped, so the
-  // host supplies one predicate rather than two filters. No predicate, no split.
-  const applyWork = (secs: Section[], include: boolean): Section[] =>
-    !workToggle || !isWorkRepo
+  // Both directions are the same filter with `keep` flipped, so the host supplies
+  // one predicate rather than two filters. No predicate — or no side asked for —
+  // and there is no split: every section stands.
+  //
+  // This used to be state behind a `w` toggle. It is a launch-time value now
+  // because the answer comes from the directory the command was run in, and by
+  // the time the inbox is on screen that is settled: a toggle could only ever
+  // disagree with the scope you actually chose.
+  const applyWork = (secs: Section[]): Section[] =>
+    includeWork === undefined || !isWorkRepo
       ? secs
-      : filterByOrigin(secs, include ? "work" : "home", isWorkRepo)
-  const initialSections = applyWork(sections, includeWork)
+      : filterByOrigin(secs, includeWork ? "work" : "home", isWorkRepo)
+  const initialSections = applyWork(sections)
 
   const [localSections, setLocalSections] = useState(initialSections)
   const [tabIdx, setTabIdx] = useState(0)
@@ -2575,7 +2575,7 @@ const BrowseScreen = ({
 
   // Pull in fresh data when App applies it (no longer via a loading remount).
   useEffect(() => {
-    setLocalSections(applyWork(sections, includeWork))
+    setLocalSections(applyWork(sections))
   }, [sections])
 
   useEffect(() => {
@@ -2841,19 +2841,6 @@ const BrowseScreen = ({
       onRefresh?.()
       return
     }
-    if (workToggle && input === "w") {
-      const next = !includeWork
-      const nextSections = applyWork(sections, next)
-      // Follow the tab you were ON, not the position it happened to occupy. The
-      // two sides drop different empty sections, so the same index is a different
-      // tab across the switch. Only when the tab has no counterpart at all does
-      // the clamp in the localSections effect get to choose.
-      const keptIdx = nextSections.findIndex((s) => s.id === activeId)
-      setIncludeWork(next)
-      setLocalSections(nextSections)
-      if (keptIdx >= 0) setTabIdx(keptIdx)
-      return
-    }
     // Any extension whose declared key is pressed opens it. This used to be a
     // hardcoded `input === "J"` arm calling onOpenExt("jenkins", …), which made
     // InboxExtension.key decorative — the field existed, BrowseScreen never
@@ -3103,7 +3090,6 @@ const BrowseScreen = ({
   // own legend — the list stays put underneath, dimmed, the way a modal reads.
   const overlay = help ? (
     <HelpModal
-      workToggle={workToggle}
       extensions={extensions}
       hasJira={!!jiraBase}
       tabHelp={tabHelp}
@@ -3138,7 +3124,7 @@ const BrowseScreen = ({
         brand={brand}
         sections={localSections}
         login={login}
-        work={workToggle ? includeWork : undefined}
+        work={includeWork}
         refreshing={refreshing}
         hasPending={hasPending}
         pendingSummary={pendingSummary}
@@ -3344,11 +3330,10 @@ export const App = ({
   title = "inbox",
   detailFor,
   isWorkRepo,
-  initialIncludeWork,
+  includeWork,
   jiraBase,
   jiraKeyRe,
   jiraTransitions,
-  workToggle,
   hasCiStatus,
   ciJob,
   ciFetcher,
@@ -3372,10 +3357,19 @@ export const App = ({
   // reason `extensions` is: the shell knows a row was opened, not what a PR or a
   // mission should look like once it is.
   detailFor?: (ctx: DetailContext) => React.ReactNode
-  // Splitting rows by origin is a two-account concern. Without this predicate the
-  // toggle has nothing to sort by, so `workToggle` alone does nothing.
+  // Splitting rows by origin is a two-account concern. Without this predicate
+  // there is nothing to sort by, so `includeWork` alone does nothing.
   isWorkRepo?: (repo: string) => boolean
-  initialIncludeWork?: boolean
+  /**
+   * Which side of the split to show, chosen ONCE by the host at launch — there
+   * is no in-app toggle. `undefined` means no split: every row stands.
+   *
+   * The host decides from where the command was run, so the answer is settled
+   * before the first paint and cannot change under the reader. A `w` key used to
+   * flip it mid-session, which meant the inbox could disagree with the scope the
+   * command had been started in, with nothing on screen explaining why.
+   */
+  includeWork?: boolean
   // One-line meaning per tab, for the ? legend. Supplied by the host because the
   // tabs themselves are: home's are GitHub searches, work's are Jira statuses.
   tabHelp?: [string, string][]
@@ -3387,7 +3381,6 @@ export const App = ({
   jiraBase?: string
   jiraKeyRe?: RegExp
   jiraTransitions?: JiraTransition[]
-  workToggle?: boolean
   // Reserves a standing CI status row above everything else — loading until
   // the first fetch resolves, then ready/error — so callers that don't wire a
   // job (home's cockpit) see no row at all rather than one that never fills in.
@@ -3739,11 +3732,7 @@ export const App = ({
           brand={brandOf(title)}
           sections={[]}
           login=""
-          work={
-            workToggle && state.phase === "loading"
-              ? (initialIncludeWork ?? true)
-              : undefined
-          }
+          work={state.phase === "loading" ? includeWork : undefined}
           loading={state.phase === "loading"}
           quiet={state.phase !== "loading"}
         />
@@ -3822,9 +3811,8 @@ export const App = ({
         pendingSummary={pendingSummary}
         fetchedAt={fetchedAt}
         refreshError={refreshError ?? undefined}
-        workToggle={workToggle}
         isWorkRepo={isWorkRepo}
-        initialIncludeWork={initialIncludeWork}
+        includeWork={includeWork}
         hidden={overlay !== null}
         mergedUrls={mergedUrls}
         transients={transients}
