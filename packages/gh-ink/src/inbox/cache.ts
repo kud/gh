@@ -47,10 +47,45 @@ export const cacheTtlMs = (): number => inboxConfig().cacheTtlMs
  * fell through to the GitHub row and crashed on `healthDisplay[item.health]`.
  * Not a degraded render: a full-screen React error on launch, cleared only by
  * the refetch landing underneath it.
+ *
+ * 3 — `budget` added. Optional, so a v2 entry would deserialise harmlessly, but
+ * an inbox that cannot see the last known budget makes exactly the decision this
+ * exists to prevent: it fetches.
  */
-const CACHE_VERSION = 2
+const CACHE_VERSION = 3
 
-export type CachedCockpit = { sections: Section[]; login: string; at: number }
+/**
+ * What the last fetch cost and what was left afterwards, as reported INSIDE the
+ * query response by `rateLimit { cost remaining resetAt }`.
+ *
+ * Cached because the budget is shared by every instance and every other tool on
+ * the account, so the useful reading is the most recent one from anywhere — not
+ * whatever this process happens to remember. A cockpit launching cold needs it
+ * BEFORE its first fetch, which is the one moment it has no response to read it
+ * from.
+ *
+ * Never from `GET /rate_limit`. That endpoint is served from replicas that do
+ * not share state: on 2026-08-27 it reported `used: 0, remaining: 5000` while
+ * GraphQL was refusing every call, returned a `reset` exactly 3600s ahead of
+ * each read, and gave `used` values that DECREASED between two calls a second
+ * apart. This figure comes from the service that enforces the limit, in the same
+ * response as the data, so it cannot disagree with itself.
+ */
+export type InboxBudget = {
+  /** Points left in the window. */
+  remaining: number
+  /** What the query just cost, so a caller can price the next one. */
+  cost: number
+  /** ISO-8601, from GitHub rather than computed locally. */
+  resetAt: string
+}
+
+export type CachedCockpit = {
+  sections: Section[]
+  login: string
+  at: number
+  budget?: InboxBudget
+}
 
 const cacheDir = (): string =>
   join(
@@ -66,7 +101,12 @@ export const readCache = (key: string): CachedCockpit | null => {
     const raw = JSON.parse(readFileSync(cacheFile(key), "utf8"))
     if (raw?.version !== CACHE_VERSION) return null
     if (!Array.isArray(raw?.sections)) return null
-    return { sections: raw.sections, login: raw.login ?? "", at: raw.at ?? 0 }
+    return {
+      sections: raw.sections,
+      login: raw.login ?? "",
+      at: raw.at ?? 0,
+      budget: raw.budget,
+    }
   } catch {
     return null
   }
@@ -80,7 +120,7 @@ export const isFresh = (
 
 export const writeCache = (
   key: string,
-  data: { sections: Section[]; login: string },
+  data: { sections: Section[]; login: string; budget?: InboxBudget },
 ): void => {
   try {
     mkdirSync(cacheDir(), { recursive: true })

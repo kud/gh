@@ -37,6 +37,7 @@ export {
   moveCursor,
   fitCount,
   gapsAbove,
+  budgetNotice,
   explainGhAction,
   windowCount,
   maxViewStart,
@@ -63,7 +64,7 @@ export {
   type OriginSplit,
 } from "./inbox.js"
 export type { InboxExtension, ExtensionTarget } from "./extension.js"
-export { readCache, writeCache } from "./cache.js"
+export { readCache, writeCache, type InboxBudget } from "./cache.js"
 export {
   configureInbox,
   inboxConfig,
