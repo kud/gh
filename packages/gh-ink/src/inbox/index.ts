@@ -37,6 +37,7 @@ export {
   moveCursor,
   fitCount,
   gapsAbove,
+  explainGhAction,
   windowCount,
   maxViewStart,
   withHeaders,
