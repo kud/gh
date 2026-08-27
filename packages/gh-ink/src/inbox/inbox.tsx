@@ -3575,9 +3575,11 @@ export const App = ({
   ciPollMs = 60_000,
   watchPath,
   watchDebounceMs = 400,
-  // Spread across instances so siblings do not all fetch at once. Wide enough
-  // that the first one's round trip lands before the next one looks.
-  watchJitterMs = 3_000,
+  // Zero by default, deliberately. A package that adds randomness to its own
+  // timing makes every host's tests flaky — this one's went green locally on a
+  // lucky draw and red in CI. It is also a host concern: only somebody running
+  // several cockpits at once needs the stagger, and only they know how many.
+  watchJitterMs = 0,
   extensions,
   tabHelp,
   emptyHint,
@@ -3633,6 +3635,9 @@ export const App = ({
    * Random spread added to `watchDebounceMs`, so several cockpits woken by one
    * signal take turns instead of stampeding. The first to wake fetches and
    * writes the shared cache; the others adopt it and pay nothing.
+   *
+   * Defaults to 0 — no randomness unless a host asks for it. Set it to comfortably
+   * more than one round trip when you expect several instances to be open.
    */
   watchJitterMs?: number
   // Domain extensions the host can mount as full-screen overlays (their -ink
