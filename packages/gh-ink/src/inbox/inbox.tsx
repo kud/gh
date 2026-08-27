@@ -729,10 +729,29 @@ export const moveCursor = (
   return next
 }
 
-const itemLines = (item: AnyItem, isFirst: boolean): number =>
-  (item.kind === "repo-header" || item.kind === "subgroup-header") && !isFirst
-    ? 2
-    : 1
+/**
+ * Whether this row draws a blank line above it.
+ *
+ * ONE definition, because two readers need the same answer: the renderer draws
+ * the gap, and fitCount pays for it out of the window budget. They disagreed
+ * until 2026-08-27 — fitCount priced only headers at two lines while the
+ * renderer ALSO gapped a task row following a header — so a tab with that shape
+ * drew one line more than the window had bought. The frame is sized to fill the
+ * terminal exactly, so the overflow scrolls the whole panel instead of clipping.
+ *
+ * Index-based rather than item-based: whether a row gaps depends on what sits
+ * above it, which an item alone cannot answer.
+ */
+export const gapsAbove = (items: readonly AnyItem[], i: number): boolean => {
+  const item = items[i]
+  if (!item || i === 0) return false
+  if (item.kind === "repo-header" || item.kind === "subgroup-header") return true
+  // Every ticket opens a group of its own. Without a break the last PR of one
+  // and the ticket line of the next sit on adjacent rows, and several small
+  // trees read as one long list — the grouping is there in the glyphs and
+  // nowhere in the spacing.
+  return item.kind === "task"
+}
 
 export const fitCount = (
   items: AnyItem[],
@@ -742,7 +761,9 @@ export const fitCount = (
   let lines = 0
   let count = 0
   for (let i = start; i < items.length; i++) {
-    const cost = itemLines(items[i], i === start)
+    // The window's first row never draws its gap, so it is never charged for
+    // one — gapping it would spend a line the budget never bought.
+    const cost = i !== start && gapsAbove(items, i) ? 2 : 1
     if (lines + cost > budget) break
     lines += cost
     count++
@@ -3348,26 +3369,11 @@ const BrowseScreen = ({
                   isChildRow(section.items[viewStart + i + 1])
                 }
                 sparkFrame={sparkFrame}
-                gap={
-                  // Window-relative, never `viewStart + i`. fitCount prices the
-                  // window's FIRST row at one line (isFirst), so gapping it when
-                  // scrolled draws a row the budget never bought — and the frame
-                  // is sized to fill the terminal exactly, so the overflow scrolls
-                  // the whole panel up a line instead of clipping.
-                  i > 0 &&
-                  (item.kind === "repo-header" ||
-                    item.kind === "subgroup-header" ||
-                    // A header is always followed by a blank line before its
-                    // first child — in Other PRs that's "free" because the
-                    // child is itself a repo-header (gap above). A task row
-                    // has no such stand-in, so it needs this explicitly. Never
-                    // applies between two tickets/PRs — only right after a
-                    // header.
-                    (item.kind === "task" &&
-                      ["repo-header", "subgroup-header"].includes(
-                        section.items[viewStart + i - 1]?.kind,
-                      )))
-                }
+                // `i > 0` is window-relative and stays that way: the window's
+                // first row never draws its gap, and fitCount does not charge
+                // for one. The rule itself is gapsAbove, shared with fitCount so
+                // the two cannot drift.
+                gap={i > 0 && gapsAbove(section.items, viewStart + i)}
               />
             ))}
           </Box>
