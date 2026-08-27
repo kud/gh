@@ -3575,6 +3575,9 @@ export const App = ({
   ciPollMs = 60_000,
   watchPath,
   watchDebounceMs = 400,
+  // Spread across instances so siblings do not all fetch at once. Wide enough
+  // that the first one's round trip lands before the next one looks.
+  watchJitterMs = 3_000,
   extensions,
   tabHelp,
   emptyHint,
@@ -3626,6 +3629,12 @@ export const App = ({
   watchPath?: string
   /** Bursts of writes to collapse into one refetch. */
   watchDebounceMs?: number
+  /**
+   * Random spread added to `watchDebounceMs`, so several cockpits woken by one
+   * signal take turns instead of stampeding. The first to wake fetches and
+   * writes the shared cache; the others adopt it and pay nothing.
+   */
+  watchJitterMs?: number
   // Domain extensions the host can mount as full-screen overlays (their -ink
   // assembled bodies). Proven with Jenkins; the browse glances follow.
   extensions?: InboxExtension[]
@@ -3794,6 +3803,29 @@ export const App = ({
         setFetchedAt(Date.now())
         setRefreshError(null)
         if (hasCiStatus) applyCiStatus(fresh.ciStatus ?? null)
+        receive(fresh)
+      })
+      .catch((err) => {
+        setRefreshing(false)
+        const message = (err as Error).message
+        // Nothing on screen yet, so there is no list to flash the error beside —
+        // it becomes the whole screen instead. It must NOT be printed and exited:
+        // see AppState, where the alternate buffer eats exactly that.
+        if (!displayedKey.current) {
+          setState({ phase: "failed", message })
+          return
+        }
+        setRefreshError({ message, at: Date.now() })
+      })
+  }
+
+  /**
+   * What to do with a result, wherever it came from — our own fetch, or a
+   * sibling cockpit's, adopted off the shared cache. One function, because the
+   * two must behave identically: a result adopted from disk still has to pass
+   * the manual-apply gate rather than reshuffling the list under you.
+   */
+  const receive = (fresh: { sections: Section[]; login: string }) => {
         const freshKey = signatureOf(fresh.sections)
         if (!displayedKey.current) {
           if (fresh.sections.length === 0) {
@@ -3818,19 +3850,6 @@ export const App = ({
         } else {
           setPending(null)
         }
-      })
-      .catch((err) => {
-        setRefreshing(false)
-        const message = (err as Error).message
-        // Nothing on screen yet, so there is no list to flash the error beside —
-        // it becomes the whole screen instead. It must NOT be printed and exited:
-        // see AppState, where the alternate buffer eats exactly that.
-        if (!displayedKey.current) {
-          setState({ phase: "failed", message })
-          return
-        }
-        setRefreshError({ message, at: Date.now() })
-      })
   }
 
   const applyOrRefresh = () => {
@@ -3926,7 +3945,34 @@ export const App = ({
         // Coalesce: one `touch` raises several events, and a burst of closed
         // issues should cost one fetch, not one each.
         if (timer) clearTimeout(timer)
-        timer = setTimeout(() => live && revalidate(), watchDebounceMs)
+        const firedAt = Date.now()
+        // Jitter, or the sharing below buys nothing: every cockpit hears the
+        // same signal and debounces by the same fixed amount, so all of them
+        // would check the cache in the same millisecond, all miss, and all
+        // fetch — which is the behaviour this is meant to replace. Spread out,
+        // the first to wake pays and the rest find its answer waiting.
+        //
+        // Worst case is a lost race and today's behaviour, never worse.
+        const delay =
+          watchDebounceMs + Math.floor(Math.random() * watchJitterMs)
+        timer = setTimeout(() => {
+          if (!live) return
+          // One signal wakes EVERY running cockpit, and each used to pay the
+          // full query for the same answer — three open cockpits turned one
+          // closed issue into three fetches. The cache is shared on disk and
+          // keyed per scope, so a sibling that already refetched since the
+          // signal has exactly what we would pay for.
+          //
+          // Strictly AFTER the signal: a cache entry written before it is stale
+          // by definition, because the signal is what says the world moved.
+          const shared = cacheKey ? readCache(cacheKey) : null
+          if (shared && shared.at > firedAt) {
+            receive({ sections: shared.sections, login: shared.login })
+            setFetchedAt(shared.at)
+            return
+          }
+          revalidate()
+        }, delay)
       })
     } catch {
       // An unwatchable directory costs the signal, never the inbox.
