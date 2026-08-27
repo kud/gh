@@ -90,6 +90,28 @@ describe("whoseMove", () => {
     expect(whoseMove("draft", "reviewed")).toBe("them")
   })
 
+  it("hands you the row when somebody else spoke last", () => {
+    // The plainest claim there is, and none of it shows up as a health: a bare
+    // comment approves nothing, fails nothing and opens no thread. The row's own
+    // turn arrow already said `←` here while the band said Their move.
+    for (const tab of ["open", "mine", "review", "reviewed"])
+      expect(whoseMove("waiting", tab, undefined, true)).toBe("you")
+    expect(whoseMove("none", "mine", undefined, true)).toBe("you")
+  })
+
+  it("does not hand the row over when YOU spoke last", () => {
+    // Only one direction. Red CI on your own PR is yours whether or not you
+    // commented after it, so this case falls through to the table.
+    expect(whoseMove("ci-fail", "mine", undefined, false)).toBe("you")
+    expect(whoseMove("waiting", "mine", undefined, false)).toBe("them")
+  })
+
+  it("falls back to the table when nobody has spoken", () => {
+    // An un-updated host passes nothing, and must behave exactly as before.
+    expect(whoseMove("waiting", "mine")).toBe(whoseMove("waiting", "mine", undefined, false))
+    expect(whoseMove("ci-fail", "mine")).toBe("you")
+  })
+
   it("never claims an unknown, from any position", () => {
     // An issue has no review state to read, so claiming it would be a guess
     // rather than a reading — including on a tab of your own work.
