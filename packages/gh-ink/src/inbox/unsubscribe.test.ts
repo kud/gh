@@ -12,7 +12,7 @@ const gh = (kind: "pr" | "issue"): GHItem => ({
   title: "a row",
   repo: "kud/gh",
   url: "https://github.com/kud/gh/pull/42",
-  health: "clean",
+  health: "none",
   age: "2d",
   ts: 0,
   unresolved: 0,
