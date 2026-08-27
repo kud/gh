@@ -90,13 +90,36 @@ describe("whoseMove", () => {
     expect(whoseMove("draft", "reviewed")).toBe("them")
   })
 
-  it("hands you the row when somebody else spoke last", () => {
+  it("hands you YOUR OWN row when somebody else spoke last", () => {
     // The plainest claim there is, and none of it shows up as a health: a bare
     // comment approves nothing, fails nothing and opens no thread. The row's own
     // turn arrow already said `←` here while the band said Their move.
-    for (const tab of ["open", "mine", "review", "reviewed"])
+    for (const tab of ["open", "mine", "draft", "assigned"])
       expect(whoseMove("waiting", tab, undefined, true)).toBe("you")
     expect(whoseMove("none", "mine", undefined, true)).toBe("you")
+  })
+
+  it("does NOT claim a stranger's PR because they spoke on it", () => {
+    // Read from every position this destroys the distinction the whole table is
+    // built on: the mechanical blockers are yours on your PR and theirs on
+    // theirs. Shipped unconditionally for one release and eleven rows of other
+    // people's work appeared under Your move — a merge conflict and a red build
+    // on PRs authored by two colleagues, promoted purely because they had
+    // commented on their own work.
+    for (const h of ["ci-fail", "conflict", "changes-req"] as const) {
+      expect(whoseMove(h, "review", "queued", true)).toBe("them")
+      expect(whoseMove(h, "reviewed", "spoken", true)).toBe("them")
+      // Same health, your PR: yours, exactly as before.
+      expect(whoseMove(h, "mine", "authored", true)).toBe("you")
+    }
+  })
+
+  it("still claims what those positions genuinely owe you", () => {
+    // The other two positions need no help from the last-word rule, which is why
+    // narrowing it costs nothing: a review actually wanted from you is
+    // `waiting`/`pending`, and a conversation you are in is `threads`.
+    expect(whoseMove("waiting", "review", "queued", true)).toBe("you")
+    expect(whoseMove("threads", "reviewed", "spoken", true)).toBe("you")
   })
 
   it("does not hand the row over when YOU spoke last", () => {
