@@ -1174,10 +1174,45 @@ const UNSUBSCRIBE_MUTATION = `
   }
 `
 
+/**
+ * gh's own stderr, turned into something a person can act on.
+ *
+ * `✗ Unsubscribe failed` is not a message, it is a shrug — and the one time it
+ * mattered the reason was "your GraphQL quota is spent, try in twenty minutes",
+ * which the flash had thrown away. The fetch path learned this when a raw
+ * `gh: HTTP 502` was landing under the frame; the ACTIONS never did.
+ *
+ * The raw line is always kept on the end, so a failure this table does not know
+ * is still diagnosable. A friendly sentence that hides the only clue is worse
+ * than the bare line it replaced.
+ */
+const GH_ACTION_FAILURES: [RegExp, string][] = [
+  [/rate limit|RATE_LIMIT/i, "GitHub rate limit spent — it resets within the hour"],
+  [/\b401\b|not logged in|authentication/i, "gh is not authenticated"],
+  [/\b403\b|must have admin|not authorized|permission/i, "not permitted on this repo"],
+  [/\b50[0234]\b/, "GitHub's API is failing (5xx)"],
+  [/ENOTFOUND|EAI_AGAIN|ETIMEDOUT|ECONNREFUSED/i, "no route to GitHub"],
+]
+
+export const explainGhAction = (e: unknown): string => {
+  const err = e as { stderr?: string; message?: string }
+  const raw =
+    (err.stderr ?? "").trim().split("\n").filter(Boolean).pop() ??
+    err.message ??
+    "no reason reported"
+  const human = GH_ACTION_FAILURES.find(([re]) => re.test(raw))?.[1]
+  return human ? `${human} (${raw})` : raw
+}
+
 const unsubscribeFrom = async (item: GHItem): Promise<void> => {
-  const view = item.kind === "pr" ? "pr" : "issue"
+  // REST for the node id, GraphQL only for the mutation that needs it.
+  // `gh pr view --json` is GraphQL, so the old form spent the scarcer of the two
+  // quotas twice for one action — and on the day it first failed, GraphQL was at
+  // zero while REST still had 4996 of 5000. Halving the GraphQL cost is the
+  // difference between the action working and not.
+  const route = item.kind === "pr" ? "pulls" : "issues"
   const found =
-    await quietly`gh ${view} view ${item.number} --repo ${item.repo} --json id --jq .id`
+    await quietly`gh api repos/${item.repo}/${route}/${item.number} --jq .node_id`
   const id = found.stdout.trim()
   // gh exits 0 having printed nothing when --jq finds no key, so an empty id is
   // the shape a failure arrives in — not an exception.
@@ -1350,8 +1385,8 @@ export const buildActions = (
             showFlash(`✓ Removed you as reviewer on #${item.number}`)
             ext?.onActed?.()
           })
-          .catch(() => {
-            showFlash(`✗ Could not remove you from #${item.number}`)
+          .catch((e) => {
+            showFlash(`✗ #${item.number}: ${explainGhAction(e)}`)
             onRefresh?.()
           })
       },
@@ -1365,7 +1400,9 @@ export const buildActions = (
       showFlash(`⋯ Unsubscribing from #${item.number}…`)
       void unsubscribeFrom(item as GHItem)
         .then(() => showFlash(`✓ Unsubscribed from #${item.number}`))
-        .catch(() => showFlash(`✗ Unsubscribe failed for #${item.number}`))
+        .catch((e) =>
+          showFlash(`✗ #${item.number}: ${explainGhAction(e)}`),
+        )
     },
   })
 
@@ -3150,7 +3187,9 @@ const BrowseScreen = ({
       showFlash(`⋯ Unsubscribing from #${activeItem.number}…`)
       void unsubscribeFrom(activeItem)
         .then(() => showFlash(`✓ Unsubscribed from #${activeItem.number}`))
-        .catch(() => showFlash(`✗ Unsubscribe failed for #${activeItem.number}`))
+        .catch((e) =>
+          showFlash(`✗ #${activeItem.number}: ${explainGhAction(e)}`),
+        )
       return
     }
     // Mirrors the menu entry's guard exactly. A hint that renders on a row the
@@ -3168,8 +3207,8 @@ const BrowseScreen = ({
           showFlash(`✓ Removed you as reviewer on #${activeItem.number}`)
           onActed?.()
         })
-        .catch(() => {
-          showFlash(`✗ Could not remove you from #${activeItem.number}`)
+        .catch((e) => {
+          showFlash(`✗ #${activeItem.number}: ${explainGhAction(e)}`)
           onRefresh?.()
         })
       return
