@@ -13,7 +13,15 @@ import React, {
 } from "react"
 import { Text as InkText, Box, useInput, useWindowSize } from "ink"
 import type { InboxExtension, ExtensionTarget } from "./extension.js"
-import { invalidateCache, isFresh, readCache, writeCache } from "./cache.js"
+import {
+  invalidateCache,
+  isFresh,
+  readCache,
+  writeCache,
+  type InboxBudget,
+} from "./cache.js"
+
+export type { InboxBudget }
 import { checkoutDirs, inboxConfig, profileOf } from "./config.js"
 import {
   diffSections,
@@ -753,6 +761,36 @@ export const moveCursor = (
     next += dir
   if (next < 0 || next >= items.length) return current
   return next
+}
+
+/**
+ * What to say about the remaining budget, or nothing at all.
+ *
+ * Priced in whole fetches because that is the unit that runs out: the query
+ * costs ~111 points against a 5,000 pool, so "some points left" and "another
+ * fetch left" are different questions and only the second one is actionable.
+ *
+ * Silent above the threshold. A counter on a healthy account is noise in a
+ * header already carrying four things, and noise is what gets skimmed past on
+ * the one day it matters.
+ */
+export const budgetNotice = (
+  budget: InboxBudget | null | undefined,
+  now = Date.now(),
+): { label: string; critical: boolean } | null => {
+  if (!budget) return null
+  // A spent window that has already rolled is not a warning, it is history.
+  if (new Date(budget.resetAt).getTime() <= now) return null
+  const per = Math.max(budget.cost, 1)
+  const fetches = Math.floor(budget.remaining / per)
+  if (fetches > 8) return null
+  const mins = Math.max(
+    1,
+    Math.round((new Date(budget.resetAt).getTime() - now) / 60_000),
+  )
+  return fetches <= 0
+    ? { label: `⚡ API budget spent · ${mins}m`, critical: true }
+    : { label: `⚡ ${fetches} fetch${fetches === 1 ? "" : "es"} left`, critical: false }
 }
 
 /**
@@ -1603,6 +1641,8 @@ const InboxHeader = ({
   login,
   brand,
   scopeLabel,
+  budgetLabel,
+  budgetCritical,
   loading,
   quiet,
   refreshing,
@@ -1617,6 +1657,10 @@ const InboxHeader = ({
   brand: string
   /** The active scope, in the host's words. Absent, nothing is shown. */
   scopeLabel?: string
+  /** e.g. `⚡ 4 fetches left`. Absent when there is nothing to warn about. */
+  budgetLabel?: string
+  /** Out of fetches rather than merely low — red instead of orange. */
+  budgetCritical?: boolean
   loading?: boolean
   quiet?: boolean
   refreshing?: boolean
@@ -1650,6 +1694,16 @@ const InboxHeader = ({
   // through a library anyone can install.
   const workLabel = scopeLabel ? `  ${scopeLabel}  ` : ""
 
+  // Shown ONLY when the budget is worth acting on. A points counter on a healthy
+  // account is noise in a header already carrying four things, and noise is what
+  // gets skimmed past on the one day it matters.
+  //
+  // Priced in FETCHES, because that is the unit that runs out. "1,847 points"
+  // has to be divided before it means anything; "16 fetches left" is already the
+  // answer. And never dimmed: this is the figure you would otherwise run a
+  // command to get.
+  const budgetSeg = budgetLabel ? budgetLabel + "  " : ""
+
   // Refresh status: pending (actionable) wins, then in-flight, then freshness.
   // Naming the change is the whole argument for keeping the apply manual: the
   // gate is only worth its keypress if it tells you what you would be applying.
@@ -1669,6 +1723,7 @@ const InboxHeader = ({
       countSeg.length -
       userSeg.length -
       workLabel.length -
+      budgetSeg.length -
       statusSeg.length,
   )
   return (
@@ -1679,6 +1734,11 @@ const InboxHeader = ({
       <Text dimColor>{countSeg}</Text>
       {userSeg ? <Text>{userSeg}</Text> : null}
       {scopeLabel ? <Text dimColor>{workLabel}</Text> : null}
+      {budgetLabel ? (
+        <Text bold color={budgetCritical ? "#FF5F5F" : "#FF8700"}>
+          {budgetSeg}
+        </Text>
+      ) : null}
       {statusText ? (
         <Text
           color={statusColor as any}
@@ -2662,6 +2722,8 @@ const BrowseScreen = ({
   ciJob,
   tabHelp,
   origin,
+  budget,
+  skippedForBudget,
   brand,
   mergedUrls,
   transients,
@@ -2677,6 +2739,10 @@ const BrowseScreen = ({
   /** Which tab is on screen, so the host can spend the hold per tab. */
   onTabChange?: (sectionId: string) => void
   origin?: OriginSplit
+  /** Last known API budget, for the header warning. */
+  budget?: InboxBudget | null
+  /** An automatic refresh declined itself to preserve the budget. */
+  skippedForBudget?: boolean
   tabHelp?: [string, string][]
   jiraBase?: string
   jiraKeyRe?: RegExp
@@ -3352,6 +3418,8 @@ const BrowseScreen = ({
         sections={localSections}
         login={login}
         scopeLabel={origin?.label}
+        budgetLabel={budgetNotice(budget)?.label}
+        budgetCritical={budgetNotice(budget)?.critical}
         refreshing={refreshing}
         hasPending={hasPending}
         pendingSummary={pendingSummary}
@@ -3360,6 +3428,20 @@ const BrowseScreen = ({
 
       {ciStatusState ? (
         <CiStatusLine state={ciStatusState} job={ciJob} />
+      ) : null}
+
+      {/* Said out loud, because silence here is indistinguishable from a cockpit
+          that simply has nothing new — and the reader would go on waiting for
+          rows that were never coming. Names the way out in the same breath:
+          declining to spend the budget on your behalf is not the same as
+          refusing what you ask for, and `r` is never gated. */}
+      {skippedForBudget ? (
+        <Box marginBottom={1}>
+          <Text bold color="#FF8700">
+            {"  ⚡ auto-refresh paused to save API budget"}
+          </Text>
+          <Text dimColor>{"   r refreshes anyway"}</Text>
+        </Box>
       ) : null}
 
       <Box marginBottom={1}>
@@ -3588,6 +3670,13 @@ export const App = ({
     sections: Section[]
     login: string
     ciStatus?: CiStatus | null
+    /**
+     * What that fetch cost and what is left, if the host's query asked. GitHub
+     * answers `rateLimit { cost remaining resetAt }` inside the response for
+     * free, so a host that asks pays nothing to know — and an inbox that knows
+     * can decline to spend the last of it on a refresh nobody requested.
+     */
+    budget?: InboxBudget
   }>
   cacheKey?: string
   // What this inbox is called, for the loading line. The shell is host-agnostic;
@@ -3799,10 +3888,33 @@ export const App = ({
     [pending],
   )
 
+  /**
+   * Whether an UNREQUESTED fetch is affordable. Manual `r` is never gated: the
+   * budget is a reason to stop spending it on your behalf, never a reason to
+   * refuse what you asked for.
+   *
+   * Priced in whole fetches, because that is the unit that runs out — the query
+   * costs ~111 points and the pool is 5,000, so "some points left" and "another
+   * fetch left" are different questions and only the second one matters.
+   */
+  const canAffordAuto = (): boolean => {
+    const known = budget ?? (cacheKey ? readCache(cacheKey)?.budget : null)
+    if (!known) return true
+    if (new Date(known.resetAt).getTime() <= Date.now()) return true
+    // Two, not one: the last fetch in the window should be yours to spend.
+    return known.remaining >= Math.max(known.cost, 1) * 2
+  }
+
   const revalidate = (manual = false) => {
+    if (!manual && !canAffordAuto()) {
+      setSkippedForBudget(true)
+      return
+    }
+    setSkippedForBudget(false)
     if (manual) setRefreshing(true)
     fetcher()
       .then((fresh) => {
+        if (fresh.budget) setBudget(fresh.budget)
         if (cacheKey) writeCache(cacheKey, fresh)
         setRefreshing(false)
         setFetchedAt(Date.now())
@@ -3993,6 +4105,17 @@ export const App = ({
   // Merged rows live here rather than in BrowseScreen because the row has to
   // survive the trip back from the drill view, and BrowseScreen is remounted by
   // that navigation — state parked there would be gone before the first frame.
+  // Seeded from disk so a cold launch knows the budget BEFORE its first fetch —
+  // the one moment it has no response to read it from, and the moment a third
+  // cockpit opening on an exhausted account does the most damage.
+  const [budget, setBudget] = useState<InboxBudget | null>(() =>
+    cacheKey ? (readCache(cacheKey)?.budget ?? null) : null,
+  )
+  // An automatic refresh declined itself. Worth saying: silence here is
+  // indistinguishable from a cockpit that simply has nothing new, and the reader
+  // would keep waiting for rows that were never coming.
+  const [skippedForBudget, setSkippedForBudget] = useState(false)
+
   const [mergedUrls, setMergedUrls] = useState<string[]>([])
   const mergeTimers = useRef<ReturnType<typeof setTimeout>[]>([])
   useEffect(() => () => mergeTimers.current.forEach(clearTimeout), [])
@@ -4100,6 +4223,8 @@ export const App = ({
         fetchedAt={fetchedAt}
         refreshError={refreshError ?? undefined}
         origin={origin}
+        budget={budget}
+        skippedForBudget={skippedForBudget}
         hidden={overlay !== null}
         mergedUrls={mergedUrls}
         transients={transients}
