@@ -3923,7 +3923,14 @@ export const App = ({
   }
 
   const revalidate = (manual = false) => {
-    if (!manual && !canAffordAuto()) {
+    // The FIRST fetch is never gated, whatever the budget. There is nothing on
+    // screen to preserve yet, and declining it strands the app on "loading"
+    // with no rows, no error and no way forward — the pause notice renders in
+    // BrowseScreen, which is not even mounted in that phase. A budget is a
+    // reason to stop refreshing something you can already see; it is never a
+    // reason to show you nothing at all.
+    const gated = !manual && !!displayedKey.current
+    if (gated && !canAffordAuto()) {
       setSkippedForBudget(true)
       return
     }
@@ -4167,19 +4174,24 @@ export const App = ({
         {hasCiStatus ? (
           <CiStatusLine state={ciStatusState} job={ciJob} />
         ) : null}
-        {/* Same height budget the browse screen gives its list, so the frame
-            fills the terminal from the first paint instead of hugging one line
-            and then snapping open when the fetch lands. A frame that resizes
-            under you reads as a redraw glitch rather than as data arriving —
-            and on a cold launch this is the ONLY thing on screen, so it is also
-            the first impression the cockpit makes.
+        {/* Sized so the frame fills the alternate screen from the first paint,
+            rather than hugging one line and snapping open when the fetch lands.
+            On a cold launch this is the ONLY thing on screen.
 
-            -10 for the same reasons BrowseScreen documents: eight rows of
-            chrome plus the frame's two border rows. The CI line is reserved
-            when it will be there, since it is rendered above this. */}
+            Its OWN chrome, not BrowseScreen's. Copying that view's `rows - 10`
+            reserved rows for a tab strip, a filter line and a footer that do not
+            exist here, so the frame stopped short and left the terminal visibly
+            unfilled underneath — which reads as "not fullscreen" even though the
+            host is running us with alternateScreen: true.
+
+            Six: one margin above the frame, its two border rows, the header and
+            its margin, and the one footer line NoRowsScreen draws. Loading has
+            no footer and so runs a row short of the bottom, which is the right
+            way round to be wrong — Ink clips overflow from the TOP, so guessing
+            high would eat the header. */}
         <Box
           flexDirection="column"
-          minHeight={Math.max(5, rows - 10 - (hasCiStatus ? 2 : 0))}
+          minHeight={Math.max(5, rows - 6 - (hasCiStatus ? 2 : 0))}
         >
           {state.phase === "loading" ? (
             <LoadingScreen label={`Fetching ${title}…`} />
