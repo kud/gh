@@ -70,15 +70,32 @@ describe("treeUrls", () => {
     expect(treeUrls([task("ACC-9")], 0)).toEqual([taskUrl("ACC-9")])
   })
 
-  // show-more draws as a child and has no URL. Including it would put a blank
-  // line on the clipboard, which is exactly what a paste would show.
-  it("skips collapsed-tree rows, which carry no URL", () => {
-    const more: AnyItem = {
-      kind: "show-more",
-      hidden: [pr(9)],
-      indent: true,
-    } as AnyItem
-    expect(treeUrls([task("ACC-1"), more], 0)).toEqual([taskUrl("ACC-1")])
+  // A collapsed row is the rest of the tree, not the end of it. What `C`
+  // copies must not depend on how many children happened to fit on screen —
+  // that is a difference nothing on screen would report.
+  const collapsed = (...numbers: number[]): AnyItem =>
+    ({ kind: "show-more", hidden: numbers.map(pr), indent: true }) as AnyItem
+
+  it("descends into a collapsed row, which holds the children not drawn", () => {
+    expect(treeUrls([task("ACC-1"), pr(1), collapsed(9, 10)], 0)).toEqual([
+      taskUrl("ACC-1"),
+      prUrl(1),
+      prUrl(9),
+      prUrl(10),
+    ])
+  })
+
+  // The row itself still carries no URL, so it contributes no blank line —
+  // only what it hides.
+  it("adds nothing of its own for an empty collapsed row", () => {
+    expect(treeUrls([task("ACC-1"), collapsed()], 0)).toEqual([taskUrl("ACC-1")])
+  })
+
+  it("gives the same collapsed tree from a child of it", () => {
+    const rows = [task("ACC-1"), pr(1), collapsed(9), task("ACC-2"), pr(3)]
+    expect(treeUrls(rows, 1)).toEqual([taskUrl("ACC-1"), prUrl(1), prUrl(9)])
+    expect(treeUrls(rows, 2)).toEqual([taskUrl("ACC-1"), prUrl(1), prUrl(9)])
+    expect(treeUrls(rows, 3)).toEqual([taskUrl("ACC-2"), prUrl(3)])
   })
 
   it("returns nothing for a header, which is not a tree", () => {
