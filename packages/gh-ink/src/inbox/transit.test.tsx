@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest"
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
 import { EventEmitter } from "node:events"
 import { mkdtempSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
@@ -57,6 +57,49 @@ class FakeStdin extends EventEmitter {
 
 const settle = () => new Promise((resolve) => setImmediate(resolve))
 const after = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+/*
+ * A spec that waits out a 7s hold in real time is not testing the hold, it is
+ * racing React's effect flush against a wall clock — and losing about one run
+ * in five, in BOTH directions at once: the same failing run spent a hold that
+ * should have stood and stood one that should have spent. Under a release
+ * workflow that gates publish on the suite, that is one release in five
+ * blocked by a test with nothing to say about the release.
+ *
+ * So these specs own the clock. Only Date and setTimeout are faked, which is
+ * exactly what the hold reads and what it schedules. Ink's render loop and
+ * React's effect flush ride on setImmediate and microtasks, and freezing
+ * those stops the render rather than controlling it — `settle` stays real for
+ * that reason. setInterval stays real too: the spark animation and the CI
+ * poll are nobody's business here.
+ *
+ * Not applied to the stamp-file specs. Those wait on an fs.watch event, which
+ * arrives on real time and cannot be advanced — faking the clock there would
+ * skip the wait without skipping the wait.
+ */
+const withFakeClock = () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] })
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+}
+
+// Settle, move the clock, settle again — and the FIRST half is the half that
+// is easy to leave out. A hold is stamped by an effect reacting to the arrival,
+// so advancing before that effect has run moves the clock past a stamp that
+// does not exist yet; the effect then stamps Date.now() on the far side of the
+// jump and the hold starts over, which reads exactly like a hold that refuses
+// to expire. Flush first, then advance. The trailing settles are for the other
+// end: expiring a hold sets state that schedules the render the assertion reads.
+const advance = async (ms: number) => {
+  await settle()
+  await settle()
+  await vi.advanceTimersByTimeAsync(ms)
+  await settle()
+  await settle()
+}
 
 const pr = (
   number: number,
@@ -144,6 +187,8 @@ const mount = async (watchPath?: string) => {
 }
 
 describe("applying a refresh", () => {
+  withFakeClock()
+
   it("opens quiet — a first paint has nothing to have changed from", async () => {
     const { stdout, stop } = await mount()
     const frame = stdout.lastFrame()
@@ -157,7 +202,7 @@ describe("applying a refresh", () => {
     stdin.press("r")
     await settle()
     await settle()
-    await after(50)
+    await advance(50)
 
     const frame = stdout.lastFrame()
     // Counted, not merely announced: "something changed" is what the old
@@ -177,7 +222,7 @@ describe("applying a refresh", () => {
     stdin.press("r")
     await settle()
     await settle()
-    await after(50)
+    await advance(50)
     stdin.press("r")
     await settle()
     await settle()
@@ -198,7 +243,7 @@ describe("applying a refresh", () => {
     stdin.press("r")
     await settle()
     await settle()
-    await after(50)
+    await advance(50)
     stdin.press("r")
     await settle()
     await settle()
@@ -220,10 +265,10 @@ describe("applying a refresh", () => {
     stdin.press("r")
     await settle()
     await settle()
-    await after(50)
+    await advance(50)
     stdin.press("r")
     await settle()
-    await after(TRANSIT_HOLD_MS + 500)
+    await advance(TRANSIT_HOLD_MS + 500)
 
     const frame = stdout.lastFrame()
     expect(frame).not.toContain("GONE")
@@ -332,7 +377,7 @@ const mountTwoTabs = async () => {
   stdin.press("r")
   await settle()
   await settle()
-  await after(50)
+  await advance(50)
   stdin.press("r")
   await settle()
   await settle()
@@ -347,9 +392,11 @@ const mountTwoTabs = async () => {
 }
 
 describe("a change in a tab you are not on", () => {
+  withFakeClock()
+
   it("keeps its marker until that tab is displayed", async () => {
     const { stdout, stdin, stop } = await mountTwoTabs()
-    await after(TRANSIT_HOLD_MS + 500)
+    await advance(TRANSIT_HOLD_MS + 500)
 
     // The guard: the row is not merely unmarked here, it is not on screen at
     // all — so a passing assertion has to come from the OTHER tab.
@@ -369,7 +416,7 @@ describe("a change in a tab you are not on", () => {
     const { stdout, stdin, stop } = await mountTwoTabs()
     stdin.press(RIGHT_ARROW)
     await settle()
-    await after(TRANSIT_HOLD_MS + 500)
+    await advance(TRANSIT_HOLD_MS + 500)
 
     const frame = stdout.lastFrame()
     expect(frame).not.toContain("UPDATED")
@@ -389,7 +436,7 @@ describe("a change in a tab you are not on", () => {
     stdin.press(LEFT_ARROW)
     await settle()
     await settle()
-    await after(TRANSIT_HOLD_MS + 500)
+    await advance(TRANSIT_HOLD_MS + 500)
 
     stdin.press(RIGHT_ARROW)
     await settle()
@@ -404,6 +451,8 @@ describe("a change in a tab you are not on", () => {
 })
 
 describe("the tab marker", () => {
+  withFakeClock()
+
   // The row markers are the signal; this is the pointer to them. A tab you are
   // not on draws none of its rows, so without a marker on the tab itself the
   // hold keeps its promise to a screen nobody is looking at.
@@ -414,7 +463,7 @@ describe("the tab marker", () => {
 
   it("sits on the tab holding news, and nowhere else", async () => {
     const { stdout, stop } = await mountTwoTabs()
-    await after(TRANSIT_HOLD_MS + 500)
+    await advance(TRANSIT_HOLD_MS + 500)
 
     const bar = tabBar(stdout.lastFrame())
     expect(bar).toBeTruthy()
@@ -428,7 +477,7 @@ describe("the tab marker", () => {
     const { stdout, stdin, stop } = await mountTwoTabs()
     stdin.press(RIGHT_ARROW)
     await settle()
-    await after(TRANSIT_HOLD_MS + 500)
+    await advance(TRANSIT_HOLD_MS + 500)
 
     const bar = tabBar(stdout.lastFrame())
     expect(bar).toBeTruthy()
@@ -522,12 +571,14 @@ const mountTasks = async () => {
 }
 
 describe("applying a refresh on task rows", () => {
+  withFakeClock()
+
   it("says what it did to each row, in words", async () => {
     const { stdout, stdin, stop } = await mountTasks()
     stdin.press("r")
     await settle()
     await settle()
-    await after(50)
+    await advance(50)
     stdin.press("r")
     await settle()
     await settle()
@@ -545,7 +596,7 @@ describe("applying a refresh on task rows", () => {
     stdin.press("r")
     await settle()
     await settle()
-    await after(50)
+    await advance(50)
     stdin.press("r")
     await settle()
     await settle()
