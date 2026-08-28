@@ -779,7 +779,7 @@ export const moveCursor = (
  * What to say about the remaining budget, or nothing at all.
  *
  * Priced in whole fetches because that is the unit that runs out: the query
- * costs ~111 points against a 5,000 pool, so "some points left" and "another
+ * costs ~73 points against a 5,000 pool, so "some points left" and "another
  * fetch left" are different questions and only the second one is actionable.
  *
  * Silent above the threshold. A counter on a healthy account is noise in a
@@ -3911,7 +3911,7 @@ export const App = ({
    * refuse what you asked for.
    *
    * Priced in whole fetches, because that is the unit that runs out — the query
-   * costs ~111 points and the pool is 5,000, so "some points left" and "another
+   * costs ~73 points and the pool is 5,000, so "some points left" and "another
    * fetch left" are different questions and only the second one matters.
    */
   const canAffordAuto = (): boolean => {
@@ -4023,7 +4023,7 @@ export const App = ({
     }
     /* The whole point of the cache, and it was missing. This used to revalidate
        unconditionally, so the cached paint bought a fast first frame and saved
-       nothing — 111 GraphQL points on every launch, however recently the last
+       nothing — 73 GraphQL points on every launch, however recently the last
        one ran. `r` still refetches on demand (`revalidate(true)`), and an action
        drops the entry outright, so nothing here can strand you on stale rows. */
     if (!painted || !isFresh(cached)) revalidate()

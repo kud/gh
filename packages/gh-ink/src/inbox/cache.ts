@@ -12,8 +12,8 @@ import { inboxConfig } from "./config.js"
 /**
  * How long a cached glance is trusted before launch refetches it.
  *
- * The glance costs **111 GraphQL points** — measured via `rateLimit { cost }`,
- * at a nodeCount of 25,550 — against a 5000/hour account-wide pool shared with
+ * The glance costs **73 GraphQL points** — measured via `rateLimit { cost }`,
+ * at a nodeCount of ~16,870 — against a 5000/hour account-wide pool shared with
  * everything else `gh` touches. Until this existed the cache was painted on
  * mount and then refetched unconditionally, so it bought a fast first frame and
  * saved nothing at all: a cache that records rather than prevents.
@@ -24,7 +24,8 @@ import { inboxConfig } from "./config.js"
  * an hour — rather than the typical one. That inverted the cost: nobody launches
  * thirty times an hour, but a reader who opens the cockpit every few minutes
  * missed the cache on essentially every launch and paid the full eight-search
- * query each time, which is also what draws 502s out of the API.
+ * query each time. That is also what used to draw 502s out of the API, until
+ * `buildInboxQueries` stopped asking all eight in one request.
  *
  * 10 minutes still bounds the pathological case comfortably (six full fetches an
  * hour, whatever the launch rate), while making the ordinary rhythm — glance,
