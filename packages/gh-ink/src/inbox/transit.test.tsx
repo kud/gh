@@ -269,10 +269,16 @@ describe("the stamp file", () => {
 })
 
 /*
- * The hold is per tab, and its clock only runs while that tab is on screen.
- * Without that, a refresh whose only news lived in a tab you were not on spent
- * its 2.5s behind your back — you switched over to a list that had already
- * settled and looked exactly like it did before.
+ * The hold is per tab, and its clock starts when that tab is first opened.
+ * Both halves are load-bearing and they pull in opposite directions.
+ *
+ * Without the per-tab part, a refresh whose only news lived in a tab you were
+ * not on spent its hold behind your back — you switched over to a list that had
+ * already settled and looked exactly like it did before.
+ *
+ * Without the wall clock, the hold ran only while you stood on the tab, so
+ * reading the news and moving on left the markers waiting for you to come back
+ * and watch them expire. Arriving is the whole event; the rest is a timer.
  */
 const OTHER_STAYS = "a row in the second tab that sits still"
 const OTHER_MOVES = "a row in the second tab whose health changed"
@@ -294,8 +300,10 @@ const twoTabsAfter: Section[] = [
   },
 ]
 
-// What a keyboard actually sends for →, which is what Ink reads as a tab switch.
+// What a keyboard actually sends for → and ←, which is what Ink reads as a tab
+// switch.
 const RIGHT_ARROW = "\u001B[C"
+const LEFT_ARROW = "\u001B[D"
 
 const mountTwoTabs = async () => {
   const stdout = new FakeStdout(120, 44)
@@ -368,6 +376,29 @@ describe("a change in a tab you are not on", () => {
     // Still the tab it settled on, not a blanked list.
     expect(frame).toContain(OTHER_MOVES)
     expect(frame).toContain(OTHER_STAYS)
+    stop()
+  })
+
+  it("keeps counting after you leave — arriving is the whole event", async () => {
+    const { stdout, stdin, stop } = await mountTwoTabs()
+    // Over to the news, then straight back. A reader who has seen it has no
+    // reason to stand there while a timer runs out on their behalf.
+    stdin.press(RIGHT_ARROW)
+    await settle()
+    await settle()
+    stdin.press(LEFT_ARROW)
+    await settle()
+    await settle()
+    await after(TRANSIT_HOLD_MS + 500)
+
+    stdin.press(RIGHT_ARROW)
+    await settle()
+    await settle()
+
+    const frame = stdout.lastFrame()
+    expect(frame).not.toContain("UPDATED")
+    // The row is still there — settled, not blanked. Same guard as above.
+    expect(frame).toContain(OTHER_MOVES)
     stop()
   })
 })

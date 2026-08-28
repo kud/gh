@@ -488,7 +488,14 @@ const STANDING: Record<string, Standing> = {
 // `none` remains unlisted from every position — an issue has no review state to
 // read, so claiming it would be a guess rather than a reading.
 const YOURS: Record<Standing, Health[]> = {
-  authored: ["ci-fail", "conflict", "changes-req", "threads", "approved", "draft"],
+  authored: [
+    "ci-fail",
+    "conflict",
+    "changes-req",
+    "threads",
+    "approved",
+    "draft",
+  ],
   queued: ["waiting", "pending", "threads", "approved"],
   spoken: ["threads"],
 }
@@ -813,7 +820,10 @@ export const budgetNotice = (
   )
   return fetches <= 0
     ? { label: `⚡ API budget spent · ${mins}m`, critical: true }
-    : { label: `⚡ ${fetches} fetch${fetches === 1 ? "" : "es"} left`, critical: false }
+    : {
+        label: `⚡ ${fetches} fetch${fetches === 1 ? "" : "es"} left`,
+        critical: false,
+      }
 }
 
 /**
@@ -877,7 +887,8 @@ export const treeUrls = (items: readonly AnyItem[], i: number): string[] => {
 export const gapsAbove = (items: readonly AnyItem[], i: number): boolean => {
   const item = items[i]
   if (!item || i === 0) return false
-  if (item.kind === "repo-header" || item.kind === "subgroup-header") return true
+  if (item.kind === "repo-header" || item.kind === "subgroup-header")
+    return true
   if (item.kind !== "task") return false
 
   // The gap separates one TREE from the next, which is not the same as one
@@ -1302,9 +1313,15 @@ const UNSUBSCRIBE_MUTATION = `
  * than the bare line it replaced.
  */
 const GH_ACTION_FAILURES: [RegExp, string][] = [
-  [/rate limit|RATE_LIMIT/i, "GitHub rate limit spent — it resets within the hour"],
+  [
+    /rate limit|RATE_LIMIT/i,
+    "GitHub rate limit spent — it resets within the hour",
+  ],
   [/\b401\b|not logged in|authentication/i, "gh is not authenticated"],
-  [/\b403\b|must have admin|not authorized|permission/i, "not permitted on this repo"],
+  [
+    /\b403\b|must have admin|not authorized|permission/i,
+    "not permitted on this repo",
+  ],
   [/\b50[0234]\b/, "GitHub's API is failing (5xx)"],
   [/ENOTFOUND|EAI_AGAIN|ETIMEDOUT|ECONNREFUSED/i, "no route to GitHub"],
 ]
@@ -1515,9 +1532,7 @@ export const buildActions = (
       showFlash(`⋯ Unsubscribing from #${item.number}…`)
       void unsubscribeFrom(item as GHItem)
         .then(() => showFlash(`✓ Unsubscribed from #${item.number}`))
-        .catch((e) =>
-          showFlash(`✗ #${item.number}: ${explainGhAction(e)}`),
-        )
+        .catch((e) => showFlash(`✗ #${item.number}: ${explainGhAction(e)}`))
     },
   })
 
@@ -1951,15 +1966,17 @@ export const MERGED_FRAME_MS = 150
 const MERGED_FRAMES = ["✦", "✧", "✶", "✧"]
 const MERGED_COLOUR = "#A371F7"
 
-// How long a refreshed row stays flagged, counted only while its own tab is on
-// screen. Longer than the merge sparkle, which celebrates something you did
-// yourself a second ago and already knew about; this is reporting work that
-// happened in another window while you were reading something else, so it has
-// to survive being noticed rather than just seen.
+// How long a refreshed row stays flagged, counted from the moment its own tab
+// is first opened. Longer than the merge sparkle, which celebrates something
+// you did yourself a second ago and already knew about; this is reporting work
+// that happened in another window while you were reading something else, so it
+// has to survive being noticed rather than just seen.
 export const TRANSIT_HOLD_MS = 7000
 // One shared empty map, so clearing the marks compares equal to already-clear
 // and React skips the repaint instead of redrawing the list to change nothing.
 const NO_TRANSIENTS: Map<string, Transient> = new Map()
+// The same trick for the per-tab hold clocks, which clear on the same beat.
+const NO_HOLDS: Map<string, number> = new Map()
 // Dissolving and coalescing, so the direction of travel is in the SHAPE. Read
 // them as one animation played forwards and backwards: a row on its way out
 // thins to a dot, a row arriving fills in from one.
@@ -3883,6 +3900,10 @@ export const App = ({
   // Which tab each marked row sits in. A ref, not state: it is read inside the
   // hold's effect, which already reruns whenever the marks themselves change.
   const transitTabs = useRef<Map<string, string>>(new Map())
+  // When each tab's hold started — the moment the reader first arrived on it
+  // while it held marks. State rather than a ref: the settling effect has to
+  // rerun when a clock starts, and a tab with no entry has no clock at all.
+  const [heldSince, setHeldSince] = useState<Map<string, number>>(NO_HOLDS)
   // The tab the reader is actually looking at, reported up by BrowseScreen.
   const [visibleTab, setVisibleTab] = useState("")
 
@@ -3969,23 +3990,53 @@ export const App = ({
     )
   }
 
-  /* The hold runs on the tab you are looking at, never on a global clock.
-     A row that changed in another tab used to run out its 2.5s behind your
-     back, so the refresh with news for you was the one that showed you nothing.
-     Switching away cancels the timer rather than settling early — you get the
-     full hold whenever you arrive, however long it took you to get there. */
+  /* Arriving on a tab starts its clock — and nothing stops it again.
+     Arriving is the whole event the hold exists for: a marker has to survive
+     being noticed, not be waited out. Standing on the tab for the full hold to
+     watch news you have already read expire is the reader serving the
+     animation, so the stamp is taken once, on arrival, and the tab settles on
+     wall time wherever you happen to be by then.
+
+     A tab nobody has opened has no entry here and no clock, which is the half
+     of the promise that still stands: unread news keeps its marker for as long
+     as it takes you to come and collect it. */
   useEffect(() => {
-    if (transients.size === 0) return
-    // Behind a drill view there is no list to read the markers off.
-    if (state.phase !== "browse" || !visibleTab) return
-    if (![...transitTabs.current.values()].includes(visibleTab)) return
+    const held = new Set(transitTabs.current.values())
+    const arrived =
+      state.phase === "browse" && !!visibleTab && held.has(visibleTab)
+    setHeldSince((prev) => {
+      // A tab that no longer holds marks loses its clock, so the next news to
+      // land there gets a fresh hold rather than inheriting a spent one.
+      const next = new Map([...prev].filter(([tab]) => held.has(tab)))
+      if (arrived && !next.has(visibleTab)) next.set(visibleTab, Date.now())
+      const same =
+        next.size === prev.size && [...next.keys()].every((t) => prev.has(t))
+      return same ? prev : next.size === 0 ? NO_HOLDS : next
+    })
+  }, [transients, visibleTab, state.phase])
+
+  /* Spend every clock that has run out, on whatever tab it belongs to.
+     Not scoped to the visible tab: leaving is not a reason to freeze a hold,
+     only a reason never to have started one. Behind a drill view there is no
+     list to settle onto, so the timer waits — but the clock does not, so coming
+     back to a hold that expired in there settles it at once. */
+  useEffect(() => {
+    if (transients.size === 0 || heldSince.size === 0) return
+    if (state.phase !== "browse") return
+    const held = new Set(transitTabs.current.values())
+    const running = [...heldSince].filter(([tab]) => held.has(tab))
+    if (running.length === 0) return
+    const remaining = (at: number) => at + TRANSIT_HOLD_MS - Date.now()
     const timer = setTimeout(
-      () => settleTab(visibleTab, transients),
-      TRANSIT_HOLD_MS,
+      () => {
+        for (const [tab, at] of running)
+          if (remaining(at) <= 0) settleTab(tab, transients)
+      },
+      Math.max(0, Math.min(...running.map(([, at]) => remaining(at)))),
     )
     return () => clearTimeout(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [transients, visibleTab, state.phase])
+  }, [transients, heldSince, state.phase])
 
   // What is waiting behind `r`, in words, so the indicator is worth its keypress.
   const pendingSummary = useMemo(
@@ -4060,30 +4111,27 @@ export const App = ({
    * the manual-apply gate rather than reshuffling the list under you.
    */
   const receive = (fresh: { sections: Section[]; login: string }) => {
-        const freshKey = signatureOf(fresh.sections)
-        if (!displayedKey.current) {
-          if (fresh.sections.length === 0) {
-            setState({ phase: "empty" })
-            return
-          }
-          showData(fresh.sections, fresh.login)
-        } else if (freshKey !== displayedKey.current) {
-          // A changed signature is necessary but not sufficient. Belt and
-          // braces for the class of bug `activityAge` was one instance of: if
-          // the diff finds nothing entering, leaving or moving, then whatever
-          // drifted is something the reader cannot see, and asking them to
-          // press `r` to apply it spends attention on nothing. Swap silently
-          // and keep the fresher data.
-          const { counts } = diffSections(
-            displayedSections.current,
-            fresh.sections,
-          )
-          if (counts.added + counts.removed + counts.changed === 0)
-            showData(fresh.sections, fresh.login)
-          else setPending(fresh)
-        } else {
-          setPending(null)
-        }
+    const freshKey = signatureOf(fresh.sections)
+    if (!displayedKey.current) {
+      if (fresh.sections.length === 0) {
+        setState({ phase: "empty" })
+        return
+      }
+      showData(fresh.sections, fresh.login)
+    } else if (freshKey !== displayedKey.current) {
+      // A changed signature is necessary but not sufficient. Belt and
+      // braces for the class of bug `activityAge` was one instance of: if
+      // the diff finds nothing entering, leaving or moving, then whatever
+      // drifted is something the reader cannot see, and asking them to
+      // press `r` to apply it spends attention on nothing. Swap silently
+      // and keep the fresher data.
+      const { counts } = diffSections(displayedSections.current, fresh.sections)
+      if (counts.added + counts.removed + counts.changed === 0)
+        showData(fresh.sections, fresh.login)
+      else setPending(fresh)
+    } else {
+      setPending(null)
+    }
   }
 
   const applyOrRefresh = () => {
