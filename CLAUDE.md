@@ -84,6 +84,19 @@ registry copy and hid the ordering problem. **When a lockfile falls behind the
 package.json versions, expect this to come back** — the entry to check is
 whether `node_modules/@kud/gh-ink` in `package-lock.json` says `link: true`.
 
+The symptom is a typecheck error that cannot be true: a sibling's freshly-added
+export reported as missing, or errors in files nobody touched.
+
+> [!IMPORTANT]
+> `npm ci` reproduces exactly the tree the lock records and cannot re-decide it,
+> so it is the right move for a **dirty** install and the wrong one for a
+> **stale lock** — where it faithfully replays the staleness. Telling the two
+> apart is the whole skill. `npm install` re-resolves and fixes the lock, but it
+> can leave the orphaned directories behind, and a gate run straight after it
+> may pass against the very copy you were trying to stop compiling against.
+> Green and meaningless. Run `npm ci` after the `npm install` to get an honest
+> reading.
+
 ## Gates
 
 `npm run build` · `npm run typecheck` · `npm test`. That is the whole of CI
