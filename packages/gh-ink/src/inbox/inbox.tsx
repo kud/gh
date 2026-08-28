@@ -2486,6 +2486,7 @@ export const HelpModal = ({
     ["m", "actions · close"],
     ["e", "explain this row"],
     ["o", "open in browser"],
+    ["O", "open ticket + its PRs"],
     ["c", "copy URL"],
     ["C", "copy ticket + its PRs"],
     ["b", "copy branch"],
@@ -3279,6 +3280,18 @@ const BrowseScreen = ({
       const label =
         activeItem.kind === "task" ? activeItem.key : `#${activeItem.number}`
       showFlash(`↗ Opened ${label}`)
+      return
+    }
+    // Shift+O is `o` over the same tree Shift+C copies — the ticket and its
+    // PRs, which is what you actually want open when you pick a row up. One
+    // `open` call with every URL rather than one per row: macOS takes them all
+    // and the shell spawns once, though it makes no promise about tab ORDER,
+    // so nothing here should be read as opening them left to right.
+    if (input === "O") {
+      const urls = treeUrls(section.items, cursor)
+      if (urls.length === 0) return
+      quietly`open ${urls}`.catch(() => {})
+      showFlash(`↗ Opened ${urls.length} tab${urls.length === 1 ? "" : "s"}`)
       return
     }
     if (input === "c") {
