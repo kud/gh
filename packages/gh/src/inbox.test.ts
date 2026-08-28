@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest"
 
-import { buildInboxQuery } from "./index.js"
+import {
+  INBOX_SOURCES,
+  buildInboxQueries,
+  buildInboxQuery,
+  mergeInboxData,
+} from "./index.js"
 
 const searchFor = (query: string, alias: string) =>
   query.match(new RegExp(`${alias}: search\\(query: "([^"]*)"`))?.[1] ?? ""
@@ -144,5 +149,131 @@ describe("buildInboxQuery", () => {
     expect(
       searchFor(buildInboxQuery({ doneWithinDays: 1 }), "recentlyDone"),
     ).toContain(`closed:>=${yesterday}`)
+  })
+})
+
+describe("sources", () => {
+  it("asks only for what was named", () => {
+    const query = buildInboxQuery({ sources: ["myPRs", "recentlyDone"] })
+    expect(query).toContain("myPRs: search(")
+    expect(query).toContain("recentlyDone: search(")
+    for (const alias of ["reviewRequests", "reviewed", "assigned", "repoPRs"])
+      expect(query).not.toContain(`${alias}: search(`)
+  })
+
+  // A subset is a whole document, not a fragment: the parts are issued as
+  // separate requests, so anything the caller reads off the envelope has to be
+  // on every one of them.
+  it("keeps a subset a complete, self-describing document", () => {
+    const query = buildInboxQuery({ sources: ["reviewed"] })
+    expect(query).toContain("rateLimit { cost")
+    expect(query).toContain("viewer { login }")
+    expect(query.trim().startsWith("{")).toBe(true)
+    expect(query.trim().endsWith("}")).toBe(true)
+  })
+
+  it("defaults to every source, so an existing caller keeps what it had", () => {
+    expect(buildInboxQuery()).toBe(buildInboxQuery({ sources: INBOX_SOURCES }))
+  })
+})
+
+describe("buildInboxQueries", () => {
+  it("covers every source exactly once, in order", () => {
+    const asked = buildInboxQueries()
+      .flatMap((q) => [...q.matchAll(/^ {2}(\w+): search\(/gm)])
+      .map((m) => m[1])
+    expect(asked).toEqual([...INBOX_SOURCES])
+  })
+
+  it("splits into the requested number per request", () => {
+    expect(buildInboxQueries({ sourcesPerQuery: 4 })).toHaveLength(2)
+    expect(buildInboxQueries({ sourcesPerQuery: 1 })).toHaveLength(
+      INBOX_SOURCES.length,
+    )
+  })
+
+  // Asking for everything in one request is the shape that draws the 502s, so
+  // it has to stay reachable deliberately rather than by accident — and when a
+  // caller does ask for it, it must be the same query buildInboxQuery emits.
+  it("collapses to the whole query when one request holds every source", () => {
+    const [only, ...rest] = buildInboxQueries({ sourcesPerQuery: 99 })
+    expect(rest).toHaveLength(0)
+    expect(only).toBe(buildInboxQuery())
+  })
+
+  // Zero or a fraction would produce an infinite loop or an empty chunk, and
+  // the failure would be a hung process rather than an error.
+  it("refuses to split into nothing", () => {
+    for (const sourcesPerQuery of [0, -3, 0.5])
+      expect(buildInboxQueries({ sourcesPerQuery })).toHaveLength(
+        INBOX_SOURCES.length,
+      )
+  })
+
+  it("passes the scope and shape through to every part", () => {
+    const parts = buildInboxQueries({ repo: "kud/ambre", shape: "minimal" })
+    for (const part of parts) {
+      expect(part).toContain("repo:kud/ambre")
+      expect(part).not.toContain("statusCheckRollup")
+    }
+  })
+})
+
+describe("mergeInboxData", () => {
+  const part = (
+    alias: string,
+    limit: Partial<{
+      cost: number
+      nodeCount: number
+      remaining: number
+      resetAt: string
+    }> = {},
+  ) => ({
+    rateLimit: {
+      cost: 10,
+      nodeCount: 100,
+      remaining: 4000,
+      resetAt: "2026-08-28T10:00:00Z",
+      ...limit,
+    },
+    viewer: { login: "kud" },
+    [alias]: { nodes: [{ number: 1 }] },
+  })
+
+  it("puts every source back under its own alias", () => {
+    const merged = mergeInboxData([part("myPRs"), part("recentlyDone")])
+    expect(Object.keys(merged)).toContain("myPRs")
+    expect(Object.keys(merged)).toContain("recentlyDone")
+    expect(merged.viewer.login).toBe("kud")
+  })
+
+  // Each part was charged separately, so reporting one part's cost as the
+  // inbox's would understate what the refresh actually spent — by a factor of
+  // however many requests it took.
+  it("sums what each part cost", () => {
+    const merged = mergeInboxData([
+      part("myPRs", { cost: 17, nodeCount: 3720 }),
+      part("reviewed", { cost: 11, nodeCount: 2480 }),
+    ])
+    expect(merged.rateLimit.cost).toBe(28)
+    expect(merged.rateLimit.nodeCount).toBe(6200)
+  })
+
+  // The parts run concurrently and the budget only falls, so the lowest reading
+  // is the one closest to now — and its resetAt has to travel with it, or the
+  // window and its expiry describe two different moments.
+  it("keeps the scarcest reading of what is left", () => {
+    const merged = mergeInboxData([
+      part("myPRs", { remaining: 4000, resetAt: "2026-08-28T10:00:00Z" }),
+      part("reviewed", { remaining: 3900, resetAt: "2026-08-28T11:00:00Z" }),
+      part("assigned", { remaining: 3950, resetAt: "2026-08-28T10:30:00Z" }),
+    ])
+    expect(merged.rateLimit.remaining).toBe(3900)
+    expect(merged.rateLimit.resetAt).toBe("2026-08-28T11:00:00Z")
+  })
+
+  it("has nothing to say when nothing answered", () => {
+    expect(mergeInboxData([])).toBeUndefined()
+    expect(mergeInboxData([undefined, null])).toBeUndefined()
   })
 })
