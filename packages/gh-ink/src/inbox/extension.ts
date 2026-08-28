@@ -24,6 +24,21 @@ export type ExtensionTarget = {
   // and it has to arrive this way: extensions are declared at module scope, before
   // the viewer has been fetched, so a body cannot close over it.
   login: string
+  // Drop the row from the list, now. The built-in verbs have had this all along
+  // — `x` removes you as reviewer and the row goes at once, before the network
+  // call it started has answered — but an extension could not touch the list at
+  // all, so a row-scoped one had no way to show that anything had happened. A
+  // host that hides rows by its own rule (a mute list, a snooze) would write its
+  // state, exit, and leave the row sitting there until the next refetch was
+  // applied, which reads exactly like the keypress having failed.
+  //
+  // Local to the view, like every other use of it: it does not re-run the query,
+  // and a refetch brings the row back unless the host's own rule now excludes it.
+  onRemove?: (item: AnyItem) => void
+  // The one-line status message under the frame. Same channel the built-in verbs
+  // use, so an extension's feedback reads as part of the app rather than as
+  // something a screen printed on its way out.
+  showFlash?: (msg: string) => void
 }
 
 // An inbox extension — a domain's contribution to the host. `body` is the full
