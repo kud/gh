@@ -43,10 +43,41 @@ const header: AnyItem = {
 //  0 header · 1 task · 2 pr · 3 pr · 4 task · 5 pr
 const ROWS: AnyItem[] = [header, task("SHOP-1"), pr(1), pr(2), task("SHOP-2"), pr(3)]
 
+//  0 task · 1 task · 2 task — the Off Board shape: tickets, no PRs anywhere.
+const BARE: AnyItem[] = [task("SHOP-1"), task("SHOP-2"), task("SHOP-3")]
+
 describe("gapsAbove", () => {
-  it("gaps before a ticket, so each group gets air above it", () => {
+  it("gaps before a ticket that opens a tree", () => {
     expect(gapsAbove(ROWS, 1)).toBe(true)
     expect(gapsAbove(ROWS, 4)).toBe(true)
+  })
+
+  // The Off Board tab: ten tickets, no PRs on any of them. Air between them
+  // separates nothing, and costs nearly half the window to say so.
+  it("never gaps between tickets that have nothing under them", () => {
+    for (const i of [1, 2]) expect(gapsAbove(BARE, i)).toBe(false)
+  })
+
+  // A boundary belongs to both groups, so either side can ask for it.
+  it("gaps after a tree even when the next ticket has no PRs", () => {
+    const rows = [task("SHOP-1"), pr(1), task("SHOP-2")]
+    expect(gapsAbove(rows, 2)).toBe(true)
+  })
+
+  it("gaps before a tree even when the ticket above had no PRs", () => {
+    const rows = [task("SHOP-1"), task("SHOP-2"), pr(1)]
+    expect(gapsAbove(rows, 1)).toBe(true)
+  })
+
+  // show-more is a child row too — a ticket whose PRs are collapsed behind it
+  // still has a tree, and hiding the rows must not also remove the spacing.
+  it("counts a collapsed tree as a tree", () => {
+    const more: AnyItem = {
+      kind: "show-more",
+      hidden: [pr(9)],
+      indent: true,
+    } as AnyItem
+    expect(gapsAbove([task("SHOP-1"), more, task("SHOP-2")], 2)).toBe(true)
   })
 
   it("never gaps before a PR, so a ticket's tree stays together", () => {
