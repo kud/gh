@@ -828,6 +828,31 @@ const isChildRow = (item?: AnyItem): boolean =>
     item.kind === "show-less" ||
     ("indent" in item && item.indent === true))
 
+/**
+ * Every URL in the tree the cursor is standing in: the row that opens it, then
+ * each indented row hanging off it, in the order they are drawn.
+ *
+ * Read off the FLAT list because there is no nested model to read — a child is
+ * a row carrying `indent`, and its parent is the nearest row above it without
+ * one. That is also why standing on a child has to walk up first: `C` copies
+ * the same tree wherever inside it the cursor happens to be, which is the only
+ * behaviour that does not require knowing which row is the parent.
+ *
+ * show-more / show-less are children for drawing purposes and carry no URL, so
+ * they are skipped rather than contributing a blank line to the clipboard.
+ */
+export const treeUrls = (items: readonly AnyItem[], i: number): string[] => {
+  let root = i
+  while (root > 0 && isChildRow(items[root])) root -= 1
+  const urls: string[] = []
+  for (let j = root; j < items.length; j += 1) {
+    if (j > root && !isChildRow(items[j])) break
+    const url = (items[j] as { url?: string }).url
+    if (url) urls.push(url)
+  }
+  return urls
+}
+
 export const gapsAbove = (items: readonly AnyItem[], i: number): boolean => {
   const item = items[i]
   if (!item || i === 0) return false
@@ -2462,6 +2487,7 @@ export const HelpModal = ({
     ["e", "explain this row"],
     ["o", "open in browser"],
     ["c", "copy URL"],
+    ["C", "copy ticket + its PRs"],
     ["b", "copy branch"],
     ["s", "switch to branch here"],
     ["j", "open repo in new tab"],
@@ -3260,6 +3286,18 @@ const BrowseScreen = ({
       const label =
         activeItem.kind === "task" ? activeItem.key : `#${activeItem.number}`
       showFlash(`✓ Copied URL for ${label}`)
+      return
+    }
+    // Shift+C is the whole tree, not a second copy of the row: a ticket is
+    // rarely useful to hand over without the PRs hanging off it, and pasting
+    // them one `c` at a time is the thing this replaces. Newline-separated
+    // because every destination that matters — a Slack message, a PR body, a
+    // handoff note — treats one URL per line as a list already.
+    if (input === "C") {
+      const urls = treeUrls(section.items, cursor)
+      if (urls.length === 0) return
+      clipboard(urls.join("\n"))
+      showFlash(`✓ Copied ${urls.length} URL${urls.length === 1 ? "" : "s"}`)
       return
     }
     if (input === "d") {
