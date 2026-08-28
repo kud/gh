@@ -1,5 +1,12 @@
 # @kud/gh-webhook-replay
 
+## 0.1.9
+
+### Patch Changes
+
+- Updated dependencies [f7f2386]
+  - @kud/gh@0.7.1
+
 ## 0.1.8
 
 ### Patch Changes

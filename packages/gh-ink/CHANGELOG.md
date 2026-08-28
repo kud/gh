@@ -1,5 +1,28 @@
 # @kud/gh-ink
 
+## 0.26.5
+
+### Patch Changes
+
+- 27ee390: Only put a blank line above a ticket row when a tree actually starts or ends there.
+
+  `gapsAbove` treated every `task` row as the head of a group, so a tab whose tickets have no PRs got double-spaced for nothing. On the Off Board tab that is ten ticket rows drawn over nineteen lines, which makes the tab look shorter than it is and pushes real rows behind `↓ N more`.
+
+  The gap now asks whether the row above or below is a child. A ticket with PRs beneath it still gets air, and so does the ticket immediately after one — a boundary belongs to both groups. A run of bare tickets renders as the plain list it is. A collapsed tree counts as a tree, so hiding PRs behind `show-more` does not also drop the spacing.
+
+  `isChildRow` moved up beside `gapsAbove`, its only non-trivial reader; it had been sitting 1,100 lines further down and the new dependency held only by module-evaluation order.
+
+- f7f2386: Correct the inbox cost figures quoted throughout the cache and budget comments.
+
+  They said **111 points / 25,550 nodes**, which stopped being true when the own-PR search was capped at 30. The measured figures are **73 points / ~16,870 nodes**. Nothing reads these numbers, but they are the sort quoted back later, and a cache doc that overstates what a fetch costs argues for a longer TTL than the evidence supports.
+
+  The `MY_PRS_LIMIT` note still cites 111 and 25,550 — deliberately, in the past tense, since it is explaining why the cap dropped from 100. `budget.test.ts` keeps `cost: 111` as a fixture: it is a chosen constant the arithmetic hangs off, not a claim about the real query.
+
+  Also updates the TTL note, which blamed the 502s on missing the cache. The cause was asking all eight sources in one request, and `buildInboxQueries` now covers that.
+
+- Updated dependencies [f7f2386]
+  - @kud/gh@0.7.1
+
 ## 0.26.4
 
 ### Patch Changes
