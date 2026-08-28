@@ -838,16 +838,26 @@ const isChildRow = (item?: AnyItem): boolean =>
  * the same tree wherever inside it the cursor happens to be, which is the only
  * behaviour that does not require knowing which row is the parent.
  *
- * show-more / show-less are children for drawing purposes and carry no URL, so
- * they are skipped rather than contributing a blank line to the clipboard.
+ * show-more / show-less carry no URL of their own, so neither contributes a
+ * blank line to the clipboard. But a show-more row is not a gap in the tree —
+ * it IS the rest of it, collapsed, and the rows it holds are as much children
+ * of the parent as the ones still drawn. Walking past it would make what `C`
+ * copies depend on how tall the tree happened to be, which is a difference the
+ * screen gives you no way to notice: past the limit, PRs would simply stop
+ * arriving in the clipboard with nothing anywhere to say so.
  */
 export const treeUrls = (items: readonly AnyItem[], i: number): string[] => {
   let root = i
   while (root > 0 && isChildRow(items[root])) root -= 1
   const urls: string[] = []
   for (let j = root; j < items.length; j += 1) {
-    if (j > root && !isChildRow(items[j])) break
-    const url = (items[j] as { url?: string }).url
+    const item = items[j]
+    if (j > root && !isChildRow(item)) break
+    if (item.kind === "show-more") {
+      for (const child of item.hidden) if (child.url) urls.push(child.url)
+      continue
+    }
+    const url = (item as { url?: string }).url
     if (url) urls.push(url)
   }
   return urls
