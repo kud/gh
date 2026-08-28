@@ -4,6 +4,7 @@ import {
   computeHealth,
   fetchHealth,
   isFailCheck,
+  isInconclusiveCheck,
   isPassCheck,
   isPendingCheck,
   latestChecks,
@@ -24,6 +25,28 @@ describe("check classifiers", () => {
     expect(isFailCheck(check({ conclusion: "ACTION_REQUIRED" }))).toBe(true)
     expect(isFailCheck(check({ state: "ERROR" }))).toBe(true)
     expect(isFailCheck(check({ conclusion: "SUCCESS" }))).toBe(false)
+
+    // A workflow file too broken to start is a verdict on the code, and it was
+    // in no set at all — so it read as neither failing nor pending nor passing
+    // and rendered quiet.
+    expect(isFailCheck(check({ conclusion: "STARTUP_FAILURE" }))).toBe(true)
+  })
+
+  it("does not call a check that reached no verdict a failure", () => {
+    // The line these pin is verdict vs no-verdict, not green vs not-green. A
+    // run that was killed or abandoned examined nothing, so there is nothing
+    // in it for an author to fix — and calling it red said there was.
+    expect(isFailCheck(check({ conclusion: "CANCELLED" }))).toBe(false)
+    expect(isFailCheck(check({ conclusion: "STALE" }))).toBe(false)
+
+    expect(isInconclusiveCheck(check({ conclusion: "CANCELLED" }))).toBe(true)
+    expect(isInconclusiveCheck(check({ conclusion: "STALE" }))).toBe(true)
+    expect(isInconclusiveCheck(check({ conclusion: "FAILURE" }))).toBe(false)
+    expect(isInconclusiveCheck(check({ conclusion: "SUCCESS" }))).toBe(false)
+
+    // Not a failure is not the same as a pass: it must not count as green
+    // either, or a cancelled run would report the PR as ready to merge.
+    expect(isPassCheck(check({ conclusion: "CANCELLED" }))).toBe(false)
   })
 
   it("classifies pending checks", () => {
@@ -101,6 +124,35 @@ describe("computeHealth precedence", () => {
     ).toBe("pending")
     expect(pr({ reviewDecision: "APPROVED" })).toBe("approved")
     expect(pr({})).toBe("waiting")
+  })
+
+  it("leaves a cancelled check without a token of its own", () => {
+    // gnachman/iTerm2#731, 2026-08-28: python-api-tests SUCCESS, xcode-tests
+    // CANCELLED after six hours waiting for a macOS runner nobody here owns.
+    // It banded under "Your move" with a red glyph and the author could not
+    // see why — because nothing was wrong. It reads as `waiting` now, which is
+    // what a PR with no verdict and no review actually is. The other half of
+    // this lives in @kud/gh-ink, where whoseMove sends `waiting` on your own
+    // PR to Their move.
+    expect(
+      pr({
+        checks: [
+          { name: "python-api-tests", conclusion: "SUCCESS" },
+          { name: "xcode-tests", conclusion: "CANCELLED" },
+        ],
+      }),
+    ).toBe("waiting")
+
+    // A real failure alongside it still wins: this loosens one token, not the
+    // ladder.
+    expect(
+      pr({
+        checks: [
+          { name: "xcode-tests", conclusion: "CANCELLED" },
+          { name: "lint", conclusion: "FAILURE" },
+        ],
+      }),
+    ).toBe("ci-fail")
   })
 })
 

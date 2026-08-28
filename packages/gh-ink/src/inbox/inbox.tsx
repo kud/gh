@@ -68,6 +68,11 @@ export type GHDetail = {
   checksPass: number
   checksFail: number
   checksPending: number
+  // Terminal checks that reached no verdict — cancelled or abandoned. Optional
+  // because it arrived after the other three: a host that does not set it keeps
+  // working and simply says nothing about them, rather than reporting zero as
+  // though it had looked.
+  checksStale?: number
   threadsTotal: number
   lastCommitAt?: string
   lastEventAt?: string
@@ -292,13 +297,19 @@ const healthSentence = (item: GHItem): string => {
   }
 }
 
+// Every check the rollup carries gets counted somewhere. A cancelled one used to
+// fall through all three buckets and vanish from this sentence — so a PR could
+// read "Checks: 1 passing" while two had run, with nothing on screen to say the
+// second had been killed rather than skipped.
 const checksSentence = (d?: GHDetail): string | null => {
   if (!d) return null
-  const total = d.checksPass + d.checksFail + d.checksPending
+  const stale = d.checksStale ?? 0
+  const total = d.checksPass + d.checksFail + d.checksPending + stale
   if (total === 0) return "No CI checks run on it."
   const parts: string[] = []
   if (d.checksPass) parts.push(`${d.checksPass} passing`)
   if (d.checksFail) parts.push(`${d.checksFail} failing`)
+  if (stale) parts.push(`${stale} cancelled`)
   if (d.checksPending) parts.push(`${d.checksPending} running`)
   return `Checks: ${parts.join(", ")}.`
 }
