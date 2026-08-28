@@ -1,5 +1,12 @@
 # @kud/gh-ink
 
+## 0.26.4
+
+### Patch Changes
+
+- Updated dependencies [230f4f0]
+  - @kud/gh@0.7.0
+
 ## 0.26.3
 
 ### Patch Changes
