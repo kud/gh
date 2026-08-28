@@ -1674,7 +1674,13 @@ export const buildActions = (
     actions.push({
       label: e.title,
       hint: e.key,
-      run: () => ext?.onOpenExt?.(e.id, { item, login }),
+      run: () =>
+        ext?.onOpenExt?.(e.id, {
+          item,
+          login,
+          onRemove: (row) => onRemove?.(row as GHItem),
+          showFlash,
+        }),
     })
 
   return actions
@@ -3178,6 +3184,8 @@ const BrowseScreen = ({
         item: activeItem ?? undefined,
         ciJob: ciStatus?.job,
         login,
+        onRemove: (row) => removeItemFromSections(row as GHItem),
+        showFlash,
       })
       return
     }
