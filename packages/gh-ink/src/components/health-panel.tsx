@@ -3,6 +3,7 @@ import { Box, Text, useInput } from "ink"
 import { colors } from "@kud/ink-ui"
 import {
   isFailCheck,
+  isInconclusiveCheck,
   isPassCheck,
   mergePr,
   reRequestReviewer,
@@ -11,12 +12,18 @@ import {
   type PrHealthData,
 } from "@kud/gh"
 
+// Four glyphs, never three: a check that was cancelled and one that is still
+// running are both "not green", and collapsing them lost the only fact that
+// tells you whether waiting will help. kud is colourblind, so the shape has to
+// carry it — `-` reads as no result, `·` as not yet.
 const checkIcon = (c: PrCheck): [string, string] =>
   isPassCheck(c)
     ? ["✓", colors.success]
     : isFailCheck(c)
       ? ["✗", colors.error]
-      : ["·", colors.warning]
+      : isInconclusiveCheck(c)
+        ? ["-", colors.warning]
+        : ["·", colors.warning]
 
 const checkLabel = (c: PrCheck) => {
   const name = c.context ?? c.name ?? ""
@@ -147,10 +154,17 @@ export const HealthPanel = ({
     }
   }
 
+  // Fail OR inconclusive, and the second half is the reason this action exists
+  // at all for the case that prompted it: a job killed after six hours waiting
+  // for a runner is precisely the one worth asking for again. Narrowing this to
+  // isFailCheck when CANCELLED moved out of that set would have removed the fix
+  // along with the false alarm.
   const retrigger = () => {
-    const failing = checks.find((c) => isFailCheck(c) && runIdOf(checkUrl(c)))
-    const runId = failing && runIdOf(checkUrl(failing))
-    if (!runId) return flash("No failed Actions run to retrigger")
+    const stuck = checks.find(
+      (c) => (isFailCheck(c) || isInconclusiveCheck(c)) && runIdOf(checkUrl(c)),
+    )
+    const runId = stuck && runIdOf(checkUrl(stuck))
+    if (!runId) return flash("No Actions run to retrigger")
     void act("retrigger CI", () => rerunFailedRun(repo, runId))
   }
 
@@ -187,7 +201,8 @@ export const HealthPanel = ({
   const reviewerMap = Object.fromEntries(reviewers)
   const passed = checks.filter(isPassCheck).length
   const failed = checks.filter(isFailCheck).length
-  const pending = checks.length - passed - failed
+  const stale = checks.filter(isInconclusiveCheck).length
+  const pending = checks.length - passed - failed - stale
   const approved = Object.values(reviewerMap).filter(
     (s) => s === "APPROVED",
   ).length
@@ -197,6 +212,7 @@ export const HealthPanel = ({
 
   const checkParts: [string, string][] = [[`${passed} passed`, colors.success]]
   if (failed > 0) checkParts.push([`${failed} failed`, colors.error])
+  if (stale > 0) checkParts.push([`${stale} cancelled`, colors.warning])
   if (pending > 0) checkParts.push([`${pending} pending`, colors.warning])
 
   const reviewParts: [string, string][] = [

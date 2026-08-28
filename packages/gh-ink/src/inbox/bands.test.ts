@@ -59,6 +59,20 @@ describe("whoseMove", () => {
     expect(whoseMove("pending", "review")).toBe("you")
   })
 
+  it("does not claim a PR whose CI was cancelled rather than failed", () => {
+    // gnachman/iTerm2#731: a job killed after six hours waiting for a runner
+    // on somebody else's infrastructure. @kud/gh stopped calling that a
+    // failure, so it arrives here as `waiting` — and `waiting` on your own PR
+    // is theirs, which is the whole point. Pinned as a pair because the bug
+    // was only visible end to end: the classifier and the band were each
+    // defensible on their own.
+    expect(whoseMove("waiting", "open")).toBe("them")
+    expect(whoseMove("waiting", "mine")).toBe("them")
+
+    // Unless they said something, which is a claim on you regardless of CI.
+    expect(whoseMove("waiting", "mine", undefined, true)).toBe("you")
+  })
+
   it("keeps threads and approval yours while a review is still wanted", () => {
     for (const tab of ["open", "review", "incoming", "assigned"]) {
       expect(whoseMove("threads", tab)).toBe("you")
