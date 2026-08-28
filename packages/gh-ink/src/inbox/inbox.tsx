@@ -818,15 +818,34 @@ export const budgetNotice = (
  * Index-based rather than item-based: whether a row gaps depends on what sits
  * above it, which an item alone cannot answer.
  */
+// A row that hangs UNDER a ticket rather than beside it. Lives here, next to
+// its only non-trivial reader, rather than down among the render helpers where
+// it used to sit — `gapsAbove` depends on it, and a dependency 1,100 lines
+// below the thing that needs it survives only by module-evaluation order.
+const isChildRow = (item?: AnyItem): boolean =>
+  !!item &&
+  (item.kind === "show-more" ||
+    item.kind === "show-less" ||
+    ("indent" in item && item.indent === true))
+
 export const gapsAbove = (items: readonly AnyItem[], i: number): boolean => {
   const item = items[i]
   if (!item || i === 0) return false
   if (item.kind === "repo-header" || item.kind === "subgroup-header") return true
-  // Every ticket opens a group of its own. Without a break the last PR of one
-  // and the ticket line of the next sit on adjacent rows, and several small
-  // trees read as one long list — the grouping is there in the glyphs and
-  // nowhere in the spacing.
-  return item.kind === "task"
+  if (item.kind !== "task") return false
+
+  // The gap separates one TREE from the next, which is not the same as one
+  // ticket from the next. A ticket with PRs beneath it opens a tree and needs
+  // air above it, or the last PR of the group before reads as belonging to it.
+  // A ticket with nothing beneath it is a single line, and a run of those is a
+  // plain list — double-spacing it spends half the window on emptiness and
+  // makes the tab look shorter than it is.
+  //
+  // Both sides, because a boundary belongs to two groups: the row after a tree
+  // needs the break as much as the row that opens one. Off Board is the tab
+  // that showed this — ten ticket rows, no PRs anywhere, nineteen lines used
+  // for ten rows of content.
+  return isChildRow(items[i + 1]) || isChildRow(items[i - 1])
 }
 
 export const fitCount = (
@@ -1924,12 +1943,6 @@ export const tabLabel = (
 
 // A row hanging off the one above it. `show-more` counts: it sits inside the
 // group and closes it, so the last VISIBLE PR above it is a tee, not a corner.
-const isChildRow = (item?: AnyItem): boolean =>
-  !!item &&
-  (item.kind === "show-more" ||
-    item.kind === "show-less" ||
-    ("indent" in item && item.indent === true))
-
 const ItemRow = ({
   item,
   active,
