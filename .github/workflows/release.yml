@@ -21,6 +21,26 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      # The quality gates run HERE, not only in ci.yml, because ci.yml cannot be
+      # trusted to have run on a release.
+      #
+      # `changesets/action` opens and force-pushes `changeset-release/main` using
+      # GITHUB_TOKEN, and GitHub restricts workflow runs created by that token:
+      # the run is attributed to github-actions[bot] and comes back either
+      # `action_required` (parked awaiting approval) or a zero-job startup
+      # `failure` when the next force-push orphans it. Measured on this repo —
+      # every run whose triggering actor was the bot failed or parked, and every
+      # run triggered by a human passed. So a release PR routinely carries NO
+      # checks at all, and `gh pr checks` reports none, which reads as "nothing
+      # to worry about" rather than "nothing ran".
+      #
+      # `npm run release` is `npm run build && changeset publish`, so a broken
+      # BUILD already blocked a publish. Type errors and failing tests did not:
+      # they would publish green. These two steps close that, and they sit before
+      # the action so a red tree never even opens a version PR.
+      - run: npm run build
+      - run: npm run typecheck
+      - run: npm run test
       # Changesets publishes each changed workspace over OIDC. No NPM_TOKEN, no
       # --provenance — the id-token permission above is what npm trusts.
       - uses: changesets/action@v1
