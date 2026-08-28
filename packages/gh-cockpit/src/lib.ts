@@ -22,7 +22,10 @@ import {
 } from "@kud/gh-ink"
 import {
   type Health,
+  type InboxSource,
+  buildInboxQueries,
   buildInboxQuery,
+  mergeInboxData,
   computeHealth as ghComputeHealth,
   latestChecks,
   isPassCheck,
@@ -30,7 +33,8 @@ import {
   isPendingCheck,
 } from "@kud/gh"
 
-export { buildInboxQuery }
+export { buildInboxQueries, buildInboxQuery, mergeInboxData }
+export type { InboxSource }
 
 export const withRetry = async <T,>(
   fn: () => Promise<T>,
