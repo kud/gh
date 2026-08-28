@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import { budgetNotice, type InboxBudget } from "./inbox.js"
 
 // Priced in whole FETCHES, because that is the unit that runs out: the query
-// costs ~111 points against a 5,000 pool, so "some points left" and "another
+// costs ~73 points against a 5,000 pool, so "some points left" and "another
 // fetch left" are different questions and only the second is actionable.
 
 const NOW = 1_700_000_000_000

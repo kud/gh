@@ -13,7 +13,7 @@ import {
 } from "./cache.js"
 
 /*
- * The glance costs 111 GraphQL points a fetch, so what is being pinned here is
+ * The glance costs 73 GraphQL points a fetch, so what is being pinned here is
  * a spending policy, not a storage detail. Before this existed the cache was
  * read on mount and then refetched unconditionally — it recorded rather than
  * prevented, which is indistinguishable from working until someone counts.
@@ -44,7 +44,7 @@ describe("glance cache", () => {
     expect(isFresh(readCache(KEY))).toBe(true)
   })
 
-  // The gate. If this ever reads true, every launch pays 111 points again.
+  // The gate. If this ever reads true, every launch pays 73 points again.
   it("treats an entry older than the TTL as stale", async () => {
     writeCache(KEY, { sections, login: "kud" })
     const cached = readCache(KEY)

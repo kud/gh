@@ -78,7 +78,7 @@ describe("buildInboxQuery", () => {
    * The shape axis exists for cost, so these pin cost-bearing selections by
    * name. `statusCheckRollup.contexts` appears on five PR sources and
    * `reviewThreads(first: 50)` multiplies beneath each — together they are why
-   * the full query measures 111 points against a 5000/hour budget.
+   * the full query measures 73 points against a 5000/hour budget.
    */
   describe("shape", () => {
     it("defaults to full, so an existing caller keeps what it had", () => {
