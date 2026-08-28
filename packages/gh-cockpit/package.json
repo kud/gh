@@ -1,6 +1,6 @@
 {
   "name": "@kud/gh-cockpit",
-  "version": "0.1.18",
+  "version": "0.1.19",
   "description": "A configurable GitHub cockpit for the terminal — your PRs, reviews and issues in one Ink TUI, grouped by whose move it is.",
   "type": "module",
   "main": "dist/index.js",
@@ -53,8 +53,8 @@
     "react": ">=19"
   },
   "dependencies": {
-    "@kud/gh": "0.7.1",
-    "@kud/gh-ink": "0.29.1",
+    "@kud/gh": "0.8.0",
+    "@kud/gh-ink": "0.30.0",
     "@kud/ink-ui": "0.14.0",
     "zx": "8.8.5"
   },
