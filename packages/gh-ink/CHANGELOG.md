@@ -1,5 +1,11 @@
 # @kud/gh-ink
 
+## 0.28.0
+
+### Minor Changes
+
+- 9838fef: Shift+O opens the whole tree in the browser — the ticket and every PR hanging off it, the same rows Shift+C copies. `o` still opens the row you are on.
+
 ## 0.27.0
 
 ### Minor Changes
