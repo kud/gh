@@ -11,6 +11,11 @@ export {
   type CheckDrill,
   type CheckDrillContext,
 } from "./views/check-drill.js"
+export {
+  registerPrompts,
+  type PromptContext,
+  type PromptForms,
+} from "./prompts.js"
 export { detailFor } from "./views/detail.js"
 // A host registering its own CheckDrill renders inside the cockpit's frame, so it
 // needs the same chrome the built-in drills use — without this the only way to

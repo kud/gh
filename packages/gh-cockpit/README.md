@@ -164,6 +164,7 @@ A poller is wrong twice over: it spends quota on the long stretches where nothin
 | `configureInbox(config)`                 | Host opinions: `repoPriority`, `profiles`, `checkoutDir`, `cacheNamespace`, `cacheTtlMs` |
 | `parseArgs(argv)` | Parses `--here`, `--include`, `--exclude` and a positional filter name. You decide what they mean |
 | `registerCheckDrills(drills)`            | Where a CI check drills in; unregistered checks open in a browser                        |
+| `registerPrompts(forms)`                 | What a delegated agent is told to do. Nothing registered means the agent starts cold, and `y` copies the row URL |
 | `detailFor(ctx)`                         | The drill-in view for a row — `PrView` or `IssueView`                                    |
 | `PrView` · `IssueView`                   | The drill-in views themselves, if you want to wrap them                                  |
 | `withRetry(fn)`                          | Retries transient `50x` responses; GitHub returns them under load                        |

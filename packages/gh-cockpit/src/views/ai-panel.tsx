@@ -11,6 +11,7 @@ import {
   runInPaneHorizontal,
   runHere,
 } from "../lib.js"
+import { portablePromptFor, type PromptContext } from "../prompts.js"
 
 type Agent = {
   id: string
@@ -49,42 +50,6 @@ const isInstalled = async (cmd: string): Promise<boolean> =>
 // AppleScript never sees the string — but a shell does, and it types it verbatim.
 const shellQuote = (s: string): string => `'${s.replace(/'/g, `'\\''`)}'`
 
-// What a delegated session is told to do: a pointer and an intent, never a
-// payload. The session has `gh` and can fetch the body itself, so passing it
-// duplicates that work and puts a multi-line body through a layer of shell
-// quoting for no gain. A plan-labelled issue gets /k-project's plan form, which
-// is the one that resumes rather than re-derives.
-export const seedPromptFor = (item: {
-  kind: "pr" | "issue"
-  number: number
-  url: string
-  labels?: string[]
-}): string =>
-  item.kind === "pr"
-    ? `/k-pr ${item.number}`
-    : item.labels?.includes("plan")
-      ? `/k-project plan ${item.number}`
-      : `/k-project ${item.url}`
-
-// The same intent as seedPromptFor, addressed to a session whose working
-// directory we do not control. The launcher can afford a bare `/k-pr 42` because
-// it cds into the checkout first; a prompt on the clipboard lands wherever it is
-// pasted — an atelier session sits in ~/Companies/atelier, where that number
-// resolves against no repo at all. Every reference here is repo-qualified for
-// that reason, and the URL forms are already portable as they stand.
-export const portablePromptFor = (item: {
-  kind: "pr" | "issue"
-  number: number
-  repo: string
-  url: string
-  labels?: string[]
-}): string =>
-  item.kind === "pr"
-    ? `/k-pr ${item.url}`
-    : item.labels?.includes("plan")
-      ? `/k-project plan ${item.number} ${item.repo}`
-      : `/k-project ${item.url}`
-
 // The no-launch half of delegation: put the prompt on the clipboard for a session
 // that is already warm elsewhere, rather than starting a cold one. Shows the exact
 // text instead of a bare "copied" — it is about to be pasted somewhere with no
@@ -94,13 +59,7 @@ export const CopyPromptNotice = ({
   item,
   onBack,
 }: {
-  item: {
-    kind: "pr" | "issue"
-    number: number
-    repo: string
-    url: string
-    labels?: string[]
-  }
+  item: PromptContext
   onBack: () => void
 }) => {
   const prompt = portablePromptFor(item)
