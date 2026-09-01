@@ -1,5 +1,6 @@
 import React, { useEffect } from "react"
-import { AiLauncher, seedPromptFor } from "../views/ai-panel.js"
+import { AiLauncher } from "../views/ai-panel.js"
+import { seedPromptFor } from "../prompts.js"
 import type { AnyItem, GHItem, InboxExtension } from "../lib.js"
 
 // Delegating straight from the browse list, without drilling into the row first —
