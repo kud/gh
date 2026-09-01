@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest"
 import { EventEmitter } from "node:events"
 import React from "react"
 import { render } from "ink"
-import { App } from "./inbox.js"
+import { App, LEAVING_HOLD_MS } from "./inbox.js"
 import type { GHItem, Section } from "./inbox.js"
 import type { ExtensionTarget, InboxExtension } from "./extension.js"
 
@@ -77,6 +77,7 @@ const SECTIONS: Section[] = [
 ]
 
 const settle = () => new Promise((resolve) => setImmediate(resolve))
+const after = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 describe("ExtensionTarget", () => {
   const mount = (ext: InboxExtension) => {
@@ -133,7 +134,7 @@ describe("ExtensionTarget", () => {
     expect(typeof seen?.showFlash).toBe("function")
   })
 
-  it("drops the row from the list when the extension removes it", async () => {
+  it("sees the row off, then drops it, when the extension removes it", async () => {
     const muter: InboxExtension = {
       id: "muter",
       title: "Muter",
@@ -155,12 +156,21 @@ describe("ExtensionTarget", () => {
     await settle()
     await settle()
     const frame = stdout.lastFrame()
+
+    // The row is on its way out, not out: it wears GONE where you can see it
+    // first, the same farewell the built-in verbs got when closing stopped
+    // teleporting rows off screen. What has not changed is the part this test
+    // was written for — no refetch is involved anywhere in it.
+    expect(frame).toContain("first row")
+    expect(frame).toContain("GONE")
+    expect(frame).toContain("Muted #1")
+
+    await after(LEAVING_HOLD_MS + 400)
+    const settled = stdout.lastFrame()
     done()
 
-    // Gone at once, without a refetch — the whole point.
-    expect(frame).not.toContain("first row")
+    expect(settled).not.toContain("first row")
     // And only that row: a remover that clears the list would pass the line above.
-    expect(frame).toContain("second row that must survive")
-    expect(frame).toContain("Muted #1")
+    expect(settled).toContain("second row that must survive")
   })
 })

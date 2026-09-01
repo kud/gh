@@ -1995,6 +1995,18 @@ const TRANSIT_LABEL: Record<Transient, string> = {
   out: "GONE",
   changed: "UPDATED",
 }
+// A row you banished yourself — closed, or dropped your review request from —
+// leaves wearing the same GONE the refresh puts on a row that left between two
+// fetches. It used to vanish on the keypress, which is the one departure in this
+// UI with no acknowledgement at all: the flash says "✓ Closed #412" while the
+// row it names is already off screen, so there is nothing left to check it
+// against. Merging had exactly this fixed once; closing is the same gap.
+//
+// Shorter than either other hold. The merge sparkle celebrates, and the refresh
+// mark has to survive being NOTICED — it is reporting work that happened in
+// another window. This one only has to be seen: you pressed the key a second ago
+// and are looking at the row.
+export const LEAVING_HOLD_MS = 2500
 // A tab still holding marks wears a dot. Presence, not hue — Tabs dims every
 // inactive label to the same grey, so a coloured marker would be no marker at
 // all on exactly the tabs this exists to point at.
@@ -2018,7 +2030,8 @@ const ItemRow = ({
   gap,
   login,
   merged,
-  transient,
+  transient: refreshMark,
+  leaving,
   lastChild,
   parent,
   sparkFrame = 0,
@@ -2041,8 +2054,16 @@ const ItemRow = ({
   merged?: boolean
   /** What the refresh just did to this row, for the length of the hold. */
   transient?: Transient
+  /** You just closed it, or removed yourself from it: on its way out. */
+  leaving?: boolean
   sparkFrame?: number
 }) => {
+  // One vocabulary, because the row is saying the same thing either way: it is
+  // leaving. Who caused it is the flash's business — the row's is that it will
+  // not be here in a moment. Folded in here rather than at each of the six
+  // places `transient` is read, so a later branch cannot handle one and forget
+  // the other.
+  const transient: Transient | undefined = leaving ? "out" : refreshMark
   if (item.kind === "repo-header")
     return <RepoHeaderRow repo={item.repo} gap={gap ?? false} />
 
@@ -2822,6 +2843,8 @@ const BrowseScreen = ({
   skippedForBudget,
   brand,
   mergedUrls,
+  leavingUrls,
+  onLeave,
   transients,
   onTabChange,
 }: {
@@ -2830,6 +2853,14 @@ const BrowseScreen = ({
   login: string
   /** URLs of rows merged from this cockpit, still inside their hold. */
   mergedUrls?: string[]
+  /** URLs of rows closed or dismissed from here, still inside their hold. */
+  leavingUrls?: string[]
+  /**
+   * This row has been dismissed — closed, or you off its reviewer list. The host
+   * owns what happens next, because the row has to keep being RENDERED for the
+   * length of its farewell, and the sections it is rendered from are App's.
+   */
+  onLeave?: (item: GHItem) => void
   /** What the refresh just did to each row, for the length of the hold. */
   transients?: Map<string, Transient>
   /** Which tab is on screen, so the host can spend the hold per tab. */
@@ -2967,8 +2998,16 @@ const BrowseScreen = ({
     )
   }, [localSections, listHeight])
 
-  const removeItemFromSections = (target: GHItem) =>
-    setLocalSections((prev) => withoutItem(prev, target))
+  // Handed up rather than done here: a dismissed row now stays on screen for a
+  // beat wearing GONE, and this screen cannot hold it — App re-supplies
+  // `sections` on every applied fetch, so a row this screen had quietly dropped
+  // would reappear anyway. The fallback keeps the old instant behaviour for a
+  // host that has not wired the hold, which is worse than the farewell but far
+  // better than a keypress that does nothing.
+  const dismissItem = (target: GHItem) =>
+    onLeave
+      ? onLeave(target)
+      : setLocalSections((prev) => withoutItem(prev, target))
 
   const rawSection = localSections[safeTabIdx] ?? {
     id: "empty",
@@ -3033,6 +3072,7 @@ const BrowseScreen = ({
   const [sparkFrame, setSparkFrame] = useState(0)
   const sparkling =
     (mergedUrls?.length ?? 0) > 0 ||
+    (leavingUrls?.length ?? 0) > 0 ||
     (!!transients?.size &&
       section.items.some((item) => transientOf(transients, item)))
   useEffect(() => {
@@ -3080,7 +3120,7 @@ const BrowseScreen = ({
       jiraKeyRe,
       jiraTransitions,
       onRefresh,
-      removeItemFromSections,
+      dismissItem,
       openDrillView,
       { extensions, onOpenExt, onActed },
     )
@@ -3222,7 +3262,7 @@ const BrowseScreen = ({
         item: activeItem ?? undefined,
         ciJob: ciStatus?.job,
         login,
-        onRemove: (row) => removeItemFromSections(row as GHItem),
+        onRemove: (row) => dismissItem(row as GHItem),
         showFlash,
       })
       return
@@ -3388,7 +3428,7 @@ const BrowseScreen = ({
       activeItem.standing === "queued" &&
       login
     ) {
-      removeItemFromSections(activeItem)
+      dismissItem(activeItem)
       showFlash(`⋯ Removing you from #${activeItem.number}…`)
       void quietly`gh pr edit ${activeItem.number} --repo ${activeItem.repo} --remove-reviewer ${login}`
         .then(() => {
@@ -3623,6 +3663,10 @@ const BrowseScreen = ({
                 merged={
                   (item.kind === "pr" || item.kind === "issue") &&
                   !!mergedUrls?.includes(item.url)
+                }
+                leaving={
+                  (item.kind === "pr" || item.kind === "issue") &&
+                  !!leavingUrls?.includes(item.url)
                 }
                 transient={transientOf(transients, item)}
                 // Computed against section.items, never the visible slice: a
@@ -4282,8 +4326,12 @@ export const App = ({
   const [skippedForBudget, setSkippedForBudget] = useState(false)
 
   const [mergedUrls, setMergedUrls] = useState<string[]>([])
-  const mergeTimers = useRef<ReturnType<typeof setTimeout>[]>([])
-  useEffect(() => () => mergeTimers.current.forEach(clearTimeout), [])
+  const [leavingUrls, setLeavingUrls] = useState<string[]>([])
+  // One list for both holds: they are the same kind of promise — a row kept on
+  // screen past the moment its state changed — and two refs would only give the
+  // unmount two chances to miss one.
+  const holdTimers = useRef<ReturnType<typeof setTimeout>[]>([])
+  useEffect(() => () => holdTimers.current.forEach(clearTimeout), [])
 
   // The three list-less states share the browse screen's frame so that whichever
   // one you land on, the header still says what was looked at — which under
@@ -4362,15 +4410,36 @@ export const App = ({
   const toBrowse = () =>
     setState({ phase: "browse", sections: state.sections, login: state.login })
 
-  // Closing from a drill hands back to the inbox, so the row has to be gone
-  // from App's own sections — returning to a list that still shows what you
-  // just closed is the lag the optimistic update exists to remove.
-  const removeAndReturn = (target: GHItem) =>
-    setState({
-      phase: "browse",
-      sections: withoutItem(state.sections, target),
-      login: state.login,
-    })
+  // Closing from a drill hands back to the inbox, so the row has to go from
+  // App's own sections — returning to a list that still shows what you just
+  // closed is the lag the optimistic update exists to remove. It goes on a
+  // delay rather than at once, so the removal happens where you can watch it:
+  // the row dissolves in place wearing GONE, then drops.
+  //
+  // Same shape as markMerged, including its one rough edge — a close that
+  // GitHub then refuses removes the row anyway and lets the failure's refresh
+  // put it back, so the bounce is longer than it used to be. That path already
+  // says "restoring #412" out loud, and paying for it costs a cancellation seam
+  // through every caller of an action that never normally fails.
+  const markLeaving = (target: GHItem) => {
+    // Only when there is something to come back FROM. In browse this would swap
+    // `sections` for an identical copy, and BrowseScreen resyncs off that prop
+    // identity — collapsing every expanded group at the moment you closed a row.
+    if (state.phase !== "browse") toBrowse()
+    setLeavingUrls((prev) =>
+      prev.includes(target.url) ? prev : [...prev, target.url],
+    )
+    holdTimers.current.push(
+      setTimeout(() => {
+        setLeavingUrls((prev) => prev.filter((u) => u !== target.url))
+        setState((s) =>
+          s.phase === "browse"
+            ? { ...s, sections: withoutItem(s.sections, target) }
+            : s,
+        )
+      }, LEAVING_HOLD_MS),
+    )
+  }
 
   // Back to the list first, so the sparkle happens where you can see it — the
   // drill view is still up at the moment the merge resolves, and a celebration
@@ -4380,7 +4449,7 @@ export const App = ({
     setMergedUrls((prev) =>
       prev.includes(target.url) ? prev : [...prev, target.url],
     )
-    mergeTimers.current.push(
+    holdTimers.current.push(
       setTimeout(() => {
         setMergedUrls((prev) => prev.filter((u) => u !== target.url))
         setState((s) =>
@@ -4412,6 +4481,8 @@ export const App = ({
         skippedForBudget={skippedForBudget}
         hidden={overlay !== null}
         mergedUrls={mergedUrls}
+        leavingUrls={leavingUrls}
+        onLeave={markLeaving}
         transients={transients}
         onTabChange={setVisibleTab}
         ciStatusState={hasCiStatus ? ciStatusState : undefined}
@@ -4451,7 +4522,7 @@ export const App = ({
           login: state.login,
           onBack: toBrowse,
           onRefresh: applyOrRefresh,
-          onRemove: removeAndReturn,
+          onRemove: markLeaving,
           onMerged: markMerged,
         })}
       {overlay?.kind === "ext" &&
