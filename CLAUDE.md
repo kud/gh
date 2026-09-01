@@ -50,24 +50,53 @@ ends when you touch one: `packages/gh/src/health.test.ts` for the token,
 > `packages/gh-ink/src/components/health-panel.tsx` finds the run behind the `r`
 > key through it. Narrowing the predicate silently narrows the affordance.
 
-## Cockpit does not compile against its workspace siblings
+## Cockpit compiles against the workspace, so build order is load-bearing
 
-`packages/gh-cockpit` resolves `@kud/gh-ink` to a **published** copy from the
-registry, not to the sibling in this repo. Three packages pin
-`@kud/ink-ui@0.8.0` while `gh-ink` and `gh-cockpit` pin `0.14.0`, so npm hoists
-0.8.0 and nests a registry `gh-ink` under cockpit to satisfy the conflict.
+`packages/gh-cockpit` resolves `@kud/gh-ink` to the **sibling in this repo**, not
+to a published copy: it pins the exact version the workspace carries, changesets
+bumps both in lockstep on every release, and npm therefore links
+`node_modules/@kud/gh-ink` straight at `packages/gh-ink`. The same holds for
+`@kud/gh` and for the three thin CLIs. Only `@kud/ink-ui` still nests — three
+packages pin `0.8.0` against `gh-ink` and `gh-cockpit`'s `0.14.0`, so npm hoists
+0.8.0 and gives those two their own copy.
 
-The practical rule: **a change that adds to `gh-ink`'s exported types cannot be
-consumed by cockpit in the same commit.** Cockpit's half waits for `gh-ink` to
-publish. Typecheck catches it, but only after a clean install — a stale
-`node_modules` hides it and shows unrelated `@kud/ink-ui` errors instead. When
-the typecheck errors look impossible, run `npm ci` before believing them.
+The good half: **a change to `gh-ink`'s exported types is consumable by cockpit
+in the same commit.** Nothing waits for a publish.
+
+The cost: cockpit's build needs `gh-ink/dist` to already exist, and
+`workspaces: ["packages/*"]` expands ALPHABETICALLY — `gh-cockpit` before
+`gh-ink`. So the root `build` script builds `@kud/gh` and `@kud/gh-ink`
+explicitly first, then sweeps `--workspaces`. Keep that prelude when you touch
+the script, and extend it if a new package acquires dependents.
+
+> [!IMPORTANT]
+> This is invisible locally and fatal in CI. A previous build leaves
+> `packages/*/dist` on disk, so any order works on your machine; a fresh
+> checkout has none, and cockpit fails with `Cannot find module '@kud/gh-ink'`
+> or a burst of `has no exported member` errors from `lib.js`. To reproduce
+> what CI sees, delete every `dist/` first. This was red on `main` from
+> 2026-08-28 to 2026-09-01, taking the release train down with it, and every
+> local check passed throughout.
+
+Both halves of this changed with the lockfile sync in `dc6cab3`: cockpit used to
+pin a `gh-ink` the workspace did not carry, which is what made npm nest a
+registry copy and hid the ordering problem. **When a lockfile falls behind the
+package.json versions, expect this to come back** — the entry to check is
+whether `node_modules/@kud/gh-ink` in `package-lock.json` says `link: true`.
 
 ## Gates
 
 `npm run build` · `npm run typecheck` · `npm test`. That is the whole of CI
 (`.github/workflows/ci.yml`) and there is no linter. Build first — packages
-consume each other's `dist`, so a stale build makes typecheck lie.
+consume each other's `dist`, so a stale build makes typecheck lie, and in the
+right order for the reason above.
+
+Several of the Ink tests mount a real terminal and wait on real timers
+(`transit.test.tsx`, `merged.test.tsx`, `leaving.test.tsx`), which is deliberate
+— the thing under test is the gap between state being set and a frame carrying
+it. They are correspondingly sensitive to a loaded runner: one tab-marker
+assertion has failed once on GitHub's hardware and passed on re-run. Re-run
+before believing a lone failure there; believe a second one.
 
 ## Changesets
 
