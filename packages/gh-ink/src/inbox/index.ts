@@ -8,6 +8,7 @@ export {
   CiStatusLine,
   layoutGHItems,
   whoseMove,
+  PIN_MARK,
   insertRepoHeaders,
   sortItems,
   sortByRecency,
