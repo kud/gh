@@ -571,6 +571,10 @@ export const whoseMove = (
   return YOURS[position].includes(health) ? "you" : "them"
 }
 
+// Exported so the colourblind invariant can be tested against the health glyphs
+// rather than restated as a literal in two files that drift apart.
+export const PIN_MARK = "+"
+
 const BAND_LABEL: Record<"you" | "them", string> = {
   you: "Your move",
   them: "Their move",
@@ -2228,12 +2232,18 @@ const ItemRow = ({
   // A pinned row lands in Your move for a reason no arrow can carry: the arrows
   // report who SPOKE last, and a pin is not a turn in the conversation. Left to
   // the arrow alone it would sit under Your move wearing a grey → that says the
-  // opposite. So it gets its own mark — single-width ASCII, because this cell is
+  // opposite. So it gets its own mark, single-width ASCII because this cell is
   // in the aligned zone where a codepoint that renders double-width anywhere
-  // would shift only the rows carrying one, and orange, so the mark and the
-  // colour each say it independently.
+  // would shift only the rows carrying one.
+  //
+  // NOT `!`, which was the first choice and was wrong: `!` is `conflict` in the
+  // health vocabulary, in this same orange, one cell to the left — so a PR that
+  // was both rendered `! !` twice in the same colour with nothing to tell the
+  // two apart. The colourblind invariant health-display.ts states for its own
+  // map has to hold ACROSS the adjacent cells too, not just within one, and
+  // `pinMarkIsUnambiguous` in health-display.test.ts now pins that.
   const [turnIcon, turnColor] = item.pinned
-    ? ["!", "#FF8700"]
+    ? [PIN_MARK, "#FF8700"]
     : !login || !item.lastActor
       ? [" ", "white"]
       : spokeLast

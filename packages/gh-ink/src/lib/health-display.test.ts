@@ -5,6 +5,7 @@ import {
   healthGlyph,
   healthLegend,
 } from "./health-display.js"
+import { PIN_MARK } from "../inbox/inbox.js"
 import type { Health } from "@kud/gh"
 
 const ALL: Health[] = [
@@ -29,6 +30,15 @@ describe("healthDisplay", () => {
   it("gives every non-blank state a distinct glyph (colourblind invariant)", () => {
     const glyphs = ALL.filter((h) => h !== "none").map(healthGlyph)
     expect(new Set(glyphs).size).toBe(glyphs.length)
+  })
+
+  // The invariant the map above states for itself, extended one cell right. The
+  // turn column sits immediately beside the health column, so a mark that is
+  // unique within the health map and equal to one of its glyphs is exactly as
+  // unreadable as a duplicate inside it — and the first pin mark was `!`, which
+  // is `conflict`, in the same orange.
+  it("keeps the pin mark distinct from every health glyph", () => {
+    expect(ALL.map(healthGlyph)).not.toContain(PIN_MARK)
   })
 
   it("exposes glyph and colour accessors", () => {
