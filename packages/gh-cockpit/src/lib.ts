@@ -7,7 +7,93 @@
 // the HOST, not here: `configureInbox`, `registerCheckDrills` and the repo
 // filters are how a host says those things.
 
-export * from "@kud/gh-ink"
+/*
+ * Every VALUE @kud/gh-ink exports, named one by one, and the list is not
+ * boilerplate — it is the fix.
+ *
+ * This was `export * from "@kud/gh-ink"` for the package's whole life, and it
+ * never worked once it was published. esbuild cannot express a star re-export of
+ * an EXTERNAL package in ESM's static export list, so tsup degrades it to a
+ * runtime __reExport shim that copies properties onto an internal object nothing
+ * ever re-exports. The .d.ts keeps the star, so types resolve and tsc passes
+ * clean: 0.2.2 shipped 17 of ~26 documented exports, with App, configureInbox,
+ * layoutGHItems and whoseMove all `undefined` at runtime. A host got a green
+ * typecheck and "Element type is invalid ... got: undefined" at first render.
+ *
+ * Inside the workspace the same star resolves from source and works perfectly,
+ * which is what hid it — the bug only exists in the published artefact, and
+ * every local check passed throughout. `exports.test.ts` beside this file now
+ * imports the BUILT dist and compares against gh-ink's own key list, so the
+ * next name to go missing fails a test rather than a render.
+ *
+ * TYPES stay a star below: type-only re-exports are erased before esbuild sees
+ * them, so they never hit the degradation, and this way only the value names
+ * need maintaining by hand.
+ */
+export {
+  ActionMenu,
+  App,
+  budgetNotice,
+  buildActions,
+  buildCheckoutCmd,
+  checkoutDirs,
+  CiStatusLine,
+  clipboard,
+  COLS,
+  CommentsPanel,
+  configureInbox,
+  drillCmd,
+  explainGhAction,
+  explainItem,
+  filterByOrigin,
+  filterByRepos,
+  filterBySearch,
+  fitCount,
+  gapsAbove,
+  healthColor,
+  healthDisplay,
+  healthGlyph,
+  healthLegend,
+  HealthPanel,
+  inboxConfig,
+  insertRepoHeaders,
+  itermRun,
+  jumpToRepo,
+  jumpToRepoPane,
+  layoutGHItems,
+  matchesFilter,
+  maxViewStart,
+  moveCursor,
+  openInTab,
+  parsePatterns,
+  PIN_MARK,
+  profileOf,
+  readCache,
+  relativeTime,
+  renderMarkdown,
+  repoPriority,
+  reposInSections,
+  resetInboxConfig,
+  resolveRepoPath,
+  runHere,
+  runInPane,
+  runInPaneHorizontal,
+  sameCiStatusState,
+  signatureOf,
+  sortByRecency,
+  sortItems,
+  toCiStatusState,
+  topLevelCount,
+  truncate,
+  useActionMenu,
+  whoseMove,
+  windowCount,
+  withHeaders,
+  withoutItem,
+  writeCache,
+} from "@kud/gh-ink"
+
+export type * from "@kud/gh-ink"
 
 import { $ } from "zx"
 import { mkdirSync } from "node:fs"
@@ -89,10 +175,41 @@ export const computeHealth = (node: any): Health =>
 // already taken. Bot-ness comes from `__typename`, not the login: GraphQL
 // reports app authors bare (`greptile-apps`), so a machine ACCOUNT such as
 // `raycastbot` is a User here and still reads as human.
+//
+// That hatch assumes every turn is clearable by words or by a push, and one
+// shape is clearable by neither: a bot commenting AFTER the last push — an
+// autoplan fired by a change to the base branch, say — on a PR that is green,
+// has no open thread and is simply waiting on somebody else's approval. It went
+// to Your move and stayed there, with no action available that would clear it.
+//
+// So a third thing can settle a turn: 👀 from the viewer on the last comment. It
+// reads as "no reply is owed for THIS one", and its scope is the point — it is a
+// fact about one event, so the next comment is unacked and the turn comes back.
+// That self-expiry is what makes it safe to reach for freely, and why it can
+// never permanently silence a PR. Nothing about it is bot-specific; it is
+// arguably more useful on a human's "non-blocking nit".
+//
+// The ack IS the reply, so it lands in the same hatch rather than beside it —
+// handing back the author is already how this function says "no turn is owed",
+// and `theySpokeLast` downstream is derived from `lastActor`.
+const viewerReacted = (n: any, content: string): boolean =>
+  ((n?.reactionGroups ?? []) as any[]).some(
+    (g) => g?.content === content && g?.viewerHasReacted,
+  )
+
 const conversationOf = (
   node: any,
 ): { count: number; lastActor?: string; lastEventAt?: string } => {
-  const events: Array<{ at: string; login?: string; bot: boolean }> = []
+  // `acked` is only ever set on the PR-level comments, because they are the only
+  // events @kud/gh fetches reactions for. Reviews and thread replies carry none
+  // and read as unacked, which is the safe direction: an ack that cannot be seen
+  // leaves the turn where it was rather than clearing one nobody claimed.
+  const events: Array<{
+    at: string
+    login?: string
+    bot: boolean
+    acked?: boolean
+  }> = []
   let count = node.comments?.totalCount ?? 0
   const isBot = (author: any) => author?.__typename === "Bot"
 
@@ -101,6 +218,7 @@ const conversationOf = (
       at: c.createdAt,
       login: c.author?.login,
       bot: isBot(c.author),
+      acked: viewerReacted(c, "EYES"),
     })
   for (const r of node.reviews?.nodes ?? [])
     if (r.state !== "PENDING")
@@ -128,8 +246,16 @@ const conversationOf = (
   // event before it too. ISO-8601 UTC compares lexicographically, the same trick
   // the stall test in @kud/gh-ink already relies on.
   const pushedAt = node.commits?.nodes?.[0]?.commit?.committedDate
-  if (last?.bot && pushedAt && pushedAt > last.at)
-    return { count, lastActor: node.author?.login, lastEventAt: pushedAt }
+  const answeredByPush = Boolean(last?.bot && pushedAt && pushedAt > last.at)
+  // An ack moves no clock: unlike a push it is not an event with a time of its
+  // own here, so the comment it settles stays the last thing that happened and
+  // the row keeps reading as active. Only the turn changes.
+  if (answeredByPush || last?.acked)
+    return {
+      count,
+      lastActor: node.author?.login,
+      lastEventAt: answeredByPush ? pushedAt : last?.at,
+    }
 
   return { count, lastActor: last?.login, lastEventAt: last?.at }
 }
@@ -210,6 +336,17 @@ export const toGHItem = (
     ).length,
     conversation: convo.count,
     lastActor: convo.lastActor,
+    // 👍 on the PR BODY, and the anchor is load-bearing rather than incidental.
+    // Scoped to a comment this would quietly evaporate on the next bot comment,
+    // which is exactly backwards for something meant to persist — anchoring it
+    // on the PR makes it PR-scoped by construction, with no bookkeeping to get
+    // wrong. It also reads distinctly on GitHub itself: an eye down in the
+    // thread, a thumb at the top.
+    //
+    // Precedence over 👀 comes for free: the pin is read by whoseMove, which
+    // answers before anything derived from lastActor is consulted. Nobody pins
+    // by accident, so the pin wins.
+    pinned: viewerReacted(node, "THUMBS_UP"),
     labels: (node.labels?.nodes ?? [])
       .map((l: any) => l?.name)
       .filter((n: unknown): n is string => typeof n === "string"),
