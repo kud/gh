@@ -73,6 +73,39 @@ describe("whoseMove", () => {
     expect(whoseMove("waiting", "mine", undefined, true)).toBe("you")
   })
 
+  // A pin is the viewer overruling the inference, so what is pinned here is
+  // that NOTHING gets to overrule it back. The cases below are the ones the
+  // bands are most confident about — a PR provably in somebody else's queue,
+  // and one on a tab where you have already had your say.
+  it("hands a pinned row to you whatever the tab and health say", () => {
+    for (const tab of ["open", "review", "reviewed", "mine", "incoming"])
+      for (const h of ["waiting", "pending", "approved", "ci-fail"] as const)
+        expect(whoseMove(h, tab, undefined, undefined, true)).toBe("you")
+  })
+
+  // The asymmetry, pinned deliberately: there is no way to pin a row away. An
+  // unpinned row is decided exactly as it was, which is also what keeps the
+  // parameter backward-compatible for every caller that never passes it.
+  it("changes nothing when the pin is absent or false", () => {
+    for (const pin of [undefined, false])
+      expect(whoseMove("waiting", "open", undefined, undefined, pin)).toBe(
+        "them",
+      )
+  })
+
+  it("puts a pinned row in the Your move band with no help from health", () => {
+    const rows = layoutGHItems(
+      [
+        item({ repo: "o/r", number: 1, health: "waiting" }),
+        item({ repo: "o/r", number: 2, health: "waiting", pinned: true }),
+      ],
+      "open",
+      "kud",
+    )
+    expect(labels(rows)).toEqual(["Your move (1)", "Their move (1)"])
+    expect(numbers(rows)).toEqual([2, 1])
+  })
+
   it("keeps threads and approval yours while a review is still wanted", () => {
     for (const tab of ["open", "review", "incoming", "assigned"]) {
       expect(whoseMove("threads", tab)).toBe("you")

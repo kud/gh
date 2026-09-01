@@ -74,6 +74,28 @@ describe("buildInboxQuery", () => {
     }
   })
 
+  // Both levels, and the distinction is the feature rather than a detail of it:
+  // a reaction on the last comment can only settle that comment, one on the PR
+  // settles the PR. Collapse them to one and whichever survives is wrong for
+  // half the cases.
+  it("carries reactions at both the PR and the last-comment level", () => {
+    const query = buildInboxQuery()
+    for (const alias of OPEN_PR_SOURCES) {
+      const block = blockFor(query, alias)
+      expect(block).toContain("reactionGroups { content viewerHasReacted }")
+      expect(
+        block.match(/reactionGroups \{ content viewerHasReacted \}/g),
+      ).toHaveLength(2)
+    }
+  })
+
+  // Selecting `users` would make this the one reaction sub-selection that is a
+  // connection, and GitHub wants a pagination argument on those. Nothing reads
+  // the count, so the cheap shape is also the correct one — this pins that.
+  it("asks for no reaction field that would need paginating", () => {
+    expect(buildInboxQuery()).not.toContain("users { totalCount }")
+  })
+
   /*
    * The shape axis exists for cost, so these pin cost-bearing selections by
    * name. `statusCheckRollup.contexts` appears on five PR sources and
@@ -95,6 +117,7 @@ describe("buildInboxQuery", () => {
         "comments(",
         "labels(",
         "commits(",
+        "reactionGroups",
       ])
         expect(query).not.toContain(field)
     })

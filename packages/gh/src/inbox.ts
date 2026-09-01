@@ -125,8 +125,24 @@ const PR_HEALTH = `
 // decide whether a push answers what was said — it does when a machine said it,
 // and does not when a person did. Note it catches GitHub Apps only; a machine
 // ACCOUNT like `raycastbot` is a User and reads as human here.
+//
+// A reaction of the viewer's OWN is the third thing that can settle a turn,
+// after words and a push, and `viewerHasReacted` is the whole of what a
+// consumer needs to see it. The count is deliberately not selected: nobody asks
+// how many, and `users` is the only sub-selection here that would be a
+// connection and want a pagination argument. `reactionGroups` itself is a plain
+// list of the eight content types, returned whether or not anyone reacted, so
+// this buys no nodes — a PR carrying both selections measures at cost 1.
+//
+// Two levels, because the two directions a reaction can point are scoped
+// differently and have to be. On the last comment it can only speak for that
+// comment, so a newer one undoes it; on the PR it speaks for the PR, where no
+// later comment should quietly erase it. Thread comments get neither:
+// `reviewThreads` is already `first: 50`, and eight more fields fifty times over
+// is exactly the multiplication the budget note above exists to prevent.
 const PR_CONVERSATION = `
-      comments(last: 1) { totalCount nodes { author { __typename login } createdAt } }
+      reactionGroups { content viewerHasReacted }
+      comments(last: 1) { totalCount nodes { author { __typename login } createdAt reactionGroups { content viewerHasReacted } } }
       reviews(last: 1) { nodes { author { __typename login } state submittedAt } }
       reviewThreads(first: 50) { nodes {
         isResolved

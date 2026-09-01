@@ -115,6 +115,22 @@ export type GHItem = {
    * never about the PR. Left unset, the section id decides as before.
    */
   standing?: Standing
+  /**
+   * A turn the viewer has claimed BY HAND, outranking everything inferred.
+   *
+   * The inference below is good and still gets things wrong in one direction it
+   * cannot see: a row can be genuinely yours while every signal says otherwise —
+   * nothing red, no unresolved thread, nobody waiting on a word from you — and
+   * no amount of reading the PR harder will discover it. That knowledge lives
+   * with the viewer, so this is the field where they put it.
+   *
+   * It is a PIN, not a correction: it applies whether or not the row was already
+   * yours, which is why it does not pair with an opposite. The other direction —
+   * "no reply is owed for this particular comment" — is a fact about one event
+   * and belongs where the events are read, not here; a host expresses it by
+   * handing back a `lastActor` that no longer claims a turn.
+   */
+  pinned?: boolean
   indent: boolean
 }
 
@@ -319,6 +335,13 @@ const checksSentence = (d?: GHDetail): string | null => {
 // urgent its glyph looks — that distinction is the whole reason this modal
 // exists, so it gets its own sentence rather than being left to inference.
 const turnSentences = (item: GHItem, login: string): string[] => {
+  // Ahead of the "nothing said yet" case as much as the rest: a pin on an
+  // untouched PR is the most informative thing this panel can report, and the
+  // sentence below would otherwise answer a question nobody asked.
+  if (item.pinned)
+    return [
+      "You pinned this (!). It stays under Your move until you unpin it, whatever else the row says.",
+    ]
   if (!item.lastActor) return ["Nothing has been said on it yet."]
   const d = item.detail
   const when = d?.lastEventAt ? `${relativeTime(d.lastEventAt)} ago` : "earlier"
@@ -508,8 +531,16 @@ export const whoseMove = (
   sectionId: string,
   standing?: Standing,
   theySpokeLast?: boolean,
+  pinned?: boolean,
 ): "you" | "them" => {
   const position = standing ?? STANDING[sectionId] ?? "queued"
+
+  // First, and unconditionally. Everything below is inference from what GitHub
+  // reports; this is the viewer having said so outright, and inference does not
+  // get to argue with it. It is one-directional by design — there is no way to
+  // pin a row AWAY, because "not mine" is what the bands already conclude on
+  // their own and a second control for it would only be a way to hide work.
+  if (pinned) return "you"
 
   // Somebody else having the last word is a claim on you — a question asked, an
   // objection raised, a "can you rebase" — and none of it shows up as a health,
@@ -575,6 +606,7 @@ export const layoutGHItems = (
           sectionId,
           i.standing,
           !!login && !!i.lastActor && i.lastActor !== login,
+          i.pinned,
         ) === side,
     ),
   }))
@@ -2193,8 +2225,16 @@ const ItemRow = ({
   // only the rows that carry one, and a fixed cell exists precisely so the
   // title never moves. ← and → are already proven in this UI's footer hints.
   const spokeLast = !!login && !!item.lastActor && item.lastActor === login
-  const [turnIcon, turnColor] =
-    !login || !item.lastActor
+  // A pinned row lands in Your move for a reason no arrow can carry: the arrows
+  // report who SPOKE last, and a pin is not a turn in the conversation. Left to
+  // the arrow alone it would sit under Your move wearing a grey → that says the
+  // opposite. So it gets its own mark — single-width ASCII, because this cell is
+  // in the aligned zone where a codepoint that renders double-width anywhere
+  // would shift only the rows carrying one, and orange, so the mark and the
+  // colour each say it independently.
+  const [turnIcon, turnColor] = item.pinned
+    ? ["!", "#FF8700"]
+    : !login || !item.lastActor
       ? [" ", "white"]
       : spokeLast
         ? ["→", "#888888"]
