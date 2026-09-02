@@ -77,6 +77,16 @@ describe("topLevelCount", () => {
     expect(topLevelCount(section(items))).toBe(2)
   })
 
+  // Furniture, not an entity — and it used to count. The three sibling filters
+  // (search, repo, origin) already dropped these two kinds; this one did not.
+  it("does not count a collapsed tail sitting at the top level", () => {
+    const items = [
+      task("SHOP-100", 0),
+      { kind: "show-more", hidden: [pr(9, 0)] } as AnyItem,
+    ]
+    expect(topLevelCount(section(items))).toBe(1)
+  })
+
   // Guard against the fix being spelled as a depth. A container is a genuine
   // top-level row; if it were pushed to depth 1 to drop it from the count,
   // every site that draws indentation would read that as truth.
