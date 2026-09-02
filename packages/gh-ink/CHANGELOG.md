@@ -7,9 +7,9 @@
 - 73ae70c: Rows carry a real depth, so a tree can be three levels deep.
 
   Every row type declared `indent: boolean`, which can only say "top level" or
-  "under something". A board that groups epic > story > PR has three levels, so
-  the epic and its own story landed in different groups and read as unrelated
-  rows — the thing the tree exists to show was the thing it could not express.
+  "under something". Three levels of nesting could not be expressed at all, so a
+  grouping row and the row beneath it landed in different groups and read as
+  unrelated.
 
   Rows now carry `depth?: number`. `indent` is still a legal way to spell
   `depth: 1` and every existing producer keeps working untouched, but it is read
@@ -25,43 +25,22 @@
   `C` over a tree used to copy from the nearest top-level row, on the rule that it
   should hand over the same tree wherever the cursor sat inside it. That rule was
   a consequence of there being two levels, not a principle: with three there are
-  two candidate roots and the question has two honest answers. Copying from the
-  top level would hand you a whole epic — including the PRs of sibling stories
-  that were never on screen together — which is the "a ticket copied half of
-  itself" bug from the other direction. The walk now stops at the first row that
-  is a task, or at depth 0, whichever comes first. On two-level data both terms
-  coincide with the old rule, which is why every test written before this still
-  passes unchanged.
+  two candidate roots and the question has two honest answers. Rooting at the top
+  level regardless would copy rows from branches that were never on screen
+  together. The walk now stops at the first row that is a task, or at depth 0,
+  whichever comes first. On two-level data both terms coincide with the old rule,
+  which is why every test written before this still passes unchanged.
 
-  The blank line between trees stays binary and only a top-level row can open one.
-  Without that guard the naive reading puts air between an epic and its own story
-  — a gap inside a tree, which is the opposite of what it is for — and a
-  non-binary gap would mean the window budget prices a non-binary cost, which is
-  where a previous overflow came from.
+  The blank line between trees stays binary, and only a top-level row can open
+  one — otherwise the naive reading puts air inside a tree rather than between
+  two, and a non-binary gap would mean the window budget prices a non-binary
+  cost, which is where a previous overflow came from.
 
   A row's glyph run is now computed from its ancestors rather than from a single
   "am I last" boolean. Past two levels the stem has to keep running down the left
-  of a subtree that is not the final one, and a collapsed `+N more` sitting under
-  a non-last story used to draw a bare corner — losing its ancestor column while
-  every visible sibling above it kept theirs.
-
-### Patch Changes
-
-- 6de6467: The inbox had a table that turns a `gh` failure into a sentence a person can act
-  on — `gh is not authenticated`, `GitHub rate limit spent` — and it was wired
-  into every action path and none of the fetch paths. So the one failure a brand
-  new host is most likely to hit, on the very first frame it ever renders, arrived
-  as zx's raw stderr filling the whole screen.
-
-  That is the worst place to spend the raw line. An action failure flashes beside
-  a list that has already proved `gh` works, so the reader knows the tool is fine
-  and only this one call went wrong. A fetch failure at startup is the first thing
-  they have ever seen from the package, and `gh auth login` is overwhelmingly the
-  thing it needed to tell them.
-
-  The fetcher's catch now goes through the same mapper. The raw line still rides
-  along on the end, so a failure the table does not recognise is no less
-  diagnosable than before.
+  of a subtree that is not the final one, and a collapsed `+N more` row under a
+  non-last sibling used to draw a bare corner — losing its ancestor column while
+  every visible row above it kept theirs.
 
 ## 0.33.0
 
