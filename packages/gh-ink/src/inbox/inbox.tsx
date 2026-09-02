@@ -132,6 +132,31 @@ export type GHItem = {
    */
   pinned?: boolean
   /**
+   * What this row STANDS FOR, when that differs from what it is. Absent means
+   * the row is a unit of work and is counted as one.
+   *
+   * `"container"` marks a row that exists to carry context rather than to be
+   * done: the initiative a story hangs under, drawn as a real row because it is
+   * still selectable, openable, and worth seeing until it closes — but not
+   * itself a thing on anyone's plate. Four stories under one container is four
+   * items, not five.
+   *
+   * Deliberately not `uncounted`. A host knows what a row IS; it should not have
+   * to know what the tab badge does with that, and a field named after one
+   * consumer starts lying the moment a second one reads it.
+   *
+   * Orthogonal to `depth`, which says where the row hangs rather than what it
+   * stands for. A container is a genuine depth-0 row with genuine depth-1
+   * children; spelling it as a depth would mean lying about the tree to fix a
+   * number, and every site that draws indentation reads that lie as truth.
+   *
+   * A union with one member rather than a boolean. `indent` was a boolean that
+   * turned out to need a scalar, and widening it cost a deprecation that is
+   * still in this file. Adding a second role here is additive; turning a boolean
+   * into a union is not.
+   */
+  role?: "container"
+  /**
    * How deep this row hangs in the tree: 0 top level, 1 a child, 2 a
    * grandchild. Absent means 0.
    *
@@ -157,6 +182,8 @@ export type TaskRow = {
   url: string
   status: string
   age: string
+  /** What this row stands for. See `GHItem.role`. */
+  role?: "container"
   /** How deep this row hangs. See `GHItem.depth`; read it through `depthOf`. */
   depth?: number
   /** @deprecated Legacy spelling of `depth: 1`. See `GHItem.indent`. */
@@ -1479,11 +1506,27 @@ const Backdrop = ({
   </DimContext.Provider>
 )
 
+/**
+ * What the tab badge and the header total both count: rows that are somebody's
+ * work, at the top level.
+ *
+ * The exclusions are two different kinds of thing. Headers are furniture — not
+ * entities at all, which is why the search and repo filters drop them too.
+ * `role: "container"` rows ARE entities, selectable and openable; they simply
+ * are not work. An epic is the case that forced the distinction: real, owned,
+ * and on screen until it closes, but the work is the stories under it, and
+ * counting it as well reported five things to do where there were four.
+ *
+ * One function, both consumers, on purpose. The badge and the whole-board total
+ * are the same claim at two scales; computed apart they drift, and a header that
+ * disagrees with the sum of its own tabs is worse than either number alone.
+ */
 export const topLevelCount = (s: Section) =>
   s.items.filter(
     (i) =>
       i.kind !== "repo-header" &&
       i.kind !== "subgroup-header" &&
+      !("role" in i && i.role === "container") &&
       depthOf(i) === 0,
   ).length
 
