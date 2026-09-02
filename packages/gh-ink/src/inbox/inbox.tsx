@@ -4365,7 +4365,12 @@ export const App = ({
       })
       .catch((err) => {
         setRefreshing(false)
-        const message = (err as Error).message
+        // The same mapper the actions use. It matters more here than there: an
+        // action failure flashes beside a list that already proves gh works,
+        // whereas this is the FIRST thing a new host ever renders, and
+        // `gh auth login` is the single likeliest thing it needs to say. The
+        // raw line survives on the end either way.
+        const message = explainGhAction(err)
         // Nothing on screen yet, so there is no list to flash the error beside —
         // it becomes the whole screen instead. It must NOT be printed and exited:
         // see AppState, where the alternate buffer eats exactly that.
