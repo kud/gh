@@ -2037,6 +2037,43 @@ export const CiStatusLine = ({
 //
 // The cursor takes the two leading spaces the fence already reserved, so nothing
 // shifts — that gutter is the same cell every item row draws its ❯ in.
+/**
+ * How wide a fence is drawn, whatever the repo is called and however wide the
+ * terminal is.
+ *
+ * The NUMBER is arbitrary. The SHARING of it is not, and that is the whole of
+ * why this is a constant rather than a literal: because every fence on a tab
+ * ends on the same column, four rules four rows apart form a repeated vertical
+ * edge down the list — and that regularity is what makes a rule stopping short
+ * of its rows read as chosen rather than cut off. A truncation is ragged and
+ * arbitrary; this is neither.
+ *
+ * So it survives the obvious objection, which is that it stops well short of
+ * every row above and below it — on a busy tab the shortest row is ~30 columns
+ * longer than the fence, and nothing is aligned to its right edge. True, and
+ * beside the point: the fence's relationship is to the other fences.
+ *
+ * Full width was considered and declined, twice. The list body's own vocabulary
+ * is that a rule is scaled to its label — the tab underline is exactly its
+ * label's width — and full-width-solid is not spare: the app header already
+ * uses a full-width rule, in the lighter `╌`. A solid one here would be the
+ * heaviest horizontal in the frame, sitting UNDER the header it out-weighed.
+ * And on a tab holding a single repo it stops reading as a list at all: one
+ * full-width rule two lines below the frame border, at the same width and
+ * weight, is a table's header separator.
+ *
+ * Growing it only while selected is worse than either — a rule that changes
+ * length as the cursor passes is motion in a list. Padding it to the widest row
+ * in its group is worse still, and quietly: every fence would end on a
+ * different column, so the one property doing the work disappears, and the
+ * length would then depend on data that changes under a refresh.
+ *
+ * The `Math.max(4, …)` floor is the one case that breaks the alignment: a repo
+ * name past ~42 characters overshoots. Rendered, that reads as "this name is
+ * long" rather than as broken, which is graceful enough to leave.
+ */
+const FENCE_COLS = 46
+
 const RepoHeaderRow = ({
   repo,
   gap,
@@ -2047,7 +2084,7 @@ const RepoHeaderRow = ({
   active: boolean
 }) => {
   const label = `── ${repo} `
-  const fill = Math.max(4, 46 - label.length)
+  const fill = Math.max(4, FENCE_COLS - label.length)
   const rule = "─".repeat(fill)
   return (
     <Box marginTop={gap ? 1 : 0}>
