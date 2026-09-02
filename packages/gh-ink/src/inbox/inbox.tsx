@@ -1510,8 +1510,11 @@ const Backdrop = ({
  * What the tab badge and the header total both count: rows that are somebody's
  * work, at the top level.
  *
- * The exclusions are two different kinds of thing. Headers are furniture — not
- * entities at all, which is why the search and repo filters drop them too.
+ * The exclusions are two different kinds of thing. Headers and the
+ * show-more/show-less affordances are furniture — not entities at all, which is
+ * why the search and repo filters drop them too. This function used to exclude
+ * only the two header kinds while its three siblings excluded all four, so a
+ * collapsed tail sitting at the top level counted as an item.
  * `role: "container"` rows ARE entities, selectable and openable; they simply
  * are not work. An epic is the case that forced the distinction: real, owned,
  * and on screen until it closes, but the work is the stories under it, and
@@ -1526,6 +1529,8 @@ export const topLevelCount = (s: Section) =>
     (i) =>
       i.kind !== "repo-header" &&
       i.kind !== "subgroup-header" &&
+      i.kind !== "show-more" &&
+      i.kind !== "show-less" &&
       !("role" in i && i.role === "container") &&
       depthOf(i) === 0,
   ).length
