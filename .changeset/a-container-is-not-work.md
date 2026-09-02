@@ -26,5 +26,10 @@ top-level row with genuine children; pushing it a level down to drop it from a
 count would mean lying about the tree to fix a number, and every site that draws
 indentation reads that lie as truth.
 
+A collapsed `+N more` row at the top level also stops counting. `topLevelCount`
+excluded only the two header kinds while the search, repo and origin filters all
+excluded the show-more/show-less affordances as well, so one affordance was
+counted as an item everywhere a badge appeared.
+
 Hosts that set nothing are unaffected — absent means the row is a unit of work,
 which is what every row was before.
