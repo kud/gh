@@ -2,26 +2,24 @@
 "@kud/gh-ink": minor
 ---
 
-A row can say it is context rather than work, and the tab badge believes it.
+A row can say it is context rather than work, and the counts believe it.
 
 Rows gained `role?: "container"` — a row that exists to carry context rather
-than to be done. The initiative a story hangs under is the case that forced it:
-real, owned, selectable, openable, and worth seeing until it closes, but not
-itself a thing on anyone's plate. `topLevelCount`, which feeds both the tab
-badge and the whole-board total, now skips those rows. Four stories under one
-container is four items, not five.
+than to be done. `topLevelCount`, which feeds both the tab badge and the
+whole-board total, now skips those rows.
 
-Before this, a board that had just learned to nest an epic over its stories
-counted the epic as work, so a tab reading `(3)` could mean two things to do and
-one heading — a number read at a glance and acted on, wrong in the direction
-that makes you think you have more to do than you have.
+Since 0.34.0 a tree can be three levels deep, so a host can draw a grouping row
+over the rows beneath it. Such a row is a real entity — selectable, openable,
+worth seeing — but it is not itself a unit of work, and counting it as one
+inflates every total it appears in. Four rows under one container is four items,
+not five.
 
-It is `role`, not `uncounted`, because a host knows what a row *is* and should
-not have to know what the tab badge does with that; a field named after one
-consumer starts lying the moment a second one reads it. It is a union of one
-rather than a boolean, because `indent` was a boolean that turned out to need a
-scalar and widening it cost a deprecation still sitting in this file — adding a
-second role later is additive, turning a boolean into a union is not.
+It is `role`, not `uncounted`: a host knows what a row *is* and should not have
+to know what a badge does with that, and a field named after one consumer starts
+lying the moment a second one reads it. It is a union of one rather than a
+boolean, because `indent` was a boolean that turned out to need a scalar, and
+widening it cost a deprecation still sitting in this file — adding a second role
+later is additive, turning a boolean into a union is not.
 
 And it is deliberately not spelled as a depth. A container is a genuine
 top-level row with genuine children; pushing it a level down to drop it from a
