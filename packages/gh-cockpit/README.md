@@ -27,6 +27,12 @@
 
 ## 🚀 Quick Start
 
+Everything here shells out to the [GitHub CLI](https://cli.github.com), so before anything else:
+
+- **`gh` installed and authenticated** — `gh auth login`. Every fetch and every action runs through it, and an unauthenticated `gh` is the most likely reason a first run shows nothing.
+- **Node 22 or newer.**
+- A terminal that renders the glyphs you choose to pass it. Nothing here requires a Nerd Font — the defaults are plain — but a host that supplies one will want a font that has it.
+
 ```sh
 npm install @kud/gh-cockpit
 ```
