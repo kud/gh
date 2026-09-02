@@ -107,3 +107,104 @@ describe("treeUrls", () => {
     expect(treeUrls(ROWS, 1)).not.toContain(prUrl(3))
   })
 })
+
+// Three levels — epic > story > PR. Nothing above constrains any of this: the
+// cases before this block were all written when a row could only be top level
+// or a child, so they pin that the generalisation stayed CONSERVATIVE, not that
+// it chose correctly here.
+const taskAt = (key: string, depth: number): AnyItem => ({
+  kind: "task",
+  key,
+  summary: `${key} summary`,
+  url: taskUrl(key),
+  status: "In Development",
+  age: "",
+  depth,
+})
+
+const prAt = (number: number, depth: number): AnyItem => ({
+  kind: "pr",
+  number,
+  title: `#${number}`,
+  repo: "acme/api",
+  url: prUrl(number),
+  health: "none",
+  age: "1d",
+  ts: number,
+  unresolved: 0,
+  conversation: 0,
+  depth,
+})
+
+//  0 epic ACC-1 · 1 story ACC-2 · 2 pr1 · 3 pr2 · 4 story ACC-3 · 5 pr3
+const DEEP: AnyItem[] = [
+  taskAt("ACC-1", 0),
+  taskAt("ACC-2", 1),
+  prAt(1, 2),
+  prAt(2, 2),
+  taskAt("ACC-3", 1),
+  prAt(3, 2),
+]
+
+const STORY_TREE = [taskUrl("ACC-2"), prUrl(1), prUrl(2)]
+
+describe("treeUrls across three levels", () => {
+  it("copies the whole epic from the epic row", () => {
+    expect(treeUrls(DEEP, 0)).toEqual([
+      taskUrl("ACC-1"),
+      taskUrl("ACC-2"),
+      prUrl(1),
+      prUrl(2),
+      taskUrl("ACC-3"),
+      prUrl(3),
+    ])
+  })
+
+  // The whole point of stopping at the nearest task rather than at the top
+  // level: standing on a story must not hand over its siblings' PRs, which
+  // were never on screen together.
+  it("copies only its own subtree from a story row", () => {
+    expect(treeUrls(DEEP, 1)).toEqual(STORY_TREE)
+  })
+
+  it("gives that same story subtree from a PR under it", () => {
+    expect(treeUrls(DEEP, 2)).toEqual(STORY_TREE)
+    expect(treeUrls(DEEP, 3)).toEqual(STORY_TREE)
+  })
+
+  it("never reaches a sibling story's PRs", () => {
+    expect(treeUrls(DEEP, 2)).not.toContain(prUrl(3))
+  })
+
+  it("stops at the next story rather than running to the end", () => {
+    expect(treeUrls(DEEP, 4)).toEqual([taskUrl("ACC-3"), prUrl(3)])
+  })
+
+  // The depth-0 half of the stop condition. An orphan PR has no task anywhere
+  // above it, so without that term the walk would run to the top of the list.
+  it("stops on itself for an orphan PR with no task above it", () => {
+    const rows = [taskAt("ACC-1", 0), prAt(1, 1), prAt(99, 0)]
+    expect(treeUrls(rows, 2)).toEqual([prUrl(99)])
+  })
+
+  // The landmine: a collapsed row under a STORY is at depth 2, and pinning it
+  // to 1 would make the walk stop early and drop everything it holds, with
+  // nothing on screen to say so.
+  it("descends into a collapsed row hanging off a story", () => {
+    const rows = [
+      taskAt("ACC-1", 0),
+      taskAt("ACC-2", 1),
+      prAt(1, 2),
+      { kind: "show-more", hidden: [pr(9), pr(10)], depth: 2 } as AnyItem,
+      taskAt("ACC-3", 1),
+      prAt(3, 2),
+    ]
+    expect(treeUrls(rows, 1)).toEqual([
+      taskUrl("ACC-2"),
+      prUrl(1),
+      prUrl(9),
+      prUrl(10),
+    ])
+    expect(treeUrls(rows, 1)).not.toContain(prUrl(3))
+  })
+})
