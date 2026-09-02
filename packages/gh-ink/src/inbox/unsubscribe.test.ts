@@ -22,9 +22,9 @@ const gh = (kind: "pr" | "issue"): GHItem => ({
 
 const task: TaskRow = {
   kind: "task",
-  key: "ACC-1",
+  key: "SHOP-1",
   summary: "a ticket",
-  url: "https://example.invalid/ACC-1",
+  url: "https://example.invalid/SHOP-1",
   status: "In Development",
   age: "2d",
   indent: false,

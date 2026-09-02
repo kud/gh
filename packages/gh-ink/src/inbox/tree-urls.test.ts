@@ -38,17 +38,17 @@ const header: AnyItem = {
   indent: false,
 } as AnyItem
 
-//  0 header · 1 ACC-1 · 2 pr1 · 3 pr2 · 4 ACC-2 · 5 pr3
+//  0 header · 1 SHOP-1 · 2 pr1 · 3 pr2 · 4 SHOP-2 · 5 pr3
 const ROWS: AnyItem[] = [
   header,
-  task("ACC-1"),
+  task("SHOP-1"),
   pr(1),
   pr(2),
-  task("ACC-2"),
+  task("SHOP-2"),
   pr(3),
 ]
 
-const TREE = [taskUrl("ACC-1"), prUrl(1), prUrl(2)]
+const TREE = [taskUrl("SHOP-1"), prUrl(1), prUrl(2)]
 
 describe("treeUrls", () => {
   it("copies the parent and every child under it", () => {
@@ -63,11 +63,11 @@ describe("treeUrls", () => {
   })
 
   it("stops at the next tree rather than running to the end", () => {
-    expect(treeUrls(ROWS, 4)).toEqual([taskUrl("ACC-2"), prUrl(3)])
+    expect(treeUrls(ROWS, 4)).toEqual([taskUrl("SHOP-2"), prUrl(3)])
   })
 
   it("is just the row's own URL when nothing hangs off it", () => {
-    expect(treeUrls([task("ACC-9")], 0)).toEqual([taskUrl("ACC-9")])
+    expect(treeUrls([task("SHOP-9")], 0)).toEqual([taskUrl("SHOP-9")])
   })
 
   // A collapsed row is the rest of the tree, not the end of it. What `C`
@@ -77,8 +77,8 @@ describe("treeUrls", () => {
     ({ kind: "show-more", hidden: numbers.map(pr), indent: true }) as AnyItem
 
   it("descends into a collapsed row, which holds the children not drawn", () => {
-    expect(treeUrls([task("ACC-1"), pr(1), collapsed(9, 10)], 0)).toEqual([
-      taskUrl("ACC-1"),
+    expect(treeUrls([task("SHOP-1"), pr(1), collapsed(9, 10)], 0)).toEqual([
+      taskUrl("SHOP-1"),
       prUrl(1),
       prUrl(9),
       prUrl(10),
@@ -88,14 +88,14 @@ describe("treeUrls", () => {
   // The row itself still carries no URL, so it contributes no blank line —
   // only what it hides.
   it("adds nothing of its own for an empty collapsed row", () => {
-    expect(treeUrls([task("ACC-1"), collapsed()], 0)).toEqual([taskUrl("ACC-1")])
+    expect(treeUrls([task("SHOP-1"), collapsed()], 0)).toEqual([taskUrl("SHOP-1")])
   })
 
   it("gives the same collapsed tree from a child of it", () => {
-    const rows = [task("ACC-1"), pr(1), collapsed(9), task("ACC-2"), pr(3)]
-    expect(treeUrls(rows, 1)).toEqual([taskUrl("ACC-1"), prUrl(1), prUrl(9)])
-    expect(treeUrls(rows, 2)).toEqual([taskUrl("ACC-1"), prUrl(1), prUrl(9)])
-    expect(treeUrls(rows, 3)).toEqual([taskUrl("ACC-2"), prUrl(3)])
+    const rows = [task("SHOP-1"), pr(1), collapsed(9), task("SHOP-2"), pr(3)]
+    expect(treeUrls(rows, 1)).toEqual([taskUrl("SHOP-1"), prUrl(1), prUrl(9)])
+    expect(treeUrls(rows, 2)).toEqual([taskUrl("SHOP-1"), prUrl(1), prUrl(9)])
+    expect(treeUrls(rows, 3)).toEqual([taskUrl("SHOP-2"), prUrl(3)])
   })
 
   it("returns nothing for a header, which is not a tree", () => {
@@ -136,26 +136,26 @@ const prAt = (number: number, depth: number): AnyItem => ({
   depth,
 })
 
-//  0 epic ACC-1 · 1 story ACC-2 · 2 pr1 · 3 pr2 · 4 story ACC-3 · 5 pr3
+//  0 epic SHOP-1 · 1 story SHOP-2 · 2 pr1 · 3 pr2 · 4 story SHOP-3 · 5 pr3
 const DEEP: AnyItem[] = [
-  taskAt("ACC-1", 0),
-  taskAt("ACC-2", 1),
+  taskAt("SHOP-1", 0),
+  taskAt("SHOP-2", 1),
   prAt(1, 2),
   prAt(2, 2),
-  taskAt("ACC-3", 1),
+  taskAt("SHOP-3", 1),
   prAt(3, 2),
 ]
 
-const STORY_TREE = [taskUrl("ACC-2"), prUrl(1), prUrl(2)]
+const STORY_TREE = [taskUrl("SHOP-2"), prUrl(1), prUrl(2)]
 
 describe("treeUrls across three levels", () => {
   it("copies the whole epic from the epic row", () => {
     expect(treeUrls(DEEP, 0)).toEqual([
-      taskUrl("ACC-1"),
-      taskUrl("ACC-2"),
+      taskUrl("SHOP-1"),
+      taskUrl("SHOP-2"),
       prUrl(1),
       prUrl(2),
-      taskUrl("ACC-3"),
+      taskUrl("SHOP-3"),
       prUrl(3),
     ])
   })
@@ -177,13 +177,13 @@ describe("treeUrls across three levels", () => {
   })
 
   it("stops at the next story rather than running to the end", () => {
-    expect(treeUrls(DEEP, 4)).toEqual([taskUrl("ACC-3"), prUrl(3)])
+    expect(treeUrls(DEEP, 4)).toEqual([taskUrl("SHOP-3"), prUrl(3)])
   })
 
   // The depth-0 half of the stop condition. An orphan PR has no task anywhere
   // above it, so without that term the walk would run to the top of the list.
   it("stops on itself for an orphan PR with no task above it", () => {
-    const rows = [taskAt("ACC-1", 0), prAt(1, 1), prAt(99, 0)]
+    const rows = [taskAt("SHOP-1", 0), prAt(1, 1), prAt(99, 0)]
     expect(treeUrls(rows, 2)).toEqual([prUrl(99)])
   })
 
@@ -192,15 +192,15 @@ describe("treeUrls across three levels", () => {
   // nothing on screen to say so.
   it("descends into a collapsed row hanging off a story", () => {
     const rows = [
-      taskAt("ACC-1", 0),
-      taskAt("ACC-2", 1),
+      taskAt("SHOP-1", 0),
+      taskAt("SHOP-2", 1),
       prAt(1, 2),
       { kind: "show-more", hidden: [pr(9), pr(10)], depth: 2 } as AnyItem,
-      taskAt("ACC-3", 1),
+      taskAt("SHOP-3", 1),
       prAt(3, 2),
     ]
     expect(treeUrls(rows, 1)).toEqual([
-      taskUrl("ACC-2"),
+      taskUrl("SHOP-2"),
       prUrl(1),
       prUrl(9),
       prUrl(10),

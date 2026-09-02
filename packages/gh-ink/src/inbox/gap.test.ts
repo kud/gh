@@ -41,10 +41,10 @@ const header: AnyItem = {
 } as AnyItem
 
 //  0 header · 1 task · 2 pr · 3 pr · 4 task · 5 pr
-const ROWS: AnyItem[] = [header, task("ACC-1"), pr(1), pr(2), task("ACC-2"), pr(3)]
+const ROWS: AnyItem[] = [header, task("SHOP-1"), pr(1), pr(2), task("SHOP-2"), pr(3)]
 
 //  0 task · 1 task · 2 task — the Off Board shape: tickets, no PRs anywhere.
-const BARE: AnyItem[] = [task("ACC-1"), task("ACC-2"), task("ACC-3")]
+const BARE: AnyItem[] = [task("SHOP-1"), task("SHOP-2"), task("SHOP-3")]
 
 describe("gapsAbove", () => {
   it("gaps before a ticket that opens a tree", () => {
@@ -60,12 +60,12 @@ describe("gapsAbove", () => {
 
   // A boundary belongs to both groups, so either side can ask for it.
   it("gaps after a tree even when the next ticket has no PRs", () => {
-    const rows = [task("ACC-1"), pr(1), task("ACC-2")]
+    const rows = [task("SHOP-1"), pr(1), task("SHOP-2")]
     expect(gapsAbove(rows, 2)).toBe(true)
   })
 
   it("gaps before a tree even when the ticket above had no PRs", () => {
-    const rows = [task("ACC-1"), task("ACC-2"), pr(1)]
+    const rows = [task("SHOP-1"), task("SHOP-2"), pr(1)]
     expect(gapsAbove(rows, 1)).toBe(true)
   })
 
@@ -77,7 +77,7 @@ describe("gapsAbove", () => {
       hidden: [pr(9)],
       indent: true,
     } as AnyItem
-    expect(gapsAbove([task("ACC-1"), more, task("ACC-2")], 2)).toBe(true)
+    expect(gapsAbove([task("SHOP-1"), more, task("SHOP-2")], 2)).toBe(true)
   })
 
   it("never gaps before a PR, so a ticket's tree stays together", () => {
@@ -90,7 +90,7 @@ describe("gapsAbove", () => {
 
   it("never gaps the very first row, which has nothing above it", () => {
     expect(gapsAbove(ROWS, 0)).toBe(false)
-    expect(gapsAbove([task("ACC-1")], 0)).toBe(false)
+    expect(gapsAbove([task("SHOP-1")], 0)).toBe(false)
   })
 })
 
