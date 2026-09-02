@@ -131,7 +131,23 @@ export type GHItem = {
    * handing back a `lastActor` that no longer claims a turn.
    */
   pinned?: boolean
-  indent: boolean
+  /**
+   * How deep this row hangs in the tree: 0 top level, 1 a child, 2 a
+   * grandchild. Absent means 0.
+   *
+   * Always read it through `depthOf`, never off the row — `indent` is still a
+   * legal way to spell "depth 1", and that helper is the only place that knows
+   * both spellings. A site that reads `item.indent` directly prices a `depth: 2`
+   * row as top level, which is the bug this field exists to end rather than a
+   * new one to introduce.
+   */
+  depth?: number
+  /**
+   * @deprecated Legacy spelling of `depth: 1`. Write `depth`; this is kept so
+   * every existing producer still typechecks, and it is read in exactly one
+   * place (`depthOf`). Due to be removed at the next major.
+   */
+  indent?: boolean
 }
 
 export type TaskRow = {
@@ -141,7 +157,10 @@ export type TaskRow = {
   url: string
   status: string
   age: string
-  indent: boolean
+  /** How deep this row hangs. See `GHItem.depth`; read it through `depthOf`. */
+  depth?: number
+  /** @deprecated Legacy spelling of `depth: 1`. See `GHItem.indent`. */
+  indent?: boolean
   instanceKey?: string
   /**
    * Trailing annotation, rendered dim after the summary — a recurrence marker,
@@ -169,30 +188,57 @@ export type RepoHeader = {
   kind: "repo-header"
   repo: string
   age: string
-  indent: boolean
+  /** How deep this row hangs. See `GHItem.depth`; read it through `depthOf`. */
+  depth?: number
+  /** @deprecated Legacy spelling of `depth: 1`. See `GHItem.indent`. */
+  indent?: boolean
 }
 
 export type ShowMore = {
   kind: "show-more"
   hidden: GHItem[]
-  indent: boolean
+  /** How deep this row hangs. See `GHItem.depth`; read it through `depthOf`. */
+  depth?: number
+  /** @deprecated Legacy spelling of `depth: 1`. See `GHItem.indent`. */
+  indent?: boolean
 }
 
 export type ShowLess = {
   kind: "show-less"
   toHide: GHItem[]
-  indent: boolean
+  /** How deep this row hangs. See `GHItem.depth`; read it through `depthOf`. */
+  depth?: number
+  /** @deprecated Legacy spelling of `depth: 1`. See `GHItem.indent`. */
+  indent?: boolean
 }
 
 export type SubgroupHeader = {
   kind: "subgroup-header"
   label: string
   age: string
-  indent: boolean
+  /** How deep this row hangs. See `GHItem.depth`; read it through `depthOf`. */
+  depth?: number
+  /** @deprecated Legacy spelling of `depth: 1`. See `GHItem.indent`. */
+  indent?: boolean
 }
 
 export type AnyItem =
   GHItem | TaskRow | RepoHeader | SubgroupHeader | ShowMore | ShowLess
+
+/**
+ * The one place either spelling of depth is read. Every other site goes through
+ * this, so a row written as `depth: 2` cannot be priced as top level by a
+ * reader that only knew about the boolean.
+ *
+ * Clamped and floored rather than trusted: a bad producer degrades to a flatter
+ * list, where the old behaviour was a `NaN` column width that renders as a
+ * blank row and gives you nothing to diagnose from.
+ */
+export const depthOf = (item?: AnyItem): number => {
+  if (!item) return 0
+  if (typeof item.depth === "number") return Math.max(0, Math.floor(item.depth))
+  return item.indent === true ? 1 : 0
+}
 
 // Standing status line for the "main pipeline we care about" — not a
 // browsable list item, just a glance shown above the tabs. Drilling in
@@ -441,7 +487,7 @@ export const insertRepoHeaders = (items: GHItem[]): AnyItem[] => {
   const result: AnyItem[] = []
   let lastRepo = ""
   for (const item of items) {
-    if (!item.indent && item.repo !== lastRepo) {
+    if (depthOf(item) === 0 && item.repo !== lastRepo) {
       lastRepo = item.repo
       result.push({
         kind: "repo-header",
@@ -894,21 +940,104 @@ export const budgetNotice = (
 // its only non-trivial reader, rather than down among the render helpers where
 // it used to sit — `gapsAbove` depends on it, and a dependency 1,100 lines
 // below the thing that needs it survives only by module-evaluation order.
-const isChildRow = (item?: AnyItem): boolean =>
-  !!item &&
-  (item.kind === "show-more" ||
-    item.kind === "show-less" ||
-    ("indent" in item && item.indent === true))
+
+// A row that hangs UNDER something rather than beside it.
+//
+// show-more / show-less used to be children unconditionally, whatever they
+// carried, and that had to go with the third level: a show-more collapsing the
+// PRs under a STORY sits at depth 2, and a predicate that placed it at 1 made
+// the walk in `treeUrls` stop one level early and drop every collapsed row it
+// held. That is the loss the treeUrls comment below warns about — nothing on
+// screen reports it — so the depth a collapsed row carries has to be readable
+// from the same predicate that places every other row.
+const isChildRow = (item?: AnyItem): boolean => depthOf(item) > 0
+
+/**
+ * Is this the last row at its own level, or does a sibling follow?
+ *
+ * A row cannot answer this by looking at the row below: under three levels the
+ * next row is usually its own child, and "something hangs below me" is a
+ * different question from "am I the last of my siblings". So the scan skips
+ * everything DEEPER than this row — those are its descendants — and reads the
+ * first row at its own level or shallower. Equal means a sibling follows,
+ * shallower means the parent's boundary, falling off the end means last.
+ */
+const isLastAtDepth = (items: readonly AnyItem[], i: number): boolean => {
+  const depth = depthOf(items[i])
+  for (let j = i + 1; j < items.length; j += 1) {
+    const d = depthOf(items[j])
+    if (d > depth) continue
+    return d < depth
+  }
+  return true
+}
+
+/**
+ * The tree glyphs to the left of a row, as one string.
+ *
+ * Computed here rather than in the row component, and handed down whole: past
+ * two levels a row's glyph run depends on whether each of its ANCESTORS was
+ * last among its own siblings — the stem `│` has to keep running down past a
+ * subtree that is not the final one. Passing that as an array and rebuilding
+ * the run in the renderer would put tree reasoning in two files; this keeps all
+ * of it beside `depthOf` and `isLastAtDepth`, and the row stays a renderer.
+ *
+ * Fixed at three columns per level with no narrow variants, because the
+ * ancestor column has to be exactly as wide as the level it stands in for or
+ * the stems stop lining up vertically. Every caller prices the string's own
+ * length into its truncation maths — a prefix the maths does not know about
+ * overflows the row, and the frame is sized to fill the terminal exactly, so
+ * one column too many scrolls the whole panel instead of clipping.
+ */
+const treePrefix = (items: readonly AnyItem[], i: number): string => {
+  const depth = depthOf(items[i])
+  if (depth === 0) return ""
+
+  // Nearest ancestor first: walk up, taking the row that owns each level above
+  // this one. Rows deeper than the level being sought are its descendants and
+  // are skipped.
+  const ancestorLast: boolean[] = []
+  let level = depth - 1
+  for (let j = i - 1; j >= 0 && level >= 1; j -= 1) {
+    if (depthOf(items[j]) === level) {
+      ancestorLast[level] = isLastAtDepth(items, j)
+      level -= 1
+    }
+  }
+
+  let prefix = ""
+  for (let k = 1; k < depth; k += 1) prefix += ancestorLast[k] ? "   " : "│  "
+  return prefix + (isLastAtDepth(items, i) ? "└─ " : "├─ ")
+}
 
 /**
  * Every URL in the tree the cursor is standing in: the row that opens it, then
  * each indented row hanging off it, in the order they are drawn.
  *
  * Read off the FLAT list because there is no nested model to read — a child is
- * a row carrying `indent`, and its parent is the nearest row above it without
- * one. That is also why standing on a child has to walk up first: `C` copies
- * the same tree wherever inside it the cursor happens to be, which is the only
- * behaviour that does not require knowing which row is the parent.
+ * a row deeper than the one above it, and its parent is the nearest shallower
+ * row. That is also why standing on a child has to walk up first.
+ *
+ * The original rule was "`C` copies the same tree wherever inside it the cursor
+ * happens to be, which is the only behaviour that does not require knowing which
+ * row is the parent", and it fixed a real bug: a ticket that copied half of
+ * itself. That rule was a CONSEQUENCE of there being two levels, not a
+ * principle. With one candidate root above any child, "the tree" is unambiguous
+ * and cursor-independence comes free. With three there are two candidate roots
+ * and the question genuinely has two answers, so it had to be chosen rather
+ * than extended.
+ *
+ * Rooting at the top level regardless would reintroduce the same over-copy one
+ * level up: `C` on a story would hand you the whole epic, including the PRs of
+ * sibling stories you never had on screen. So the walk stops at the first row
+ * that is a task, OR at depth 0, whichever comes first. Two terms, one loop, no
+ * special case — and the depth-0 term is what gives an orphan PR (a top-level
+ * row with no task anywhere above it) the old behaviour of stopping on itself.
+ *
+ * On two-level data both terms coincide with "the nearest unindented row", which
+ * is why every test written before the third level existed still passes here
+ * unchanged. That is a check on the generalisation being conservative, not on
+ * its being right — the three-level cases are pinned separately.
  *
  * show-more / show-less carry no URL of their own, so neither contributes a
  * blank line to the clipboard. But a show-more row is not a gap in the tree —
@@ -950,11 +1079,13 @@ export const treeUrls = (items: readonly AnyItem[], i: number): string[] => {
   // pair cannot drift apart later.
   if (items[i]?.kind === "repo-header") return groupUrls(items, i)
   let root = i
-  while (root > 0 && isChildRow(items[root])) root -= 1
+  while (root > 0 && depthOf(items[root]) > 0 && items[root]?.kind !== "task")
+    root -= 1
+  const rootDepth = depthOf(items[root])
   const urls: string[] = []
   for (let j = root; j < items.length; j += 1) {
     const item = items[j]
-    if (j > root && !isChildRow(item)) break
+    if (j > root && depthOf(item) <= rootDepth) break
     if (item.kind === "show-more") {
       for (const child of item.hidden) if (child.url) urls.push(child.url)
       continue
@@ -983,7 +1114,14 @@ export const gapsAbove = (items: readonly AnyItem[], i: number): boolean => {
   // needs the break as much as the row that opens one. Off Board is the tab
   // that showed this — ten ticket rows, no PRs anywhere, nineteen lines used
   // for ten rows of content.
-  return isChildRow(items[i + 1]) || isChildRow(items[i - 1])
+  //
+  // Only a TOP-LEVEL row may open a gap. A story is a task with children too,
+  // so without that term the naive reading gaps between an epic and its own
+  // story — air inside a tree, which is the opposite of what this exists for.
+  // The gap stays binary on purpose: `fitCount` prices it, and a cost with more
+  // than two values is where 2026-08-27 came from.
+  if (depthOf(item) > 0) return false
+  return depthOf(items[i + 1]) > 0 || depthOf(items[i - 1]) > 0
 }
 
 export const fitCount = (
@@ -1344,7 +1482,9 @@ const Backdrop = ({
 export const topLevelCount = (s: Section) =>
   s.items.filter(
     (i) =>
-      i.kind !== "repo-header" && i.kind !== "subgroup-header" && !i.indent,
+      i.kind !== "repo-header" &&
+      i.kind !== "subgroup-header" &&
+      depthOf(i) === 0,
   ).length
 
 export const drillCmd = (item: AnyItem): string | null => {
@@ -1718,7 +1858,11 @@ export const buildActions = (
       },
     })
     if (jiraBase && jiraKeyRe) {
-      const jiraKey = !item.indent ? item.title.match(jiraKeyRe)?.[0] : null
+      // Top-level only, as before. Under a three-level board this branch runs
+      // for orphan PRs — the ones with no ticket above them — since any PR
+      // hanging off a ticket now reaches its key through the parent row.
+      const jiraKey =
+        depthOf(item) === 0 ? item.title.match(jiraKeyRe)?.[0] : null
       if (jiraKey) {
         actions.push({
           label: `Open ${jiraKey} in Jira`,
@@ -2176,7 +2320,7 @@ const ItemRow = ({
   merged,
   transient: refreshMark,
   leaving,
-  lastChild,
+  prefix = "",
   parent,
   sparkFrame = 0,
 }: {
@@ -2185,14 +2329,17 @@ const ItemRow = ({
   gap?: boolean
   login?: string
   /**
-   * This indented row is the last of its group, so it draws the corner and its
-   * siblings above draw the tee. A row cannot know this about itself — it is a
-   * fact about the row BELOW — so the list supplies it. Every child drew `└─`
-   * before, which made a ticket with three PRs draw three closing corners and
-   * no tree at all.
+   * This row's tree glyphs, already assembled — see `treePrefix`. Empty for a
+   * top-level row.
+   *
+   * A row cannot work this out about itself: it is a fact about the rows BELOW
+   * it (is a sibling still to come?) and about its ANCESTORS (does a stem still
+   * need to run past this level?), so the list supplies it. Every child drew
+   * `└─` before this was computed at all, which made a ticket with three PRs
+   * draw three closing corners and no tree.
    */
-  lastChild?: boolean
-  /** This row has indented children hanging off it, so it opens the branch. */
+  prefix?: string
+  /** This row has deeper rows hanging off it, so it opens the branch. */
   parent?: boolean
   /** Just merged from this cockpit: sparkle in place, then the row is dropped. */
   merged?: boolean
@@ -2227,7 +2374,10 @@ const ItemRow = ({
     return (
       <Box>
         <Text color="cyan">{active ? "❯ " : "  "}</Text>
-        <Text dimColor>{"└─ "}</Text>
+        {/* The computed run, not a bare corner. A collapsed group under a
+            non-last story still needs its ancestor stem, or its column breaks
+            while every visible sibling keeps theirs. */}
+        <Text dimColor>{prefix}</Text>
         <Text dimColor>{active ? "↵ " : "  "}</Text>
         <Text dimColor>{`+${item.hidden.length} more`}</Text>
       </Box>
@@ -2237,7 +2387,7 @@ const ItemRow = ({
     return (
       <Box>
         <Text color="cyan">{active ? "❯ " : "  "}</Text>
-        <Text dimColor>{"└─ "}</Text>
+        <Text dimColor>{prefix}</Text>
         <Text dimColor>{active ? "↵ " : "  "}</Text>
         <Text dimColor>show less</Text>
       </Box>
@@ -2263,17 +2413,29 @@ const ItemRow = ({
           ? (TRANSIT_IN_FRAMES[sparkFrame % TRANSIT_IN_FRAMES.length] as string)
           : "\u25C9"
     const transitLabel = transient ? TRANSIT_LABEL[transient] : ""
+    // The prefix term is new here and easy to miss: a task row had no indent
+    // to price until stories became tasks hanging under an epic, so this
+    // budget never carried one and a depth-1 story overflowed by exactly its
+    // three columns.
     const titleMax = Math.max(
       20,
-      COLS - item.key.length - note.length - transitLabel.length - 12,
+      COLS -
+        item.key.length -
+        note.length -
+        transitLabel.length -
+        prefix.length -
+        12,
     )
     return (
       <Box marginTop={gap ? 1 : 0}>
         <Text color="cyan">{active ? "❯ " : "  "}</Text>
+        <Text dimColor>{prefix}</Text>
         {/* The branch this ticket opens, and it must come BEFORE the transit
-            cell: the children draw `├─ ` immediately after their own cursor
-            cell, so anything between the cursor and this glyph pushes the trunk
-            off the stem below it. Sat after the transit cell for one release and
+            cell: the children draw their own glyph run immediately after this
+            row's, so anything between the two pushes the trunk off the stem
+            below it. Immediately after the row's OWN prefix, not the cursor —
+            a story is itself a child, so it draws `└─┬ `, where the corner
+            closes the epic's branch and the tee opens its own. Sat after the transit cell for one release and
             read as a stray character beside the ticket rather than the top of
             the branch.
             `parent` is a fact about the row BELOW, which is why the list
@@ -2388,10 +2550,12 @@ const ItemRow = ({
   ]
     .filter(Boolean)
     .join("  ")
-  const repoLabel = item.indent ? item.repo : ""
+  // The boolean was doing two jobs here. This one is "this row hangs under
+  // something, so say which repo it belongs to" — unchanged in meaning.
+  const repoLabel = depthOf(item) > 0 ? item.repo : ""
   const fixedWidth =
     2 +
-    (item.indent ? 3 : 0) +
+    prefix.length +
     2 /* health */ +
     2 /* turn */ +
     7 +
@@ -2403,9 +2567,7 @@ const ItemRow = ({
   return (
     <Box>
       <Text color="cyan">{active ? "❯ " : "  "}</Text>
-      {item.indent ? (
-        <Text dimColor>{lastChild === false ? "├─ " : "└─ "}</Text>
-      ) : null}
+      <Text dimColor>{prefix}</Text>
       <Text color={color as any} bold>
         {icon + " "}
       </Text>
@@ -3498,7 +3660,12 @@ const BrowseScreen = ({
                   {
                     kind: "show-less" as const,
                     toHide: activeItem.hidden,
-                    indent: true,
+                    // The depth of the row it replaces, never a constant. A
+                    // collapsed row sitting under a story is at depth 2, and
+                    // pinning it to 1 makes the walk in `treeUrls` stop one
+                    // level early and drop every row it holds — silently, since
+                    // nothing on screen reports what the clipboard missed.
+                    depth: depthOf(activeItem),
                   },
                 ]
               : [i],
@@ -3520,7 +3687,9 @@ const BrowseScreen = ({
                     {
                       kind: "show-more" as const,
                       hidden: activeItem.toHide,
-                      indent: true,
+                      // Same reasoning as the show-less above: carry the depth
+                      // of the row being replaced, not a constant.
+                      depth: depthOf(activeItem),
                     },
                   ]
                 : [i],
@@ -3901,14 +4070,10 @@ const BrowseScreen = ({
                 // Computed against section.items, never the visible slice: a
                 // window boundary is not the end of a group, and slicing first
                 // would draw a closing corner wherever the scroll happens to cut.
-                lastChild={
-                  "indent" in item && item.indent
-                    ? !isChildRow(section.items[viewStart + i + 1])
-                    : undefined
-                }
+                prefix={treePrefix(section.items, viewStart + i)}
                 parent={
                   item.kind === "task" &&
-                  isChildRow(section.items[viewStart + i + 1])
+                  depthOf(section.items[viewStart + i + 1]) > depthOf(item)
                 }
                 sparkFrame={sparkFrame}
                 // `i > 0` is window-relative and stays that way: the window's
