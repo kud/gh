@@ -812,6 +812,22 @@ export const reposInSections = (sections: Section[]): string[] =>
     ),
   ].sort()
 
+/**
+ * The next selectable row in `dir`, or `current` when there is none.
+ *
+ * A repo-header is a STOP, and a subgroup-header is not. The two look alike and
+ * are not: the fence names a thing you can act on — open the checkout, copy every
+ * URL under it — where a band label ("Your move") names an arrangement of rows
+ * and has nothing behind it to open. Landing on the second would be a keystroke
+ * spent on a row whose every key is inert.
+ *
+ * Unconditional in both directions, deliberately. Skipping the fence going down
+ * and landing on it going up would make ↓ then ↑ end somewhere other than where
+ * it started, and an arrow pair that is not its own inverse reads as the list
+ * drifting rather than as a shortcut. The cost is one press per repo group; the
+ * fence is also the "you have crossed into another repo" beat the eye takes
+ * anyway, so the press buys orientation as well as position.
+ */
 export const moveCursor = (
   items: AnyItem[],
   current: number,
@@ -821,8 +837,7 @@ export const moveCursor = (
   while (
     next >= 0 &&
     next < items.length &&
-    (items[next].kind === "repo-header" ||
-      items[next].kind === "subgroup-header")
+    items[next].kind === "subgroup-header"
   )
     next += dir
   if (next < 0 || next >= items.length) return current
@@ -903,7 +918,37 @@ const isChildRow = (item?: AnyItem): boolean =>
  * screen gives you no way to notice: past the limit, PRs would simply stop
  * arriving in the clipboard with nothing anywhere to say so.
  */
+/**
+ * Every URL under a repo fence: the run of rows between it and the next header.
+ *
+ * The run, not "every row in this tab whose repo matches". In a recency-sorted
+ * tab `insertRepoHeaders` emits a fresh header each time the repo changes as it
+ * walks down the timeline, so one repo can own several fences — and what `C`
+ * hands over has to be the group you were looking at, not a union assembled from
+ * three places on screen you cannot see at once.
+ */
+export const groupUrls = (items: readonly AnyItem[], i: number): string[] => {
+  const urls: string[] = []
+  for (let j = i + 1; j < items.length; j += 1) {
+    const item = items[j]
+    if (item.kind === "repo-header" || item.kind === "subgroup-header") break
+    // Same reasoning as treeUrls below: a collapsed row is not a gap in the
+    // group, it IS the rest of it, so its hidden children are copied too.
+    if (item.kind === "show-more") {
+      for (const child of item.hidden) if (child.url) urls.push(child.url)
+      continue
+    }
+    const url = (item as { url?: string }).url
+    if (url) urls.push(url)
+  }
+  return urls
+}
+
 export const treeUrls = (items: readonly AnyItem[], i: number): string[] => {
+  // A fence has no tree hanging off it — it opens a group — so C and O over one
+  // take the whole group. Handled here rather than at the two call sites so the
+  // pair cannot drift apart later.
+  if (items[i]?.kind === "repo-header") return groupUrls(items, i)
   let root = i
   while (root > 0 && isChildRow(items[root])) root -= 1
   const urls: string[] = []
@@ -1980,12 +2025,38 @@ export const CiStatusLine = ({
   )
 }
 
-const RepoHeaderRow = ({ repo, gap }: { repo: string; gap: boolean }) => {
+// Selected, the fence undims and its repo name goes bold; unselected it is
+// byte-identical to what it has always drawn. Two reasons it is not the chevron
+// alone. Every other row puts full-brightness CONTENT beside the cursor, so a
+// dim fence with a bright gutter reads as a stray glyph parked in a margin
+// rather than as the selected row. And dim is this list's own "you may skip
+// this" — leaving it on the one row that currently matters points away from the
+// answer. Luminance and weight, not hue: kud is colourblind, and orange already
+// means "act on this" here, so spending it on "the cursor is here" would devalue
+// it where it is load-bearing.
+//
+// The cursor takes the two leading spaces the fence already reserved, so nothing
+// shifts — that gutter is the same cell every item row draws its ❯ in.
+const RepoHeaderRow = ({
+  repo,
+  gap,
+  active,
+}: {
+  repo: string
+  gap: boolean
+  active: boolean
+}) => {
   const label = `── ${repo} `
   const fill = Math.max(4, 46 - label.length)
+  const rule = "─".repeat(fill)
   return (
     <Box marginTop={gap ? 1 : 0}>
-      <Text dimColor>{"  " + label + "─".repeat(fill)}</Text>
+      <Text color="cyan">{active ? "❯ " : "  "}</Text>
+      <Text dimColor={!active}>{"── "}</Text>
+      <Text dimColor={!active} bold={active}>
+        {repo}
+      </Text>
+      <Text dimColor={!active}>{" " + rule}</Text>
     </Box>
   )
 }
@@ -2101,7 +2172,9 @@ const ItemRow = ({
   // the other.
   const transient: Transient | undefined = leaving ? "out" : refreshMark
   if (item.kind === "repo-header")
-    return <RepoHeaderRow repo={item.repo} gap={gap ?? false} />
+    return (
+      <RepoHeaderRow repo={item.repo} gap={gap ?? false} active={active} />
+    )
 
   if (item.kind === "subgroup-header")
     return (
@@ -2597,13 +2670,13 @@ export const HelpModal = ({
   const keys: [string, string][] = [
     ["↑ ↓", "navigate"],
     ["← → · tab", "switch tab"],
-    ["↵ · d", "open / drill in"],
+    ["↵ · d", "open / drill in · repo: checkout"],
     ["m", "actions · close"],
     ["e", "explain this row"],
     ["o", "open in browser"],
-    ["O", "open ticket + its PRs"],
+    ["O", "open tree · whole repo group"],
     ["c", "copy URL"],
-    ["C", "copy ticket + its PRs"],
+    ["C", "copy tree · whole repo group"],
     ["b", "copy branch"],
     ["s", "switch to branch here"],
     ["j", "open repo in new tab"],
@@ -3309,7 +3382,11 @@ const BrowseScreen = ({
     const ext = extensionFor(input, extensions)
     if (ext) {
       onOpenExt?.(ext.id, {
-        item: activeItem ?? undefined,
+        // ExtensionTarget.item has always been documented as absent on a header
+        // row, and until the fence became selectable that was true for free.
+        // Now it has to be said: every extension body narrows on `kind` for a
+        // pr / issue / task and none of them expect a repo-header.
+        item: activeItem && !isHeader(activeItem) ? activeItem : undefined,
         ciJob: ciStatus?.job,
         login,
         onRemove: (row) => dismissItem(row as GHItem),
@@ -3317,12 +3394,61 @@ const BrowseScreen = ({
       })
       return
     }
-    if (
-      !activeItem ||
-      activeItem.kind === "repo-header" ||
-      activeItem.kind === "subgroup-header"
-    )
+    // The fence is a row now, so it answers for itself here — above the guard
+    // that drops every header, and below the extension arm for the same reason
+    // every built-in binding sits there. Deliberately the same letters a PR row
+    // uses, one level up: ↵ opens the thing, o puts it in a browser, c copies
+    // its URL, C and O take everything under it. Nothing new to learn, and the
+    // block returns unconditionally — u, x, b, s and t have no meaning for a
+    // repo, and a key that quietly did nothing to the row below would be worse
+    // than one that does nothing at all.
+    if (activeItem?.kind === "repo-header") {
+      const { repo } = activeItem
+      const repoUrl = `https://github.com/${repo}`
+      // "Open the project" is the checkout, not the repo page — the same jump
+      // `j` performs from a row, minus the branch, since a fence names no
+      // branch to switch to. The GitHub page is what `o` has always meant.
+      if (key.return || input === "d" || input === "j") {
+        showFlash(`⋯ Opening ${repo}…`)
+        void jumpToRepo(repo, "", login)
+          .then(() => showFlash(`↗ Opened ${repo} in new tab`))
+          .catch(() => showFlash("✗ Jump failed"))
+        return
+      }
+      if (input === "o") {
+        quietly`open ${repoUrl}`.catch(() => {})
+        showFlash(`↗ Opened ${repo}`)
+        return
+      }
+      if (input === "c") {
+        clipboard(repoUrl)
+        showFlash(`✓ Copied URL for ${repo}`)
+        return
+      }
+      // treeUrls resolves a fence to its whole group, so C and O read exactly
+      // as they do on a row: the same key, over whatever the cursor is standing
+      // in. Named in the flash, because "12 URLs" from a tab holding six repos
+      // is not enough to know which twelve you are about to paste.
+      if (input === "C" || input === "O") {
+        const urls = treeUrls(section.items, cursor)
+        if (urls.length === 0) return
+        const n = `${urls.length} URL${urls.length === 1 ? "" : "s"}`
+        if (input === "C") {
+          clipboard(urls.join("\n"))
+          showFlash(`✓ Copied ${n} from ${repo}`)
+        } else {
+          quietly`open ${urls}`.catch(() => {})
+          showFlash(`↗ Opened ${n} from ${repo}`)
+        }
+        return
+      }
       return
+    }
+
+    // repo-header is gone from this guard because the block above consumes it
+    // whole — TS calls the arm dead, and leaving it in would read as a second
+    // line of defence that no longer exists.
+    if (!activeItem || activeItem.kind === "subgroup-header") return
 
     if (key.return && activeItem.kind === "show-more") {
       setLocalSections((prev) =>
@@ -3576,14 +3702,30 @@ const BrowseScreen = ({
     }
   })
 
-  const hints: [string, string][] = [
-    ["↑↓", "nav"],
-    ["←→", "tab"],
-    ["↵/d", "open"],
-    ["m", "actions"],
-    ["?", "help"],
-    ["q", "quit"],
-  ]
+  // What the strip advertises depends on where the cursor is, because on a
+  // fence half of it would be a lie: `m` opens nothing there, and the two keys
+  // that matter — open the checkout, copy the group — are exactly the ones a
+  // fixed strip would leave unnamed. A selectable row that advertises nothing is
+  // a row nobody presses.
+  const hints: [string, string][] =
+    activeItem?.kind === "repo-header"
+      ? [
+          ["↑↓", "nav"],
+          ["←→", "tab"],
+          ["↵", "open repo"],
+          ["o", "browser"],
+          ["C", "copy group"],
+          ["?", "help"],
+          ["q", "quit"],
+        ]
+      : [
+          ["↑↓", "nav"],
+          ["←→", "tab"],
+          ["↵/d", "open"],
+          ["m", "actions"],
+          ["?", "help"],
+          ["q", "quit"],
+        ]
   const matchCount = section.items.filter(
     (i) => i.kind !== "repo-header" && i.kind !== "subgroup-header",
   ).length
