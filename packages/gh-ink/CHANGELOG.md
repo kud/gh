@@ -1,5 +1,69 @@
 # @kud/gh-ink
 
+## 0.41.0
+
+### Minor Changes
+
+- 9caaa21: A row's refresh marker is a pill, not more trailing text.
+
+  `NEW`, `GONE`, `UPDATED`, `MOVED` and `MERGED` are drawn through
+  `@kud/ink-ui`'s `Pill` in their existing colours, on both the ticket row and the
+  PR row. Nothing about the vocabulary changes: they are still words rather than
+  hues, because a marker that lives only in the colour is a marker a colourblind
+  reader does not have, and `NO_COLOR` degrades the pill to `[GONE]` rather than
+  to nothing.
+
+  What changes is the shape, and the shape was the bug. These markers sit at the
+  end of the row, immediately after the dim age, author and repo cells — so as
+  plain coloured text they read as one more column of trailing metadata. That is
+  the opposite of what they are: every other cell on the row is state you may
+  skip, while these are the one thing on screen reporting work that happened in
+  another window, and `TRANSIT_HOLD_MS` exists precisely so they survive being
+  NOTICED rather than merely seen. A fill is what makes them read as an
+  announcement about the row instead of another of its attributes.
+
+  Both width budgets charge for the caps — `pillWidth` on the ticket row, an
+  explicit term on the PR row. Pricing a pill by its label alone overflows by
+  exactly the two caps, and the frame is sized to fill the terminal, so one
+  column too many scrolls the whole panel rather than clipping the row. The PR
+  row charges for both its pills even though only one is ever non-empty (a merged
+  row never also says `GONE`), because a budget that leans on that invariant is
+  right only for as long as the invariant is.
+
+  Requires `@kud/ink-ui` 0.18.0, whose `Pill` takes an explicit fill and inks
+  itself legibly against it.
+
+### Patch Changes
+
+- 9caaa21: A row too wide for its container no longer folds the whole frame.
+
+  The title budget floored at 20 columns. That is fine while the frame is wide and
+  fatal the moment something takes forty of them: a PR row carrying a long repo
+  name and two ages has nothing left, takes the floor anyway, and overflows by
+  exactly the difference.
+
+  Ink's answer to an overflowing row is not to clip it — it is to compress every
+  flexible child in that row. The key, the number and the title all shrink
+  together and wrap into a column of fragments, so the list stops looking like a
+  list and anything standing beside it is pushed off the screen. One row too wide
+  takes the entire layout with it.
+
+  The row now gives up its trailing context in order — author, then threads, then
+  repo, then age — before the title is squeezed, and the title floors at 1 rather
+  than at a legible minimum, because a floor above what is left is by definition
+  an overflow. A one-character title is a bad row; a row that folds the frame is a
+  bad screen. The two announcements are absent from that order on purpose: MERGED
+  and the transit labels are the news the row exists to carry that moment, and a
+  row that dropped its own headline to keep a repo name would have the priority
+  exactly backwards.
+
+  Found on a real board rather than in the suite. The specs that existed narrowed
+  the frame by mounting a smaller terminal, which cannot work: `COLS` is sampled
+  from the real terminal when the module loads, so the rows measured themselves
+  against whatever window was running the tests and the assertions passed
+  everywhere. The new spec narrows the rows the only way a test can — by opening
+  the rail.
+
 ## 0.40.0
 
 ### Minor Changes
