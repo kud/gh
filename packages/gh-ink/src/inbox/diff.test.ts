@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { diffSections, keyOf, summariseDiff } from "./diff.js"
+import { diffSections, keyOf, markKey, summariseDiff } from "./diff.js"
 import type { GHItem, Section } from "./inbox.js"
 
 /*
@@ -54,20 +54,22 @@ describe("keyOf", () => {
 describe("diffSections", () => {
   it("calls a row that was not there before new", () => {
     const { transients, counts } = diffSections(section([a]), section([a, b]))
-    expect(transients.get("u/b")).toBe("in")
+    expect(transients.get(markKey("open", "u/b"))).toBe("in")
     expect(counts).toEqual({ added: 1, removed: 0, changed: 0 })
   })
 
   it("calls a row that has gone gone", () => {
     const { transients, counts } = diffSections(section([a, b]), section([a]))
-    expect(transients.get("u/b")).toBe("out")
+    expect(transients.get(markKey("open", "u/b"))).toBe("out")
     expect(counts).toEqual({ added: 0, removed: 1, changed: 0 })
   })
 
   it("calls a row whose rendered state moved changed", () => {
     const before = section([item({ url: "u/a", health: "waiting" })])
     const after = section([item({ url: "u/a", health: "approved" })])
-    expect(diffSections(before, after).transients.get("u/a")).toBe("changed")
+    expect(
+      diffSections(before, after).transients.get(markKey("open", "u/a")),
+    ).toBe("changed")
   })
 
   /*
@@ -95,14 +97,86 @@ describe("diffSections", () => {
     const before = section([a, b])
     const after = section([item({ url: "u/a", health: "approved" }), c])
     const { transients, counts } = diffSections(before, after)
-    expect(transients.get("u/a")).toBe("changed")
-    expect(transients.get("u/b")).toBe("out")
-    expect(transients.get("u/c")).toBe("in")
+    expect(transients.get(markKey("open", "u/a"))).toBe("changed")
+    expect(transients.get(markKey("open", "u/b"))).toBe("out")
+    expect(transients.get(markKey("open", "u/c"))).toBe("in")
     expect(counts).toEqual({ added: 1, removed: 1, changed: 1 })
   })
 
   it("treats a first paint as all new, not as an empty diff", () => {
     expect(diffSections([], section([a, b])).counts.added).toBe(2)
+  })
+})
+
+/*
+ * The failure this whole per-tab key exists for.
+ *
+ * The diff used to ask "is this row anywhere on the board", so a row that moved
+ * from one tab to another was present in both snapshots and earned no mark at
+ * all — it simply vanished from the tab you were reading. Worst for a cockpit
+ * epic, whose own summary and status never change: it moves BECAUSE its children
+ * did, so there was nothing left for a board-wide diff to notice.
+ */
+describe("a row that moves between tabs", () => {
+  const twoTabs = (where: "open" | "review"): Section[] => [
+    { id: "open", label: "Open", items: where === "open" ? [a] : [] },
+    { id: "review", label: "Review", items: where === "review" ? [a] : [] },
+  ]
+
+  it("dissolves in the tab it left", () => {
+    const { transients } = diffSections(twoTabs("open"), twoTabs("review"))
+    expect(transients.get(markKey("open", "u/a"))).toBe("moved-out")
+  })
+
+  it("coalesces in the tab it landed in", () => {
+    const { transients } = diffSections(twoTabs("open"), twoTabs("review"))
+    expect(transients.get(markKey("review", "u/a"))).toBe("moved-in")
+  })
+
+  // GONE and NEW are claims about the BOARD. Saying either to a ticket that is
+  // still open one tab over is the marker lying about work you still own.
+  it("never calls a move an arrival or a departure", () => {
+    const marks = [
+      ...diffSections(twoTabs("open"), twoTabs("review")).transients.values(),
+    ]
+    expect(marks).not.toContain("in")
+    expect(marks).not.toContain("out")
+  })
+
+  // Two marks, one event. The headline is what a reader decides whether to
+  // press `r` on, so it counts rows, not the tabs they touched.
+  it("is one thing in the headline, not two", () => {
+    const { counts } = diffSections(twoTabs("open"), twoTabs("review"))
+    expect(counts).toEqual({ added: 0, removed: 0, changed: 1 })
+  })
+
+  // Without it, `r` never lights up for a move: the indicator is gated on the
+  // counts, so a silently moving block read as "nothing to apply".
+  it("is news at all", () => {
+    expect(
+      summariseDiff(diffSections(twoTabs("open"), twoTabs("review")).counts),
+    ).toBe("1 moved")
+  })
+
+  it("stands where it was for the hold, in the tab it left", () => {
+    const { union } = diffSections(twoTabs("open"), twoTabs("review"))
+    expect(union.map((s) => s.items.map((i) => keyOf(i)))).toEqual([
+      ["u/a"],
+      ["u/a"],
+    ])
+  })
+
+  // Cockpit draws one epic in two tabs at once on purpose. Per-tab marks give
+  // each instance its own answer; the board-wide key gave them one shared mark.
+  it("marks each instance of a row drawn in two tabs separately", () => {
+    const both: Section[] = [
+      { id: "open", label: "Open", items: [a] },
+      { id: "review", label: "Review", items: [a] },
+    ]
+    const { transients, counts } = diffSections(both, twoTabs("review"))
+    expect(transients.get(markKey("open", "u/a"))).toBe("moved-out")
+    expect(transients.get(markKey("review", "u/a"))).toBeUndefined()
+    expect(counts.changed).toBe(1)
   })
 })
 
@@ -136,7 +210,7 @@ describe("diffSections union", () => {
     ]
     const after: Section[] = [{ id: "open", label: "Open", items: [a] }]
     const { union, transients } = diffSections(before, after)
-    expect(transients.get("u/b")).toBe("out")
+    expect(transients.get(markKey("review", "u/b"))).toBe("out")
     expect(union.flatMap((s) => s.items.map((i) => keyOf(i)))).toEqual(["u/a"])
   })
 })

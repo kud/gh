@@ -26,6 +26,7 @@ import { checkoutDirs, inboxConfig, profileOf } from "./config.js"
 import {
   diffSections,
   keyOf,
+  rowKeyOfMark,
   summariseDiff,
   tabsOfMarks,
   transientOf,
@@ -2325,12 +2326,27 @@ const TRANSIT_COLOUR: Record<Transient, string> = {
   in: "#3FB950",
   out: "#8B949E",
   changed: "#FF8700",
+  // A move is neither an arrival nor a departure, so it takes the colour of the
+  // third thing that can happen to a row you already had: it changed. Both ends
+  // of one move wear the same colour and the same word, which is what lets you
+  // recognise the row you just watched leave when you land on the tab it went to.
+  "moved-in": "#FF8700",
+  "moved-out": "#FF8700",
 }
 const TRANSIT_LABEL: Record<Transient, string> = {
   in: "NEW",
   out: "GONE",
   changed: "UPDATED",
+  // Never GONE. The row is still on the board, one tab over, and telling you it
+  // has gone is the marker lying about work you still own — which was the whole
+  // failure: an epic moving tab said nothing at all and simply vanished.
+  "moved-in": "MOVED",
+  "moved-out": "MOVED",
 }
+// Both directions of travel, so a mark can say which end of a move it is. A
+// departure thins to a dot wherever it is going; an arrival fills in from one.
+const isDeparture = (t: Transient) => t === "out" || t === "moved-out"
+const isArrival = (t: Transient) => t === "in" || t === "moved-in"
 // A row you banished yourself — closed, or dropped your review request from —
 // leaves wearing the same GONE the refresh puts on a row that left between two
 // fetches. It used to vanish on the keypress, which is the one departure in this
@@ -2404,9 +2420,7 @@ const ItemRow = ({
   // the other.
   const transient: Transient | undefined = leaving ? "out" : refreshMark
   if (item.kind === "repo-header")
-    return (
-      <RepoHeaderRow repo={item.repo} gap={gap ?? false} active={active} />
-    )
+    return <RepoHeaderRow repo={item.repo} gap={gap ?? false} active={active} />
 
   if (item.kind === "subgroup-header")
     return (
@@ -2455,9 +2469,9 @@ const ItemRow = ({
     // would shift the very row being watched.
     const transitIcon = !transient
       ? " "
-      : transient === "out"
+      : isDeparture(transient)
         ? (TRANSIT_OUT_FRAMES[sparkFrame % TRANSIT_OUT_FRAMES.length] as string)
-        : transient === "in"
+        : isArrival(transient)
           ? (TRANSIT_IN_FRAMES[sparkFrame % TRANSIT_IN_FRAMES.length] as string)
           : "\u25C9"
     const transitLabel = transient ? TRANSIT_LABEL[transient] : ""
@@ -2504,8 +2518,8 @@ const ItemRow = ({
           {item.key + "  "}
         </Text>
         <Text
-          bold={active || transient === "in"}
-          dimColor={transient === "out"}
+          bold={active || (!!transient && isArrival(transient))}
+          dimColor={!!transient && isDeparture(transient)}
           strikethrough={transient === "out"}
         >
           {truncate(item.summary, titleMax)}
@@ -2533,9 +2547,9 @@ const ItemRow = ({
   // to announce that it changed is the one substitution that costs information.
   const icon = merged
     ? (MERGED_FRAMES[sparkFrame % MERGED_FRAMES.length] as string)
-    : transient === "out"
+    : transient && isDeparture(transient)
       ? (TRANSIT_OUT_FRAMES[sparkFrame % TRANSIT_OUT_FRAMES.length] as string)
-      : transient === "in"
+      : transient && isArrival(transient)
         ? (TRANSIT_IN_FRAMES[sparkFrame % TRANSIT_IN_FRAMES.length] as string)
         : healthIcon
   const color = merged
@@ -2624,8 +2638,8 @@ const ItemRow = ({
       </Text>
       <Text color="#FF8700">{numStr}</Text>
       <Text
-        bold={active || transient === "in"}
-        dimColor={transient === "out"}
+        bold={active || (!!transient && isArrival(transient))}
+        dimColor={!!transient && isDeparture(transient)}
         strikethrough={transient === "out"}
       >
         {truncate(item.title, titleMax) + "  "}
@@ -3427,7 +3441,8 @@ const BrowseScreen = ({
     const out = new Set<string>()
     if (!transients?.size) return out
     for (const s of localSections)
-      if (s.items.some((item) => transientOf(transients, item))) out.add(s.id)
+      if (s.items.some((item) => transientOf(transients, item, s.id)))
+        out.add(s.id)
     return out
   }, [localSections, transients])
 
@@ -3444,7 +3459,7 @@ const BrowseScreen = ({
     (mergedUrls?.length ?? 0) > 0 ||
     (leavingUrls?.length ?? 0) > 0 ||
     (!!transients?.size &&
-      section.items.some((item) => transientOf(transients, item)))
+      section.items.some((item) => transientOf(transients, item, section.id)))
   useEffect(() => {
     if (!sparkling) return
     const id = setInterval(() => setSparkFrame((f) => f + 1), MERGED_FRAME_MS)
@@ -4114,7 +4129,7 @@ const BrowseScreen = ({
                   (item.kind === "pr" || item.kind === "issue") &&
                   !!leavingUrls?.includes(item.url)
                 }
-                transient={transientOf(transients, item)}
+                transient={transientOf(transients, item, section.id)}
                 // Computed against section.items, never the visible slice: a
                 // window boundary is not the end of a group, and slicing first
                 // would draw a closing corner wherever the scroll happens to cut.
@@ -4450,7 +4465,17 @@ export const App = ({
       .filter(([, tab]) => tab === tabId)
       .map(([key]) => key)
     for (const key of keys) transitTabs.current.delete(key)
-    const gone = new Set(keys.filter((key) => marks.get(key) === "out"))
+    // Both kinds of departure settle the same way: what separates the union
+    // from the real list is a row standing in a tab it has left, whether it left
+    // the board or only moved to another tab.
+    const gone = new Set(
+      keys
+        .filter((key) => {
+          const mark = marks.get(key)
+          return !!mark && isDeparture(mark)
+        })
+        .map(rowKeyOfMark),
+    )
     setTransients((prev) => {
       const next = new Map(prev)
       for (const key of keys) next.delete(key)
