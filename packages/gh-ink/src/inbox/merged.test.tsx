@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest"
 import { EventEmitter } from "node:events"
 import React from "react"
 import { render } from "ink"
+import { glyphs } from "@kud/glyphs"
 import { App, MERGED_HOLD_MS, MERGED_FRAME_MS } from "./inbox.js"
 import type { DetailContext, GHItem, Section } from "./inbox.js"
 
@@ -133,8 +134,12 @@ describe("a merged row", () => {
 
     const frame = stdout.lastFrame()
     // The word, not the colour: kud is colourblind, so a test that only checked
-    // for purple would pass against a row nobody could read.
-    expect(frame).toContain("MERGED")
+    // for purple would pass against a row nobody could read. In a pill, because
+    // the marker shares the end of the row with the dim age and author cells and
+    // as plain text read as one more of them.
+    expect(frame).toContain(
+      `${glyphs.plCapLeft}MERGED${glyphs.plCapRight}`,
+    )
     expect(frame).toContain("the pull request being merged")
     stop()
   })
