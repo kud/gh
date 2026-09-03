@@ -61,51 +61,82 @@ const truncate = (text: string, max: number): string =>
  * Presentational, like every other row renderer here — it takes no keyboard and
  * holds no cursor. Whether the rail is shown at all is the host's state.
  */
+/** Lines one row takes: the key line, the label beneath it, and the gap after. */
+const ROW_LINES = 3
+/** The title, and the blank line under it. */
+const HEADING_LINES = 2
+
+/**
+ * How many rows fit in `height` — one fewer than would physically fit whenever
+ * that means anything is left over, to buy the line that says so.
+ *
+ * Computed rather than left to the layout, because the layout's answer is to CUT,
+ * silently. A roadmap quietly missing its last three initiatives looks exactly
+ * like a roadmap that has none, and the whole reason the rail exists is that an
+ * initiative with nothing moving on it was invisible.
+ */
+export const railCapacity = (height: number, rows: number): number => {
+  const fits = Math.max(0, Math.floor((height - HEADING_LINES) / ROW_LINES))
+  return fits >= rows ? rows : Math.max(0, fits - 1)
+}
+
 export const SidePanel = ({
   sidebar,
   height,
 }: {
   sidebar: Sidebar
   height?: number
-}) => (
-  <Box
-    flexDirection="column"
-    width={SIDEBAR_COLS}
-    flexShrink={0}
-    height={height}
-  >
-    <Box marginBottom={1} paddingLeft={GUTTER}>
-      <Text color={ACCENT} bold>
-        {"» "}
-      </Text>
-      <Text bold>{sidebar.title}</Text>
-    </Box>
-    {sidebar.rows.length === 0 ? (
-      <Box paddingLeft={GUTTER + 2}>
-        <Text dimColor>nothing open</Text>
+}) => {
+  const shown =
+    height === undefined
+      ? sidebar.rows
+      : sidebar.rows.slice(0, railCapacity(height, sidebar.rows.length))
+  const hidden = sidebar.rows.length - shown.length
+  return (
+    <Box
+      flexDirection="column"
+      width={SIDEBAR_COLS}
+      flexShrink={0}
+      height={height}
+    >
+      <Box marginBottom={1} paddingLeft={GUTTER}>
+        <Text color={ACCENT} bold>
+          {"» "}
+        </Text>
+        <Text bold>{sidebar.title}</Text>
       </Box>
-    ) : (
-      sidebar.rows.map((row) => (
-        <Box key={row.key} flexDirection="column" marginBottom={1}>
-          <Box paddingLeft={GUTTER}>
-            {/* The same arrow the PR rows use for "your move", in the same
+      {sidebar.rows.length === 0 ? (
+        <Box paddingLeft={GUTTER + 2}>
+          <Text dimColor>nothing open</Text>
+        </Box>
+      ) : (
+        shown.map((row) => (
+          <Box key={row.key} flexDirection="column" marginBottom={1}>
+            <Box paddingLeft={GUTTER}>
+              {/* The same arrow the PR rows use for "your move", in the same
                 orange and the same fixed cell — a rail that invented its own
                 mark for the same question would make you learn the vocabulary
                 twice. Fixed width either way, so a row gaining or losing its
                 claim on you never shifts the key beside it. */}
-            <Text color={ACCENT} bold>
-              {row.wantsYou ? "← " : "  "}
-            </Text>
-            <Text color={ACCENT}>{row.key}</Text>
-            {row.live !== undefined ? (
-              <Text dimColor>{`  ${row.live} live`}</Text>
-            ) : null}
+              <Text color={ACCENT} bold>
+                {row.wantsYou ? "← " : "  "}
+              </Text>
+              <Text color={ACCENT}>{row.key}</Text>
+              {row.live !== undefined ? (
+                <Text dimColor>{`  ${row.live} live`}</Text>
+              ) : null}
+            </Box>
+            <Box paddingLeft={GUTTER + 2}>
+              <Text dimColor>{truncate(row.label, CONTENT - 2)}</Text>
+            </Box>
           </Box>
-          <Box paddingLeft={GUTTER + 2}>
-            <Text dimColor>{truncate(row.label, CONTENT - 2)}</Text>
-          </Box>
+        ))
+      )}
+      {hidden > 0 ? (
+        <Box paddingLeft={GUTTER + 2}>
+          <Text dimColor>{`+${hidden} more`}</Text>
         </Box>
-      ))
-    )}
-  </Box>
-)
+      ) : null}
+    </Box>
+  )
+}
