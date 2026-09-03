@@ -2042,6 +2042,7 @@ const InboxHeader = ({
   refreshing,
   hasPending,
   pendingSummary,
+  appliedSummary,
   fetchedAt,
 }: {
   sections: Section[]
@@ -2061,6 +2062,8 @@ const InboxHeader = ({
   hasPending?: boolean
   /** `2 new · 1 gone`, when a pending refresh is waiting. */
   pendingSummary?: string
+  /** What the refresh you just applied did, held for as long as its marks are. */
+  appliedSummary?: string
   fetchedAt?: number | null
 }) => {
   const total = sections.reduce((n, s) => n + topLevelCount(s), 0)
@@ -2101,13 +2104,23 @@ const InboxHeader = ({
   // Refresh status: pending (actionable) wins, then in-flight, then freshness.
   // Naming the change is the whole argument for keeping the apply manual: the
   // gate is only worth its keypress if it tells you what you would be applying.
+  //
+  // `appliedSummary` is the same sentence one beat later: what the refresh you
+  // just applied actually did, held for as long as the marks are. It lives here
+  // rather than on the rows because this segment is the one place on screen where
+  // a changing width costs nothing — the dashed filler after it absorbs the
+  // difference, and nothing is aligned to its right. A row cannot say the same:
+  // its trailing word sits inside a width budget, so a row that gained one shed
+  // its repo name or its age to pay for it, and reflowed while being read.
   const [statusText, statusColor] = hasPending
     ? [`● ${pendingSummary || "new"} · r apply`, "#FF8700"]
     : refreshing
       ? ["↻ refreshing…", "cyan"]
-      : fetchedAt
-        ? [`updated ${agoText(fetchedAt)}`, undefined]
-        : ["", undefined]
+      : appliedSummary
+        ? [`◉ ${appliedSummary}`, "#FF8700"]
+        : fetchedAt
+          ? [`updated ${agoText(fetchedAt)}`, undefined]
+          : ["", undefined]
   const statusSeg = statusText ? statusText + "  " : ""
 
   const fill = Math.max(
@@ -2331,6 +2344,20 @@ const MERGED_COLOUR = "#A371F7"
 // that happened in another window while you were reading something else, so it
 // has to survive being noticed rather than just seen.
 export const TRANSIT_HOLD_MS = 7000
+/**
+ * How many ticks of the shared frame counter one transit frame lasts.
+ *
+ * The two animations on this screen want opposite tempos and were sharing one.
+ * The merge sparkle is a celebration of something you did a second ago: it runs
+ * for 2.5s and 150ms a frame is what makes it read as a sparkle. A transit mark
+ * is the opposite errand — it reports work done in another window, it stands for
+ * 7s, and at that rate it strobes. Something blinking six times a second beside
+ * text you are trying to read is not a marker, it is an interruption.
+ *
+ * A divisor rather than a second interval, deliberately: one ticker means the two
+ * cannot drift, which is the whole reason there was one to begin with.
+ */
+const TRANSIT_FRAME_TICKS = 3
 // One shared empty map, so clearing the marks compares equal to already-clear
 // and React skips the repaint instead of redrawing the list to change nothing.
 const NO_TRANSIENTS: Map<string, Transient> = new Map()
@@ -2393,9 +2420,35 @@ export const LEAVING_HOLD_MS = 2500
 // all on exactly the tabs this exists to point at.
 export const TAB_MARK = "●"
 
-// The dot's cell is reserved on EVERY tab for as long as any tab wears one, so
-// the bar moves twice per refresh — once when the news lands, once when the
-// last tab settles — instead of twitching sideways each time a tab is read.
+/**
+ * The tab marker's cell, ALWAYS two columns wide, on every tab, whether or not
+ * anything is marked.
+ *
+ * It used to collapse to nothing when the board was quiet, which moved the whole
+ * bar sideways twice per refresh — out when news landed, back when the last tab
+ * settled. Two columns permanently is the cheaper trade by a distance: a tab bar
+ * that shifts is a bar you have to re-find, and it shifts at exactly the moment
+ * you are trying to read it.
+ *
+ * This is the same rule the row's glyph cell has always followed, applied one
+ * level up. The trailing WORD on a row never got it, which is why a row gaining a
+ * marker used to reflow — see the transit marks, which now live here instead.
+ */
+export const tabMarker = (
+  marked: Set<string>,
+  id: string,
+  frame = 0,
+): string =>
+  marked.has(id) ? `${TAB_PULSE[frame % TAB_PULSE.length] as string} ` : "  "
+
+// The dot breathing rather than sitting still. A tab you are NOT looking at is
+// the whole problem — a marker on a row inside it cannot be seen at all — and
+// motion is the one channel that carries across the screen without costing a
+// column or leaning on a hue. Four frames, same ramp the rows dissolve through,
+// so the vocabulary is learned once.
+const TAB_PULSE = ["·", "○", "◎", "◉"]
+
+/** @deprecated Fold the marker into `Tabs`' own `marker` field instead. */
 export const tabLabel = (
   label: string,
   marked: Set<string>,
@@ -2456,6 +2509,19 @@ const ItemRow = ({
   // places `transient` is read, so a later branch cannot handle one and forget
   // the other.
   const transient: Transient | undefined = leaving ? "out" : refreshMark
+  // Slower than the merge sparkle, off the same counter — see TRANSIT_FRAME_TICKS.
+  const transitFrame = Math.floor(sparkFrame / TRANSIT_FRAME_TICKS)
+  // The one distinction the fold above deliberately loses, and the one place it
+  // matters: whether YOU caused this.
+  //
+  // A row leaving because you closed it still says GONE on the row, exactly as a
+  // merged one says MERGED — you pressed a key a second ago, you are looking at
+  // the row, and the acknowledgement is the whole point of holding it on screen
+  // instead of vanishing it. A row marked by a REFRESH says nothing here: that
+  // news is about work done in another window, it arrives on rows you are not
+  // watching, and its word cost columns the row had to take from its own title.
+  // The header carries that wording now, and the tab pulses to say where.
+  const farewellLabel = leaving ? TRANSIT_LABEL.out : ""
   if (item.kind === "repo-header")
     return <RepoHeaderRow repo={item.repo} gap={gap ?? false} active={active} />
 
@@ -2507,11 +2573,10 @@ const ItemRow = ({
     const transitIcon = !transient
       ? " "
       : isDeparture(transient)
-        ? (TRANSIT_OUT_FRAMES[sparkFrame % TRANSIT_OUT_FRAMES.length] as string)
+        ? (TRANSIT_OUT_FRAMES[transitFrame % TRANSIT_OUT_FRAMES.length] as string)
         : isArrival(transient)
-          ? (TRANSIT_IN_FRAMES[sparkFrame % TRANSIT_IN_FRAMES.length] as string)
+          ? (TRANSIT_IN_FRAMES[transitFrame % TRANSIT_IN_FRAMES.length] as string)
           : "\u25C9"
-    const transitLabel = transient ? TRANSIT_LABEL[transient] : ""
     // The prefix term is new here and easy to miss: a task row had no indent
     // to price until stories became tasks hanging under an epic, so this
     // budget never carried one and a depth-1 story overflowed by exactly its
@@ -2533,7 +2598,7 @@ const ItemRow = ({
         item.key.length -
         note.length -
         (item.pill ? pillWidth(item.pill) + 1 : 0) -
-        (transitLabel ? pillWidth(transitLabel) : 0) -
+        (farewellLabel ? pillWidth(farewellLabel) + 2 : 0) -
         prefix.length -
         12,
     )
@@ -2583,12 +2648,19 @@ const ItemRow = ({
           </>
         ) : null}
         {note ? <Text dimColor>{` ${note}`}</Text> : null}
-        {transitLabel ? (
+        {farewellLabel ? (
           <>
             <Text>{"  "}</Text>
-            <Pill color={TRANSIT_COLOUR[transient!]}>{transitLabel}</Pill>
+            <Pill color={TRANSIT_COLOUR.out}>{farewellLabel}</Pill>
           </>
         ) : null}
+        {/* No REFRESH word on the row, deliberately. It sat inside the width
+            budget, so a row that gained one paid for it by shedding its note or
+            squeezing its summary — reflowing at the exact moment you were
+            reading it. The header carries the wording now, where a changing
+            width costs nothing, and the tab pulses to say where. What stays here
+            is free: the glyph in its reserved cell, bold for arriving, dim and
+            struck through for leaving. */}
       </Box>
     )
   }
@@ -2607,9 +2679,9 @@ const ItemRow = ({
   const icon = merged
     ? (MERGED_FRAMES[sparkFrame % MERGED_FRAMES.length] as string)
     : transient && isDeparture(transient)
-      ? (TRANSIT_OUT_FRAMES[sparkFrame % TRANSIT_OUT_FRAMES.length] as string)
+      ? (TRANSIT_OUT_FRAMES[transitFrame % TRANSIT_OUT_FRAMES.length] as string)
       : transient && isArrival(transient)
-        ? (TRANSIT_IN_FRAMES[sparkFrame % TRANSIT_IN_FRAMES.length] as string)
+        ? (TRANSIT_IN_FRAMES[transitFrame % TRANSIT_IN_FRAMES.length] as string)
         : healthIcon
   const color = merged
     ? MERGED_COLOUR
@@ -2661,13 +2733,14 @@ const ItemRow = ({
   const mergedLabel = merged ? "MERGED" : ""
   // Never both: a row merged from here is already being announced, and stacking
   // GONE onto MERGED would report one departure twice.
-  const transitLabel = merged || !transient ? "" : TRANSIT_LABEL[transient]
   // Two of these are pills, so the joined string under-prices them by exactly
   // their caps — see the ticket row's budget for the same correction. Only one
   // of the pair is ever non-empty (a merged row never also says GONE), but both
   // are charged rather than one, because a budget that relies on that stays
   // right only for as long as the invariant above `transitLabel` holds.
-  const pillCaps = [mergedLabel, transitLabel].filter(Boolean).length * 2
+  // Only MERGED is drawn on the row now, so only MERGED is charged. The transit
+  // words moved to the header — see the render below.
+  const pillCaps = [mergedLabel, farewellLabel].filter(Boolean).length * 2
   // The boolean was doing two jobs here. This one is "this row hangs under
   // something, so say which repo it belongs to" — unchanged in meaning.
   const repoLabel = depthOf(item) > 0 ? item.repo : ""
@@ -2698,7 +2771,6 @@ const ItemRow = ({
       givingUp.threads ? "" : unresolvedLabel,
       showAuthor && !givingUp.author ? `by ${item.author}` : "",
       mergedLabel,
-      transitLabel,
     ]
       .filter(Boolean)
       .join("  ")
@@ -2731,7 +2803,7 @@ const ItemRow = ({
     givingUp.threads ? "" : unresolvedLabel,
     showAuthor && !givingUp.author ? `by ${item.author}` : "",
     mergedLabel,
-    transitLabel,
+    farewellLabel,
   ]
     .filter(Boolean)
     .join("  ")
@@ -2788,12 +2860,16 @@ const ItemRow = ({
           <Pill color={MERGED_COLOUR}>{mergedLabel}</Pill>
         </>
       ) : null}
-      {transitLabel ? (
+      {farewellLabel ? (
         <>
           <Text>{"  "}</Text>
-          <Pill color={TRANSIT_COLOUR[transient!]}>{transitLabel}</Pill>
+          <Pill color={TRANSIT_COLOUR.out}>{farewellLabel}</Pill>
         </>
       ) : null}
+      {/* See the ticket row: the refresh wording lives in the header now, not
+          here, because here it costs columns the row does not have. MERGED above
+          stays — it is your own action a second ago, on a row that is leaving
+          anyway, so its reflow is both expected and brief. */}
     </Box>
   )
 }
@@ -3330,6 +3406,7 @@ const BrowseScreen = ({
   refreshing,
   hasPending,
   pendingSummary,
+  appliedSummary,
   fetchedAt,
   refreshError,
   hidden,
@@ -3392,6 +3469,8 @@ const BrowseScreen = ({
   refreshing?: boolean
   hasPending?: boolean
   pendingSummary?: string
+  /** What the refresh you just applied did, held for as long as its marks are. */
+  appliedSummary?: string
   fetchedAt?: number | null
   // A background revalidate that failed. Carries `at` so two identical failures
   // in a row are still two distinct values — a bare string would compare equal
@@ -3608,6 +3687,12 @@ const BrowseScreen = ({
   const sparkling =
     (mergedUrls?.length ?? 0) > 0 ||
     (leavingUrls?.length ?? 0) > 0 ||
+    // Any MARKED TAB, not just rows on screen. The scope used to be this tab's
+    // own items, which was right while the animation lived on the rows and is
+    // exactly wrong now it lives on the bar: a tab you are not looking at is the
+    // whole case the pulse exists for — a marker inside it cannot be seen at all
+    // — and a ticker gated on the visible tab would leave that dot sitting still.
+    markedTabs.size > 0 ||
     (!!transients?.size &&
       section.items.some((item) => transientOf(transients, item, section.id)))
   useEffect(() => {
@@ -4269,6 +4354,7 @@ const BrowseScreen = ({
         refreshing={refreshing}
         hasPending={hasPending}
         pendingSummary={pendingSummary}
+        appliedSummary={appliedSummary}
         fetchedAt={fetchedAt}
       />
 
@@ -4295,8 +4381,16 @@ const BrowseScreen = ({
           active={section.id}
           items={localSections.map((s) => ({
             value: s.id,
-            label: tabLabel(s.label, markedTabs, s.id),
+            label: s.label,
             count: topLevelCount(s),
+            // Its own cell, always two wide, so news arriving never slides the
+            // bar — and free to animate for exactly that reason.
+            marker: tabMarker(
+              markedTabs,
+              s.id,
+              Math.floor(sparkFrame / TRANSIT_FRAME_TICKS),
+            ),
+            markerColor: "#FF8700",
           }))}
         />
       </Box>
@@ -4683,7 +4777,11 @@ export const App = ({
       return
     }
 
-    const { transients: fresh, union } = diffSections(before, sections)
+    const { transients: fresh, union, counts } = diffSections(before, sections)
+    // The same words the pending indicator used a keypress ago, now in the past
+    // tense. Set before the early return below, so a refresh whose marks all
+    // settle instantly still leaves nothing stale behind it.
+    setAppliedSummary(summariseDiff(counts))
     // Marks no tab has shown yet survive into this refresh. The hold is spent
     // per tab, so an unseen marker is a promise the cockpit has not kept —
     // dropping it here would make a second `r` the way to lose the news the
@@ -4698,6 +4796,7 @@ export const App = ({
 
     if (marks.size === 0) {
       transitTabs.current = new Map()
+      setAppliedSummary("")
       setTransients(NO_TRANSIENTS)
       setState({ phase: "browse", sections, login })
       return
@@ -5055,6 +5154,11 @@ export const App = ({
   // It never enters the diff, never joins the union, and never waits on a tab's
   // hold — putting it in there would have meant threading it through every
   // setState that only ever meant to change the list.
+  // What the applied refresh did, in the same words the pending indicator used a
+  // keypress earlier. Kept in App rather than derived in the header because only
+  // the apply knows it: by the time the header renders, the diff that produced it
+  // has been folded into the marks and the counts are gone.
+  const [appliedSummary, setAppliedSummary] = useState("")
   const [sidebar, setSidebar] = useState<Sidebar | undefined>(undefined)
   // An automatic refresh declined itself. Worth saying: silence here is
   // indistinguishable from a cockpit that simply has nothing new, and the reader
@@ -5210,6 +5314,7 @@ export const App = ({
         refreshing={refreshing}
         hasPending={pending !== null}
         pendingSummary={pendingSummary}
+        appliedSummary={transients.size > 0 ? appliedSummary : ""}
         fetchedAt={fetchedAt}
         refreshError={refreshError ?? undefined}
         origin={origin}
