@@ -35,11 +35,14 @@ import type { Transient } from "./diff.js"
 import {
   FooterHints,
   LoadingScreen,
+  Pill,
+  pillWidth,
   StatusMessage,
   Tabs,
   Switch,
   useListCursor,
 } from "@kud/ink-ui"
+import type { PillVariant } from "@kud/ink-ui"
 import {
   type Health,
   computeHealth as ghComputeHealth,
@@ -197,6 +200,20 @@ export type TaskRow = {
    * separately instead of being smuggled past the truncation maths.
    */
   note?: string
+  /**
+   * A category this row BELONGS to — `epic`, `blocked`, `spike` — drawn as a
+   * filled pill after the summary.
+   *
+   * Deliberately not a second spelling of `note`, which the epic marker used to
+   * borrow. The two want opposite weights: a pill says the word itself is the
+   * information, while `note` is for a reference the reader follows — a parent
+   * ticket key, a source. Filling a breadcrumb gives it a weight it has not
+   * earned, and a row can legitimately carry both (a story under someone else's
+   * epic shows its parent's key AND, one day, a status of its own).
+   */
+  pill?: string
+  /** Which fill the pill takes. See `@kud/ink-ui`'s `PillVariant`. */
+  pillVariant?: PillVariant
   /**
    * The Jira issue key behind this row, when one exists. Its PRESENCE is what
    * turns on the ticket affordances — ↵ opens a menu led by `jira issue view`,
@@ -2478,12 +2495,15 @@ const ItemRow = ({
     // The prefix term is new here and easy to miss: a task row had no indent
     // to price until stories became tasks hanging under an epic, so this
     // budget never carried one and a depth-1 story overflowed by exactly its
-    // three columns.
+    // three columns. The pill term is the same trap one release later: priced
+    // by its label alone it overflows by exactly the two caps, which the frame
+    // answers by scrolling the whole panel rather than clipping the row.
     const titleMax = Math.max(
       20,
       COLS -
         item.key.length -
         note.length -
+        (item.pill ? pillWidth(item.pill) + 1 : 0) -
         transitLabel.length -
         prefix.length -
         12,
@@ -2524,6 +2544,15 @@ const ItemRow = ({
         >
           {truncate(item.summary, titleMax)}
         </Text>
+        {/* Before the note, because a pill says what the row IS and a note says
+            what it hangs off — and a filled shape sitting after a dim reference
+            reads as belonging to the reference rather than to the row. */}
+        {item.pill ? (
+          <>
+            <Text> </Text>
+            <Pill variant={item.pillVariant ?? "muted"}>{item.pill}</Pill>
+          </>
+        ) : null}
         {note ? <Text dimColor>{` ${note}`}</Text> : null}
         {transitLabel ? (
           <Text bold color={TRANSIT_COLOUR[transient!]}>
