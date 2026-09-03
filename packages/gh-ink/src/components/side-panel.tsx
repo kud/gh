@@ -21,6 +21,17 @@ export type SidebarRow = {
    * hard 0 asserts the first from evidence for neither.
    */
   live?: number
+  /**
+   * How far through it is — `done` of `total` children resolved.
+   *
+   * Both or neither, and only ever drawn together: a numerator with no
+   * denominator is not progress, it is a number. Absent for the same reason
+   * `live` is — a host that cannot count says nothing rather than claiming zero,
+   * and the two counts genuinely can be unavailable while `live` is known, since
+   * `live` is what the board already drew and this needs asking Jira again.
+   */
+  done?: number
+  total?: number
   /** Something under it is waiting on you. */
   wantsYou?: boolean
   /**
@@ -61,6 +72,25 @@ const LABEL_INDENT = 2
 // Matches the frame's own border rather than picking a second grey: two rules on
 // one screen that differ by a shade read as a mistake, not as a hierarchy.
 const RULE_COLOR = "gray"
+
+/**
+ * The dim figures after the key: how far through, and how much is moving.
+ *
+ * Either half may be missing and the other still worth saying, so this is a join
+ * of what is known rather than one of three fixed shapes. `done`/`total` are
+ * treated as a pair — a numerator with no denominator is not progress, it is a
+ * number — and a zero is printed wherever it was counted, because "nothing is
+ * moving" is exactly the thing a roadmap is read to notice.
+ */
+export const counts = (row: SidebarRow): string =>
+  [
+    row.done !== undefined && row.total !== undefined
+      ? `${row.done}/${row.total}`
+      : "",
+    row.live !== undefined ? `${row.live} live` : "",
+  ]
+    .filter(Boolean)
+    .join(" · ")
 
 const truncate = (text: string, max: number): string =>
   [...text].length <= max
@@ -182,9 +212,13 @@ export const SidePanel = ({
                 <Text color={ACCENT} bold={active}>
                   {row.key}
                 </Text>
-                {row.live !== undefined ? (
-                  <Text dimColor>{`  ${row.live} live`}</Text>
-                ) : null}
+                {/* Progress first, because it is the question a roadmap is
+                    read to answer, and `live` second because it qualifies it:
+                    4/9 says how far, 0 live says whether anything is moving,
+                    and an initiative that is 4/9 with nothing live is the one
+                    you most want to notice. Both are dim — the key is what you
+                    act on. */}
+                <Text dimColor>{`  ${counts(row)}`}</Text>
               </Box>
               <Box paddingLeft={LABEL_INDENT + 2}>
                 <Text dimColor={!active}>
