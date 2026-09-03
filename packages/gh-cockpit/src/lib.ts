@@ -84,6 +84,7 @@ export {
   sortItems,
   SIDEBAR_COLS,
   SidePanel,
+  railCapacity,
   toCiStatusState,
   topLevelCount,
   truncate,

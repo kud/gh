@@ -14,6 +14,7 @@ export {
 export {
   SidePanel,
   SIDEBAR_COLS,
+  railCapacity,
   type Sidebar,
   type SidebarRow,
 } from "./components/side-panel.js"
