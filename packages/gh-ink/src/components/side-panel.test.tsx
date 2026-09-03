@@ -1,7 +1,7 @@
 import React from "react"
 import { render } from "ink-testing-library"
 import { describe, it, expect } from "vitest"
-import { SidePanel, railCapacity, type Sidebar } from "./side-panel.js"
+import { SidePanel, railCapacity, counts, type Sidebar } from "./side-panel.js"
 
 /*
  * The rail is fixed to the list's height, and Ink's answer to more rows than
@@ -20,6 +20,39 @@ const rail = (n: number): Sidebar => ({
 })
 
 const frameOf = (node: React.ReactElement) => render(node).lastFrame() ?? ""
+
+describe("counts", () => {
+  it("says how far through, then how much is moving", () => {
+    expect(counts({ key: "P-1", label: "x", done: 4, total: 9, live: 1 })).toBe(
+      "4/9 · 1 live",
+    )
+  })
+
+  // A numerator with no denominator is not progress, it is a number.
+  it("refuses to draw half a fraction", () => {
+    expect(counts({ key: "P-1", label: "x", done: 4, live: 1 })).toBe("1 live")
+    expect(counts({ key: "P-1", label: "x", total: 9, live: 1 })).toBe("1 live")
+  })
+
+  // The pair can be unknown while `live` is known: `live` is what the board
+  // already drew, and progress needs asking Jira a second time.
+  it("says what it does know when the other half is missing", () => {
+    expect(counts({ key: "P-1", label: "x", live: 2 })).toBe("2 live")
+    expect(counts({ key: "P-1", label: "x", done: 0, total: 3 })).toBe("0/3")
+  })
+
+  // An initiative that is 4/9 with nothing moving is the one you most want to
+  // notice, so a counted zero is printed rather than folded away.
+  it("prints a zero it actually counted", () => {
+    expect(counts({ key: "P-1", label: "x", done: 4, total: 9, live: 0 })).toBe(
+      "4/9 · 0 live",
+    )
+  })
+
+  it("says nothing at all when nothing was counted", () => {
+    expect(counts({ key: "P-1", label: "x" })).toBe("")
+  })
+})
 
 describe("railCapacity", () => {
   it("takes every row when they all fit", () => {
