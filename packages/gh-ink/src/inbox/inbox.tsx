@@ -2344,6 +2344,13 @@ const TRANSIT_IN_FRAMES = ["·", "○", "◎", "◉"]
 // Reinforcement only. NEW / GONE / UPDATED below are the actual signal, for the
 // same reason MERGED is a word: kud is colourblind, and a marker that lives only
 // in the hue is a marker he does not have.
+//
+// The word is drawn as a `Pill` rather than as coloured text, and the fill is
+// what the colour is FOR: a marker that has to survive being noticed cannot be
+// the same shape as the dim age and author cells it sits beside, or it reads as
+// one more column of trailing metadata. It stays a word inside the fill, so
+// nothing above changes — a reader who cannot separate green from grey still has
+// GONE, and `NO_COLOR` degrades the pill to `[GONE]` rather than to nothing.
 const TRANSIT_COLOUR: Record<Transient, string> = {
   in: "#3FB950",
   out: "#8B949E",
@@ -2508,16 +2515,25 @@ const ItemRow = ({
     // The prefix term is new here and easy to miss: a task row had no indent
     // to price until stories became tasks hanging under an epic, so this
     // budget never carried one and a depth-1 story overflowed by exactly its
-    // three columns. The pill term is the same trap one release later: priced
-    // by its label alone it overflows by exactly the two caps, which the frame
-    // answers by scrolling the whole panel rather than clipping the row.
+    // three columns. The pill terms are the same trap one release later: priced
+    // by their labels alone they overflow by exactly the two caps each, which
+    // the frame answers by scrolling the whole panel rather than clipping the
+    // row.
+    //
+    // Floored at 1, never at a legible minimum. A floor above what is left is a
+    // row wider than its container, and Ink answers that by compressing every
+    // flexible child in it rather than clipping — the key, the title and the pill
+    // all shrink together and wrap into a column of fragments, taking the frame's
+    // whole layout with them. A one-character title is a bad row; a row that folds
+    // the frame is a bad screen. The GitHub row gives up its trailing context
+    // instead, having context worth giving up; this one has only a note.
     const titleMax = Math.max(
-      20,
+      1,
       cols -
         item.key.length -
         note.length -
         (item.pill ? pillWidth(item.pill) + 1 : 0) -
-        transitLabel.length -
+        (transitLabel ? pillWidth(transitLabel) : 0) -
         prefix.length -
         12,
     )
@@ -2568,9 +2584,10 @@ const ItemRow = ({
         ) : null}
         {note ? <Text dimColor>{` ${note}`}</Text> : null}
         {transitLabel ? (
-          <Text bold color={TRANSIT_COLOUR[transient!]}>
-            {"  " + transitLabel}
-          </Text>
+          <>
+            <Text>{"  "}</Text>
+            <Pill color={TRANSIT_COLOUR[transient!]}>{transitLabel}</Pill>
+          </>
         ) : null}
       </Box>
     )
@@ -2645,28 +2662,83 @@ const ItemRow = ({
   // Never both: a row merged from here is already being announced, and stacking
   // GONE onto MERGED would report one departure twice.
   const transitLabel = merged || !transient ? "" : TRANSIT_LABEL[transient]
+  // Two of these are pills, so the joined string under-prices them by exactly
+  // their caps — see the ticket row's budget for the same correction. Only one
+  // of the pair is ever non-empty (a merged row never also says GONE), but both
+  // are charged rather than one, because a budget that relies on that stays
+  // right only for as long as the invariant above `transitLabel` holds.
+  const pillCaps = [mergedLabel, transitLabel].filter(Boolean).length * 2
+  // The boolean was doing two jobs here. This one is "this row hangs under
+  // something, so say which repo it belongs to" — unchanged in meaning.
+  const repoLabel = depthOf(item) > 0 ? item.repo : ""
+
+  /*
+   * Everything after the title is CONTEXT, and context that costs you the thing
+   * it contextualises is a bad trade — so when the row cannot have it all, the
+   * trailing furniture is given up in order rather than the title being floored.
+   *
+   * The floor was the bug. `Math.max(20, cols - fixedWidth)` is fine while the
+   * frame is wide and fatal the moment something takes forty columns away: a PR
+   * carrying a long repo name and two ages has nothing left, takes the floor
+   * anyway, and overflows by exactly the difference. Ink's answer to an
+   * overflowing row is not to clip it but to compress every flexible child in it,
+   * so the key, the number and the title all shrink together and wrap into a
+   * column of fragments — the list stops looking like a list, and anything beside
+   * it is pushed off the screen. One row too wide takes the whole frame with it.
+   *
+   * Order is least-valuable-first, and the two announcements are absent from it:
+   * MERGED and the transit labels are the news the row exists to carry that
+   * moment, and a row that drops its own headline to keep a repo name has the
+   * priority exactly backwards.
+   */
+  const givingUp = { author: false, threads: false, age: false, repo: false }
+  const widthOf = () => {
+    const suffix = [
+      givingUp.age ? "" : ageLabel || "",
+      givingUp.threads ? "" : unresolvedLabel,
+      showAuthor && !givingUp.author ? `by ${item.author}` : "",
+      mergedLabel,
+      transitLabel,
+    ]
+      .filter(Boolean)
+      .join("  ")
+    return (
+      2 +
+      prefix.length +
+      2 /* health */ +
+      2 /* turn */ +
+      7 +
+      (givingUp.repo ? 0 : repoLabel.length) +
+      suffix.length +
+      pillCaps +
+      6
+    )
+  }
+  // Short enough to still say something, long enough to be worth reading. Below
+  // this the row is better off shedding its context than its subject.
+  const MIN_TITLE = 24
+  for (const give of [
+    () => (givingUp.author = true),
+    () => (givingUp.threads = true),
+    () => (givingUp.repo = true),
+    () => (givingUp.age = true),
+  ]) {
+    if (cols - widthOf() >= MIN_TITLE) break
+    give()
+  }
   const suffix = [
-    ageLabel || "",
-    unresolvedLabel,
-    showAuthor ? `by ${item.author}` : "",
+    givingUp.age ? "" : ageLabel || "",
+    givingUp.threads ? "" : unresolvedLabel,
+    showAuthor && !givingUp.author ? `by ${item.author}` : "",
     mergedLabel,
     transitLabel,
   ]
     .filter(Boolean)
     .join("  ")
-  // The boolean was doing two jobs here. This one is "this row hangs under
-  // something, so say which repo it belongs to" — unchanged in meaning.
-  const repoLabel = depthOf(item) > 0 ? item.repo : ""
-  const fixedWidth =
-    2 +
-    prefix.length +
-    2 /* health */ +
-    2 /* turn */ +
-    7 +
-    repoLabel.length +
-    suffix.length +
-    6
-  const titleMax = Math.max(20, cols - fixedWidth)
+  // Never below 1: with everything given up the row is as short as it can be, and
+  // a negative budget would hand `truncate` nonsense. A frame that narrow has
+  // bigger problems than this row.
+  const titleMax = Math.max(1, cols - widthOf())
 
   return (
     <Box>
@@ -2686,7 +2758,7 @@ const ItemRow = ({
       >
         {truncate(item.title, titleMax) + "  "}
       </Text>
-      {repoLabel ? <Text dimColor>{repoLabel}</Text> : null}
+      {repoLabel && !givingUp.repo ? <Text dimColor>{repoLabel}</Text> : null}
       {/* Follows the turn arrow, because an unresolved thread is not by itself
           a claim on you: GitHub keeps a thread open until someone clicks
           Resolve conversation, so replying leaves the count exactly where it
@@ -2695,28 +2767,32 @@ const ItemRow = ({
           from the arrow reading "not your turn" in grey. Never dimmed on an
           unknown turn (no login, no lastActor): a count we cannot attribute is
           still worth seeing. */}
-      {unresolvedLabel ? (
+      {unresolvedLabel && !givingUp.threads ? (
         <Text bold={!spokeLast} color={spokeLast ? "#888888" : "#FF8700"}>
           {"  " + unresolvedLabel}
         </Text>
       ) : null}
-      {showAuthor ? (
+      {showAuthor && !givingUp.author ? (
         <Text dimColor italic>
           {"  by " + item.author}
         </Text>
       ) : null}
       {/* Age last, so every row ends on the date — a consistent right edge. */}
-      {ageLabel ? <Text dimColor>{"  " + ageLabel}</Text> : null}
+      {ageLabel && !givingUp.age ? (
+        <Text dimColor>{"  " + ageLabel}</Text>
+      ) : null}
       {/* Except for the three seconds a row is on its way out. */}
       {mergedLabel ? (
-        <Text bold color={MERGED_COLOUR}>
-          {"  " + mergedLabel}
-        </Text>
+        <>
+          <Text>{"  "}</Text>
+          <Pill color={MERGED_COLOUR}>{mergedLabel}</Pill>
+        </>
       ) : null}
       {transitLabel ? (
-        <Text bold color={TRANSIT_COLOUR[transient!]}>
-          {"  " + transitLabel}
-        </Text>
+        <>
+          <Text>{"  "}</Text>
+          <Pill color={TRANSIT_COLOUR[transient!]}>{transitLabel}</Pill>
+        </>
       ) : null}
     </Box>
   )
