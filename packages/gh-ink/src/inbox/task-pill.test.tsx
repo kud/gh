@@ -3,7 +3,7 @@ import { EventEmitter } from "node:events"
 import React from "react"
 import { render } from "ink"
 import { glyphs } from "@kud/glyphs"
-import { App } from "./inbox.js"
+import { App, COLS } from "./inbox.js"
 import type { TaskRow, Section } from "./inbox.js"
 
 /*
@@ -100,13 +100,16 @@ describe("task row pill", () => {
   // label alone the pill overflows by exactly its two caps, and the frame is
   // sized to fill the terminal — so one column too many scrolls the whole panel
   // instead of clipping the row.
+  //
+  // Asserted against COLS, never against the mount width. COLS is sampled from
+  // the REAL terminal when the module loads, so a budget checked against the
+  // FakeStdout passes or fails on how wide the window running the suite happens
+  // to be — which this spec did, green at one width and red at another an hour
+  // later, saying nothing about the code either time.
   it("keeps the row inside the frame when the summary is far too long", async () => {
-    const frame = await mount(
-      row({ summary: "x".repeat(400), pill: "epic" }),
-      80,
-    )
+    const frame = await mount(row({ summary: "x".repeat(400), pill: "epic" }))
     expect(frame).toContain("epic")
     for (const line of frame.split("\n"))
-      expect([...line].length).toBeLessThanOrEqual(80)
+      expect([...line].length).toBeLessThanOrEqual(COLS + 4)
   })
 })

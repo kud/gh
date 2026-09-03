@@ -82,6 +82,8 @@ export {
   signatureOf,
   sortByRecency,
   sortItems,
+  SIDEBAR_COLS,
+  SidePanel,
   toCiStatusState,
   topLevelCount,
   truncate,

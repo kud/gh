@@ -11,6 +11,12 @@ export {
   HealthPanel,
   type HealthPanelProps,
 } from "./components/health-panel.js"
+export {
+  SidePanel,
+  SIDEBAR_COLS,
+  type Sidebar,
+  type SidebarRow,
+} from "./components/side-panel.js"
 export { renderMarkdown } from "./lib/markdown.js"
 export {
   healthDisplay,
