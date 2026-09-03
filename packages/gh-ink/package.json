@@ -49,7 +49,7 @@
   },
   "dependencies": {
     "@kud/gh": "0.9.0",
-    "@kud/ink-ui": "0.17.0",
+    "@kud/ink-ui": "0.18.0",
     "zx": "8.8.5"
   },
   "devDependencies": {

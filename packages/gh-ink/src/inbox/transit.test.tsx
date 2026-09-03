@@ -5,6 +5,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import React from "react"
 import { render } from "ink"
+import { glyphs } from "@kud/glyphs"
 import { App, TAB_MARK, tabLabel, TRANSIT_HOLD_MS } from "./inbox.js"
 import type { GHItem, Section, TaskRow } from "./inbox.js"
 
@@ -235,6 +236,30 @@ describe("applying a refresh", () => {
     // left by teleporting to the end reads as an arrival.
     expect(frame.indexOf(LEAVES)).toBeGreaterThan(frame.indexOf(MOVES))
     expect(frame).toContain(ARRIVES)
+    stop()
+  })
+
+  // In a pill, not in trailing text. The marker sits at the end of the row
+  // beside the dim age and author cells, so as plain words it read as one more
+  // column of metadata — which is the opposite of a marker that has to survive
+  // being noticed. Pinned on the caps rather than on the colour: the frame a
+  // test renders carries no colour at all, which is also the reader this has to
+  // work for.
+  it("draws each marker as a pill, not as trailing text", async () => {
+    const { stdout, stdin, stop } = await mount()
+    stdin.press("r")
+    await settle()
+    await settle()
+    await advance(50)
+    stdin.press("r")
+    await settle()
+    await settle()
+
+    const frame = stdout.lastFrame()
+    for (const marker of ["NEW", "GONE", "UPDATED"])
+      expect(frame).toContain(
+        `${glyphs.plCapLeft}${marker}${glyphs.plCapRight}`,
+      )
     stop()
   })
 
