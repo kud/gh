@@ -3506,12 +3506,23 @@ const BrowseScreen = ({
   // Scoped to what this tab draws, not to the marks as a whole: a mark now
   // waits for its own tab to be opened, so an untouched tab would otherwise
   // keep the ticker running against rows nobody can see.
-  // The rail is opt-in per session rather than always-on, because it is not free:
-  // it takes its columns out of the zone where the PR rows end — repo name and
-  // age, right-aligned so every row finishes on a date. Open it to plan, close it
-  // to work.
-  const [railOpen, setRailOpen] = useState(false)
+  // Open by default wherever a host supplies one. A rail you have to remember to
+  // ask for is a rail you do not consult, and the roadmap is the half of the
+  // picture the tabs cannot show at all — it earns its columns by being there.
+  // `i` still closes it for the stretches where the list wants the whole width.
+  const [railOpen, setRailOpen] = useState(true)
   const showRail = railOpen && !!sidebar
+  // Which half of the screen owns the arrow keys. Two regions, one at a time —
+  // the alternative is a second visible cursor and no way to tell which one ↵
+  // would act on.
+  const [railFocus, setRailFocus] = useState(false)
+  const [railCursor, setRailCursor] = useState(0)
+  const railRows = sidebar?.rows ?? []
+  // Focus cannot outlive what it was pointing at: a rail closed while focused,
+  // or one that came back shorter, would otherwise leave the arrows driving a row
+  // nobody can see.
+  const railActive = showRail && railFocus && railRows.length > 0
+  const railAt = Math.min(railCursor, Math.max(0, railRows.length - 1))
   // What the LIST has, which is the frame minus whatever the rail took. Computed
   // once here and handed down: a row cannot see the rail, and a budget that does
   // not know about it overflows by exactly the rail's width.
@@ -3654,8 +3665,56 @@ const BrowseScreen = ({
     // worse than an absent one — it reads as a broken feature rather than as a
     // surface that does not have it.
     if (input === "i" && sidebar) {
-      setRailOpen((open) => !open)
+      setRailOpen((open) => {
+        // Closing it hands the arrows back. Focus left behind on a hidden rail is
+        // the one state where nothing on screen says which region ↵ would act on.
+        if (open) setRailFocus(false)
+        return !open
+      })
       return
+    }
+    // Tab crosses between the two regions, and only ever between them: it is the
+    // one key in this UI that means "somewhere else on this screen", where ←→
+    // already mean "another tab" and ↑↓ mean "another row".
+    if (key.tab && showRail) {
+      setRailFocus((f) => !f)
+      return
+    }
+
+    // From here down the rail owns the keyboard. Placed after the modal branches
+    // above — help, search and the repo picker are overlays and outrank a focus
+    // region — and before every list binding below, which would otherwise move a
+    // cursor the reader is not looking at.
+    if (railActive) {
+      if (key.upArrow || input === "k") {
+        setRailCursor((c) => Math.max(0, c - 1))
+        return
+      }
+      if (key.downArrow || input === "j") {
+        setRailCursor((c) => Math.min(railRows.length - 1, c + 1))
+        return
+      }
+      if (key.escape) {
+        setRailFocus(false)
+        return
+      }
+      if (key.return || input === "o") {
+        const row = railRows[railAt]
+        // Silent where the host gave no URL. That is a fact about the surface
+        // rather than a failure the reader can act on, and a flash saying so
+        // would be noise on every press.
+        if (row?.url) {
+          quietly`open ${row.url}`.catch(() => {})
+          showFlash(`↗ Opened ${row.key}`)
+        }
+        return
+      }
+      // Everything the rail does not claim still works while it holds focus —
+      // `r`, `q`, `?`, `i`, tab — because those are about the screen, not about
+      // whichever half of it you are standing in. Only the row-level bindings
+      // below are shut out.
+      if (input !== "r" && input !== "q" && !key.leftArrow && !key.rightArrow)
+        return
     }
     if (key.escape && search != null) {
       setSearch(null)
@@ -4046,8 +4105,19 @@ const BrowseScreen = ({
   // that matter — open the checkout, copy the group — are exactly the ones a
   // fixed strip would leave unnamed. A selectable row that advertises nothing is
   // a row nobody presses.
-  const hints: [string, string][] =
-    activeItem?.kind === "repo-header"
+  const hints: [string, string][] = railActive
+    ? // The rail's own keymap while it holds focus, not the list's with a line
+      // bolted on. A footer advertising `m actions` beside a cursor that cannot
+      // reach a row is worse than a short footer: it names a key that does
+      // nothing where you are standing.
+      [
+        ["↑↓", "initiative"],
+        ["↵", "open"],
+        ["⇥/esc", "back to list"],
+        ["?", "help"],
+        ["q", "quit"],
+      ]
+    : activeItem?.kind === "repo-header"
       ? [
           ["↑↓", "nav"],
           ["←→", "tab"],
@@ -4064,12 +4134,11 @@ const BrowseScreen = ({
           ["m", "actions"],
           // Advertised only where it does something, and named for what it
           // shows rather than for the furniture: nobody wants "a sidebar".
-          ...(sidebar
-            ? ([["i", railOpen ? "hide" : sidebar.title.toLowerCase()]] as [
-                string,
-                string,
-              ][])
-            : []),
+          ...(showRail
+            ? ([["⇥", sidebar!.title.toLowerCase()]] as [string, string][])
+            : sidebar
+              ? ([["i", sidebar.title.toLowerCase()]] as [string, string][])
+              : []),
           ["?", "help"],
           ["q", "quit"],
         ]
@@ -4256,7 +4325,12 @@ const BrowseScreen = ({
           ) : null}
         </Box>
         {showRail && sidebar ? (
-          <SidePanel sidebar={sidebar} height={listHeight} />
+          <SidePanel
+            sidebar={sidebar}
+            height={listHeight}
+            focused={railActive}
+            cursor={railAt}
+          />
         ) : null}
       </Box>
 
