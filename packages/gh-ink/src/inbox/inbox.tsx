@@ -2389,15 +2389,21 @@ const TRANSIT_COLOUR: Record<Transient, string> = {
   "moved-in": "#FF8700",
   "moved-out": "#FF8700",
 }
+// Lower case, like every other pill on the row. The capitals were doing a job
+// back when these were bare coloured words competing with a line of dim metadata
+// for attention — a fill does that job now, and once it does, shouting on top of
+// it is just shouting. `epic` and `merged` sitting on the same row in the same
+// register is the point: they are the same KIND of thing, a word about the row
+// rather than another of its attributes.
 const TRANSIT_LABEL: Record<Transient, string> = {
-  in: "NEW",
-  out: "GONE",
-  changed: "UPDATED",
-  // Never GONE. The row is still on the board, one tab over, and telling you it
+  in: "new",
+  out: "gone",
+  changed: "updated",
+  // Never `gone`. The row is still on the board, one tab over, and telling you it
   // has gone is the marker lying about work you still own — which was the whole
   // failure: an epic moving tab said nothing at all and simply vanished.
-  "moved-in": "MOVED",
-  "moved-out": "MOVED",
+  "moved-in": "moved",
+  "moved-out": "moved",
 }
 // Both directions of travel, so a mark can say which end of a move it is. A
 // departure thins to a dot wherever it is going; an arrival fills in from one.
@@ -2573,9 +2579,13 @@ const ItemRow = ({
     const transitIcon = !transient
       ? " "
       : isDeparture(transient)
-        ? (TRANSIT_OUT_FRAMES[transitFrame % TRANSIT_OUT_FRAMES.length] as string)
+        ? (TRANSIT_OUT_FRAMES[
+            transitFrame % TRANSIT_OUT_FRAMES.length
+          ] as string)
         : isArrival(transient)
-          ? (TRANSIT_IN_FRAMES[transitFrame % TRANSIT_IN_FRAMES.length] as string)
+          ? (TRANSIT_IN_FRAMES[
+              transitFrame % TRANSIT_IN_FRAMES.length
+            ] as string)
           : "\u25C9"
     // The prefix term is new here and easy to miss: a task row had no indent
     // to price until stories became tasks hanging under an epic, so this
@@ -2730,7 +2740,7 @@ const ItemRow = ({
     item.activityAge && item.activityAge !== item.age
       ? `${item.activityAge} · ${item.age}`
       : item.age
-  const mergedLabel = merged ? "MERGED" : ""
+  const mergedLabel = merged ? "merged" : ""
   // Never both: a row merged from here is already being announced, and stacking
   // GONE onto MERGED would report one departure twice.
   // Two of these are pills, so the joined string under-prices them by exactly

@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest"
 import { EventEmitter } from "node:events"
 import React from "react"
 import { render } from "ink"
+import { glyphs } from "@kud/glyphs"
 import { App, LEAVING_HOLD_MS, MERGED_FRAME_MS } from "./inbox.js"
 import type { DetailContext, GHItem, Section } from "./inbox.js"
 
@@ -134,9 +135,12 @@ describe("a closed row", () => {
     const frame = stdout.lastFrame()
     // The word, not the colour: kud is colourblind, so a test that only checked
     // for grey would pass against a row nobody could read.
-    expect(frame).toContain("GONE")
+    expect(frame).toContain("gone")
     expect(frame).toContain("the issue being closed")
-    expect(frame.match(/GONE/g)).toHaveLength(1)
+    // Exactly one row wears it. Matched on the PILL rather than the bare word:
+    // lower case reads better beside `epic` but costs the uniqueness the capitals
+    // had, and "gone" is an ordinary word that can turn up in a title.
+    expect(frame.match(new RegExp(`${glyphs.plCapLeft}gone${glyphs.plCapRight}`, "g"))).toHaveLength(1)
     stop()
   })
 
@@ -148,7 +152,7 @@ describe("a closed row", () => {
 
     const frame = stdout.lastFrame()
     expect(frame).not.toContain("the issue being closed")
-    expect(frame).not.toContain("GONE")
+    expect(frame).not.toContain("gone")
     // The guard: without it this would pass just as well if closing had blanked
     // the whole list, which is the failure mode a "not.toContain" cannot see.
     expect(frame).toContain("a bystander that must not leave")
@@ -160,7 +164,7 @@ describe("a closed row", () => {
     await after(MERGED_FRAME_MS * 4)
 
     const frame = stdout.lastFrame()
-    expect(frame).not.toContain("GONE")
+    expect(frame).not.toContain("gone")
     expect(frame).toContain("the issue being closed")
     stop()
   })
