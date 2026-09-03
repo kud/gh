@@ -33,6 +33,11 @@ import {
 } from "./diff.js"
 import type { Transient } from "./diff.js"
 import {
+  SidePanel,
+  SIDEBAR_COLS,
+  type Sidebar,
+} from "../components/side-panel.js"
+import {
   FooterHints,
   LoadingScreen,
   Pill,
@@ -2404,11 +2409,19 @@ const ItemRow = ({
   prefix = "",
   parent,
   sparkFrame = 0,
+  cols = COLS,
 }: {
   item: AnyItem
   active: boolean
   gap?: boolean
   login?: string
+  /**
+   * Columns available to this row, which is NOT always the frame width: a rail
+   * beside the list takes its share, and a budget that does not know the rail is
+   * there overflows by exactly the rail. Defaulted so a host that draws no rail
+   * writes nothing.
+   */
+  cols?: number
   /**
    * This row's tree glyphs, already assembled — see `treePrefix`. Empty for a
    * top-level row.
@@ -2500,7 +2513,7 @@ const ItemRow = ({
     // answers by scrolling the whole panel rather than clipping the row.
     const titleMax = Math.max(
       20,
-      COLS -
+      cols -
         item.key.length -
         note.length -
         (item.pill ? pillWidth(item.pill) + 1 : 0) -
@@ -2653,7 +2666,7 @@ const ItemRow = ({
     repoLabel.length +
     suffix.length +
     6
-  const titleMax = Math.max(20, COLS - fixedWidth)
+  const titleMax = Math.max(20, cols - fixedWidth)
 
   return (
     <Box>
@@ -3260,10 +3273,20 @@ const BrowseScreen = ({
   onLeave,
   transients,
   onTabChange,
+  sidebar,
 }: {
   brand: string
   sections: Section[]
   login: string
+  /**
+   * A rail of containers standing beside the list — initiatives, epics, whatever
+   * the host groups its work under. Absent draws no rail and costs no columns.
+   *
+   * Deliberately not folded into `sections`: a tab answers "what state is this
+   * in", and the whole reason the rail exists is that a container has no state of
+   * its own to answer with.
+   */
+  sidebar?: Sidebar
   /** URLs of rows merged from this cockpit, still inside their hold. */
   mergedUrls?: string[]
   /** URLs of rows closed or dismissed from here, still inside their hold. */
@@ -3483,6 +3506,17 @@ const BrowseScreen = ({
   // Scoped to what this tab draws, not to the marks as a whole: a mark now
   // waits for its own tab to be opened, so an untouched tab would otherwise
   // keep the ticker running against rows nobody can see.
+  // The rail is opt-in per session rather than always-on, because it is not free:
+  // it takes its columns out of the zone where the PR rows end — repo name and
+  // age, right-aligned so every row finishes on a date. Open it to plan, close it
+  // to work.
+  const [railOpen, setRailOpen] = useState(false)
+  const showRail = railOpen && !!sidebar
+  // What the LIST has, which is the frame minus whatever the rail took. Computed
+  // once here and handed down: a row cannot see the rail, and a budget that does
+  // not know about it overflows by exactly the rail's width.
+  const listCols = showRail ? COLS - SIDEBAR_COLS : COLS
+
   const [sparkFrame, setSparkFrame] = useState(0)
   const sparkling =
     (mergedUrls?.length ?? 0) > 0 ||
@@ -3614,6 +3648,13 @@ const BrowseScreen = ({
     if (input === "f" && allRepos.length > 0) {
       setRepoCursor(0)
       setRepoPicker(true)
+      return
+    }
+    // Only where there is a rail to open. A key that visibly does nothing is
+    // worse than an absent one — it reads as a broken feature rather than as a
+    // surface that does not have it.
+    if (input === "i" && sidebar) {
+      setRailOpen((open) => !open)
       return
     }
     if (key.escape && search != null) {
@@ -4021,6 +4062,14 @@ const BrowseScreen = ({
           ["←→", "tab"],
           ["↵/d", "open"],
           ["m", "actions"],
+          // Advertised only where it does something, and named for what it
+          // shows rather than for the furniture: nobody wants "a sidebar".
+          ...(sidebar
+            ? ([["i", railOpen ? "hide" : sidebar.title.toLowerCase()]] as [
+                string,
+                string,
+              ][])
+            : []),
           ["?", "help"],
           ["q", "quit"],
         ]
@@ -4126,71 +4175,88 @@ const BrowseScreen = ({
         </Box>
       ) : null}
 
-      <Box flexDirection="column" minHeight={listHeight}>
-        <Backdrop dimmed={!!overlay} absolute={!!overlay} height={listHeight}>
-          <Box flexDirection="column" flexGrow={1}>
-            {visibleItems.map((item, i) => (
-              <ItemRow
-                // Prefix the absolute index so keys stay unique even when the
-                // same repo header recurs down a time-sorted list (Done). The
-                // sum viewStart + i is stable per underlying item across scroll.
-                key={`${viewStart + i}:${
-                  item.kind === "task"
-                    ? (item.instanceKey ?? item.key)
-                    : item.kind === "repo-header"
-                      ? `header:${item.repo}`
-                      : item.kind === "subgroup-header"
-                        ? `subgroup:${item.label}`
-                        : item.kind === "show-more"
-                          ? `show-more:${item.hidden[0]?.repo ?? i}`
-                          : item.kind === "show-less"
-                            ? `show-less:${item.toHide[0]?.repo ?? i}`
-                            : `${item.repo}/${item.number}`
-                }`}
-                item={item}
-                active={viewStart + i === cursor}
-                login={login}
-                merged={
-                  (item.kind === "pr" || item.kind === "issue") &&
-                  !!mergedUrls?.includes(item.url)
-                }
-                leaving={
-                  (item.kind === "pr" || item.kind === "issue") &&
-                  !!leavingUrls?.includes(item.url)
-                }
-                transient={transientOf(transients, item, section.id)}
-                // Computed against section.items, never the visible slice: a
-                // window boundary is not the end of a group, and slicing first
-                // would draw a closing corner wherever the scroll happens to cut.
-                prefix={treePrefix(section.items, viewStart + i)}
-                parent={
-                  item.kind === "task" &&
-                  depthOf(section.items[viewStart + i + 1]) > depthOf(item)
-                }
-                sparkFrame={sparkFrame}
-                // `i > 0` is window-relative and stays that way: the window's
-                // first row never draws its gap, and fitCount does not charge
-                // for one. The rule itself is gapsAbove, shared with fitCount so
-                // the two cannot drift.
-                gap={i > 0 && gapsAbove(section.items, viewStart + i)}
-              />
-            ))}
-          </Box>
-          {hasMore && (
-            <Text dimColor>
-              {"  "}↓ {section.items.length - viewStart - visibleCount} more
-            </Text>
-          )}
-        </Backdrop>
-        {overlay ? (
-          <Box
-            flexGrow={1}
-            flexDirection="column"
-            justifyContent="center"
-            alignItems="center"
-          >
-            {overlay}
-          </Box>
+      {/* The rail stands BESIDE the list rather than above or below it, and takes
+          a fixed width out of the row: the list is the thing that has to give,
+          because it is the only half that can truncate. `width` is stated rather
+          than left to flexGrow — a row long enough to overflow compresses every
+          flexible sibling, and the rail is exactly the sort of narrow column that
+          would collapse first. */}
+      <Box>
+        <Box
+          flexDirection="column"
+          minHeight={listHeight}
+          width={showRail ? listCols : undefined}
+          flexShrink={0}
+        >
+          <Backdrop dimmed={!!overlay} absolute={!!overlay} height={listHeight}>
+            <Box flexDirection="column" flexGrow={1}>
+              {visibleItems.map((item, i) => (
+                <ItemRow
+                  // Prefix the absolute index so keys stay unique even when the
+                  // same repo header recurs down a time-sorted list (Done). The
+                  // sum viewStart + i is stable per underlying item across scroll.
+                  key={`${viewStart + i}:${
+                    item.kind === "task"
+                      ? (item.instanceKey ?? item.key)
+                      : item.kind === "repo-header"
+                        ? `header:${item.repo}`
+                        : item.kind === "subgroup-header"
+                          ? `subgroup:${item.label}`
+                          : item.kind === "show-more"
+                            ? `show-more:${item.hidden[0]?.repo ?? i}`
+                            : item.kind === "show-less"
+                              ? `show-less:${item.toHide[0]?.repo ?? i}`
+                              : `${item.repo}/${item.number}`
+                  }`}
+                  item={item}
+                  active={viewStart + i === cursor}
+                  login={login}
+                  merged={
+                    (item.kind === "pr" || item.kind === "issue") &&
+                    !!mergedUrls?.includes(item.url)
+                  }
+                  leaving={
+                    (item.kind === "pr" || item.kind === "issue") &&
+                    !!leavingUrls?.includes(item.url)
+                  }
+                  transient={transientOf(transients, item, section.id)}
+                  // Computed against section.items, never the visible slice: a
+                  // window boundary is not the end of a group, and slicing first
+                  // would draw a closing corner wherever the scroll happens to cut.
+                  prefix={treePrefix(section.items, viewStart + i)}
+                  parent={
+                    item.kind === "task" &&
+                    depthOf(section.items[viewStart + i + 1]) > depthOf(item)
+                  }
+                  sparkFrame={sparkFrame}
+                  cols={listCols}
+                  // `i > 0` is window-relative and stays that way: the window's
+                  // first row never draws its gap, and fitCount does not charge
+                  // for one. The rule itself is gapsAbove, shared with fitCount so
+                  // the two cannot drift.
+                  gap={i > 0 && gapsAbove(section.items, viewStart + i)}
+                />
+              ))}
+            </Box>
+            {hasMore && (
+              <Text dimColor>
+                {"  "}↓ {section.items.length - viewStart - visibleCount} more
+              </Text>
+            )}
+          </Backdrop>
+          {overlay ? (
+            <Box
+              flexGrow={1}
+              flexDirection="column"
+              justifyContent="center"
+              alignItems="center"
+            >
+              {overlay}
+            </Box>
+          ) : null}
+        </Box>
+        {showRail && sidebar ? (
+          <SidePanel sidebar={sidebar} height={listHeight} />
         ) : null}
       </Box>
 
@@ -4329,6 +4395,15 @@ export const App = ({
      * can decline to spend the last of it on a refresh nobody requested.
      */
     budget?: InboxBudget
+    /**
+     * A rail of containers to stand beside the list — initiatives, epics,
+     * whatever this host groups its work under. Omit it and no rail exists: no
+     * key, no hint, no columns spent.
+     *
+     * Part of the fetch result rather than a static prop because it is data, and
+     * data that goes stale the same way the rows do.
+     */
+    sidebar?: Sidebar
   }>
   cacheKey?: string
   // What this inbox is called, for the loading line. The shell is host-agnostic;
@@ -4623,6 +4698,11 @@ export const App = ({
     fetcher()
       .then((fresh) => {
         if (fresh.budget) setBudget(fresh.budget)
+        // Applied at once rather than through the manual-apply gate. That gate
+        // exists so the LIST cannot reshuffle under you mid-read; the rail holds
+        // no cursor and nothing is being read down it, so holding it back would
+        // only leave a stale roadmap standing beside fresh rows.
+        if (fresh.sidebar !== undefined) setSidebar(fresh.sidebar)
         if (cacheKey) writeCache(cacheKey, fresh)
         setRefreshing(false)
         setFetchedAt(Date.now())
@@ -4821,6 +4901,11 @@ export const App = ({
   const [budget, setBudget] = useState<InboxBudget | null>(() =>
     cacheKey ? (readCache(cacheKey)?.budget ?? null) : null,
   )
+  // Its own state rather than a field on the browse phase: the rail is not rows.
+  // It never enters the diff, never joins the union, and never waits on a tab's
+  // hold — putting it in there would have meant threading it through every
+  // setState that only ever meant to change the list.
+  const [sidebar, setSidebar] = useState<Sidebar | undefined>(undefined)
   // An automatic refresh declined itself. Worth saying: silence here is
   // indistinguishable from a cockpit that simply has nothing new, and the reader
   // would keep waiting for rows that were never coming.
@@ -4986,6 +5071,7 @@ export const App = ({
         onLeave={markLeaving}
         transients={transients}
         onTabChange={setVisibleTab}
+        sidebar={sidebar}
         ciStatusState={hasCiStatus ? ciStatusState : undefined}
         ciJob={ciJob}
         tabHelp={tabHelp}
