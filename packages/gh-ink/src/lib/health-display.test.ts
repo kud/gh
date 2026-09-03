@@ -32,6 +32,22 @@ describe("healthDisplay", () => {
     expect(new Set(glyphs).size).toBe(glyphs.length)
   })
 
+  /*
+   * Every glyph is exactly one column wide.
+   *
+   * This cell sits in the aligned zone left of the title, and every key and title
+   * on screen lines up off it — so a glyph that renders two columns wide shifts
+   * only the rows carrying it, which is the one failure a fixed cell exists to
+   * prevent. It is not hypothetical: `merged` and `closed` are Nerd Font icons
+   * chosen for meaning rather than for width, and the next one added will be too.
+   *
+   * Codepoint width, not rendered width — a font that draws a PUA glyph wide is
+   * beyond reach from here, and the string length is what the layout maths reads.
+   */
+  it("keeps every glyph to a single column", () => {
+    for (const h of ALL) expect([...healthGlyph(h)]).toHaveLength(1)
+  })
+
   // The invariant the map above states for itself, extended one cell right. The
   // turn column sits immediately beside the health column, so a mark that is
   // unique within the health map and equal to one of its glyphs is exactly as

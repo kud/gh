@@ -16,8 +16,24 @@ export const healthDisplay: Record<Health, { glyph: string; color: string }> = {
   pending: { glyph: "*", color: colors.warning },
   approved: { glyph: "✓", color: colors.success },
   waiting: { glyph: "·", color: colors.muted },
-  merged: { glyph: "»", color: colors.muted },
-  closed: { glyph: "×", color: colors.muted },
+  // The one glyph here that MEANS its state rather than merely differing from
+  // the others. `✓` and `✗` you never have to think about; `»` you did — it was
+  // chosen to suggest "moved through", which is a stretch nobody reads at a
+  // glance. This is Nerd Font's git-merge icon, written as an escape because raw
+  // PUA bytes get mangled by editors and diffs.
+  //
+  // The cost, stated rather than discovered: a terminal without a Nerd Font
+  // draws a box here where it used to draw a chevron. That is a trade this
+  // package has already made once — the inbox hardcodes the comment glyph at
+  // \u{f086} — and one state degrading to tofu is cheaper than ten states none
+  // of which say what they mean.
+  merged: { glyph: "\u{e727}", color: colors.muted },
+  // Nerd Font's closed-pull-request icon, for the same reason as `merged` above
+  // and with the same caveat about a font that lacks it. `×` had a second problem
+  // beyond being arbitrary: it is one stroke away from `✗` (ci failing) two rows
+  // up in this very map, and the shape-distinctness this file turns on is a
+  // silhouette test, not a codepoint one.
+  closed: { glyph: "\u{ebda}", color: colors.muted },
 }
 
 export const healthGlyph = (h: Health): string => healthDisplay[h].glyph
