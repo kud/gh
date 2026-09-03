@@ -1,7 +1,29 @@
 import type { AnyItem, GHItem, TaskRow, Section } from "./inbox.js"
 
-/** What happened to a row between two fetches. */
-export type Transient = "in" | "out" | "changed"
+/**
+ * What happened to a row between two fetches, IN ONE TAB.
+ *
+ * Five rather than three, because "gone" and "left this tab" are not the same
+ * news and a marker that conflates them lies about work that is still on the
+ * board. A row that moves between tabs is marked twice - `moved-out` where it
+ * was, `moved-in` where it landed - so it dissolves in the tab you were reading
+ * and coalesces in the one it went to. `in` and `out` keep their stronger
+ * meaning: arrived on the board, left it altogether.
+ */
+export type Transient = "in" | "out" | "changed" | "moved-in" | "moved-out"
+
+// A mark belongs to a row IN A SECTION, not to a row. The separator is NUL
+// because no section id or URL can contain one, so the two halves always split
+// back out cleanly.
+const MARK_SEP = "\u0000"
+
+/** The mark key for `row` as drawn in `sectionId`. */
+export const markKey = (sectionId: string, rowKey: string): string =>
+  `${sectionId}${MARK_SEP}${rowKey}`
+
+/** The row identity back out of a mark key. */
+export const rowKeyOfMark = (mark: string): string =>
+  mark.slice(mark.indexOf(MARK_SEP) + 1)
 
 // Stable identity for a row across fetches: the URL for anything from GitHub,
 // the ticket URL (or key) for Jira.
@@ -52,19 +74,52 @@ const renderedState = (item: AnyItem): string => {
 
 type Placed = { item: AnyItem; sectionId: string; index: number }
 
+// Keyed per SECTION, not per row, because "is this row still here" is a question
+// about a tab and the old board-wide index could not ask it. A block that moved
+// from one tab to another was present in both snapshots, so it earned no mark at
+// all and simply vanished from the tab you were reading - worst of all for an
+// epic, whose own summary and status never change because it moves only when its
+// children do. Cockpit also draws one epic in two tabs at once by design; a
+// board-wide key gave those two instances one shared mark.
 const indexRows = (sections: Section[]): Map<string, Placed> => {
   const out = new Map<string, Placed>()
   for (const section of sections) {
     section.items.forEach((item, index) => {
       const key = keyOf(item)
-      if (key) out.set(key, { item, sectionId: section.id, index })
+      if (key)
+        out.set(markKey(section.id, key), {
+          item,
+          sectionId: section.id,
+          index,
+        })
     })
   }
   return out
 }
 
+// Which rows are on the board at all, ignoring which tab holds them. The marks
+// are per tab; the COUNTS are not - a block moving between tabs is one thing
+// that happened, and reporting it as "1 gone · 1 new" would double-count a
+// single move in the one place that has to stay a headline.
+const rowsOf = (index: Map<string, Placed>): Map<string, Set<string>> => {
+  const out = new Map<string, Set<string>>()
+  for (const [mark, placed] of index) {
+    const key = rowKeyOfMark(mark)
+    const seen = out.get(key)
+    if (seen) seen.add(placed.sectionId)
+    else out.set(key, new Set([placed.sectionId]))
+  }
+  return out
+}
+
+const sameSections = (a: Set<string>, b: Set<string>): boolean =>
+  a.size === b.size && [...a].every((id) => b.has(id))
+
 export type DiffResult = {
-  /** Row key to what happened to it. Rows absent from this map are unchanged. */
+  /**
+   * Mark key (see `markKey`) to what happened to that row in that tab. Rows
+   * absent from this map are unchanged.
+   */
   transients: Map<string, Transient>
   /**
    * `next`, with departing rows spliced back in at the position they held in
@@ -109,34 +164,53 @@ const spliceBack = (next: Section[], leaving: Placed[]): Section[] => {
 export const diffSections = (prev: Section[], next: Section[]): DiffResult => {
   const before = indexRows(prev)
   const after = indexRows(next)
+  const boardBefore = rowsOf(before)
+  const boardAfter = rowsOf(after)
   const transients = new Map<string, Transient>()
   const leaving: Placed[] = []
 
-  for (const [key] of after) if (!before.has(key)) transients.set(key, "in")
+  // Arriving in this tab. Whether that is news about the BOARD depends on where
+  // the row was a moment ago: on it already means the row travelled, and saying
+  // NEW to a ticket you have been watching for a fortnight is the marker lying.
+  for (const [mark] of after)
+    if (!before.has(mark))
+      transients.set(
+        mark,
+        boardBefore.has(rowKeyOfMark(mark)) ? "moved-in" : "in",
+      )
 
-  for (const [key, was] of before) {
-    const now = after.get(key)
+  for (const [mark, was] of before) {
+    const now = after.get(mark)
     if (!now) {
-      transients.set(key, "out")
+      transients.set(
+        mark,
+        boardAfter.has(rowKeyOfMark(mark)) ? "moved-out" : "out",
+      )
       leaving.push(was)
     } else if (renderedState(was.item) !== renderedState(now.item)) {
-      transients.set(key, "changed")
+      transients.set(mark, "changed")
     }
   }
 
+  // Counted per ROW, so one move is one headline however many tabs it touched -
+  // and so an epic drawn in two tabs at once is not reported twice for the one
+  // edit.
   let added = 0
   let removed = 0
-  let changed = 0
-  for (const [, kind] of transients) {
-    if (kind === "in") added++
-    else if (kind === "out") removed++
-    else changed++
+  const changedRows = new Set<string>()
+  for (const [mark, kind] of transients)
+    if (kind === "changed") changedRows.add(rowKeyOfMark(mark))
+  for (const [key, sections] of boardAfter) {
+    const had = boardBefore.get(key)
+    if (!had) added += 1
+    else if (!sameSections(had, sections)) changedRows.add(key)
   }
+  for (const key of boardBefore.keys()) if (!boardAfter.has(key)) removed += 1
 
   return {
     transients,
     union: spliceBack(next, leaving),
-    counts: { added, removed, changed },
+    counts: { added, removed, changed: changedRows.size },
   }
 }
 
@@ -155,18 +229,25 @@ export const summariseDiff = (counts: DiffResult["counts"]): string => {
   return parts.join(" · ")
 }
 
-/** What the last refresh did to this row, if anything. */
+/**
+ * What the last refresh did to this row IN THIS TAB, if anything.
+ *
+ * The section id is not optional and cannot be defaulted: a row drawn in two
+ * tabs has two answers, and the whole point of the per-tab marks is that they
+ * can differ - `moved-out` where it was, `moved-in` where it went.
+ */
 export const transientOf = (
   transients: Map<string, Transient> | undefined,
   item: AnyItem,
+  sectionId: string,
 ): Transient | undefined => {
   if (!transients?.size) return undefined
   const key = keyOf(item)
-  return key ? transients.get(key) : undefined
+  return key ? transients.get(markKey(sectionId, key)) : undefined
 }
 
 /**
- * Row key → the id of the section (tab) the row sits in, for every key in
+ * Mark key → the id of the section (tab) the row sits in, for every key in
  * `marks`.
  *
  * Built from the union rather than from `next`, so a departing row is filed
@@ -181,7 +262,9 @@ export const tabsOfMarks = (
   for (const section of sections)
     for (const item of section.items) {
       const key = keyOf(item)
-      if (key && marks.has(key)) out.set(key, section.id)
+      if (!key) continue
+      const mark = markKey(section.id, key)
+      if (marks.has(mark)) out.set(mark, section.id)
     }
   return out
 }
