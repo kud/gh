@@ -162,7 +162,7 @@ describe("ExtensionTarget", () => {
     // teleporting rows off screen. What has not changed is the part this test
     // was written for — no refetch is involved anywhere in it.
     expect(frame).toContain("first row")
-    expect(frame).toContain("GONE")
+    expect(frame).toContain("gone")
     expect(frame).toContain("Muted #1")
 
     await after(LEAVING_HOLD_MS + 400)
