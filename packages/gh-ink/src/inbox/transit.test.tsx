@@ -5,8 +5,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import React from "react"
 import { render } from "ink"
-import { glyphs } from "@kud/glyphs"
-import { App, TAB_MARK, tabLabel, TRANSIT_HOLD_MS } from "./inbox.js"
+import { App, tabMarker, TRANSIT_HOLD_MS } from "./inbox.js"
 import type { GHItem, Section, TaskRow } from "./inbox.js"
 
 /*
@@ -218,7 +217,17 @@ describe("applying a refresh", () => {
     stop()
   })
 
-  it("says what it did to each row, in words", async () => {
+  /*
+   * The wording lives in the HEADER, and the rows keep only what is free.
+   *
+   * It used to sit at the end of each row, which cost the row columns it did not
+   * have: the label is inside the title's width budget, so a row that gained one
+   * paid by shedding its repo name or squeezing its summary, and reflowed at the
+   * exact moment you were reading it. The header segment is the one place on
+   * screen where a changing width costs nothing — a dashed filler absorbs the
+   * difference and nothing is aligned to its right.
+   */
+  it("says what it did, in words, in the header", async () => {
     const { stdout, stdin, stop } = await mount()
     stdin.press("r")
     await settle()
@@ -229,37 +238,32 @@ describe("applying a refresh", () => {
     await settle()
 
     const frame = stdout.lastFrame()
-    expect(frame).toContain("NEW")
-    expect(frame).toContain("GONE")
-    expect(frame).toContain("UPDATED")
+    const header = frame.split("\n").find((l) => l.includes("Cockpit")) ?? ""
+    expect(header).toContain("1 new")
+    expect(header).toContain("1 gone")
+    expect(header).toContain("1 moved")
+    stop()
+  })
+
+  // What the rows keep is what costs nothing: a glyph in a cell that is reserved
+  // whether or not it is occupied, and weight. Neither can reflow a row.
+  it("marks the rows themselves without a word", async () => {
+    const { stdout, stdin, stop } = await mount()
+    stdin.press("r")
+    await settle()
+    await settle()
+    await advance(50)
+    stdin.press("r")
+    await settle()
+    await settle()
+
+    const frame = stdout.lastFrame()
+    for (const word of ["NEW", "UPDATED", "MOVED"])
+      expect(frame).not.toContain(word)
     // The departing row is still drawn, and still where it was — a row that
     // left by teleporting to the end reads as an arrival.
     expect(frame.indexOf(LEAVES)).toBeGreaterThan(frame.indexOf(MOVES))
     expect(frame).toContain(ARRIVES)
-    stop()
-  })
-
-  // In a pill, not in trailing text. The marker sits at the end of the row
-  // beside the dim age and author cells, so as plain words it read as one more
-  // column of metadata — which is the opposite of a marker that has to survive
-  // being noticed. Pinned on the caps rather than on the colour: the frame a
-  // test renders carries no colour at all, which is also the reader this has to
-  // work for.
-  it("draws each marker as a pill, not as trailing text", async () => {
-    const { stdout, stdin, stop } = await mount()
-    stdin.press("r")
-    await settle()
-    await settle()
-    await advance(50)
-    stdin.press("r")
-    await settle()
-    await settle()
-
-    const frame = stdout.lastFrame()
-    for (const marker of ["NEW", "GONE", "UPDATED"])
-      expect(frame).toContain(
-        `${glyphs.plCapLeft}${marker}${glyphs.plCapRight}`,
-      )
     stop()
   })
 
@@ -433,7 +437,9 @@ describe("a change in a tab you are not on", () => {
 
     const frame = stdout.lastFrame()
     expect(frame).toContain(OTHER_MOVES)
-    expect(frame).toContain("UPDATED")
+    // The header, not the row: the wording moved there so a row gaining a mark
+    // could stop paying for it in columns.
+    expect(frame).toContain("1 moved")
     stop()
   })
 
@@ -444,7 +450,7 @@ describe("a change in a tab you are not on", () => {
     await advance(TRANSIT_HOLD_MS + 500)
 
     const frame = stdout.lastFrame()
-    expect(frame).not.toContain("UPDATED")
+    expect(frame).not.toContain("1 moved")
     // Still the tab it settled on, not a blanked list.
     expect(frame).toContain(OTHER_MOVES)
     expect(frame).toContain(OTHER_STAYS)
@@ -486,15 +492,20 @@ describe("the tab marker", () => {
       .split("\n")
       .find((line) => line.includes("Open") && line.includes("Review")) ?? ""
 
+  // Any frame of the pulse. The marker breathes rather than sitting still, so a
+  // spec naming one glyph would be racing the ticker; what is being pinned is
+  // that SOMETHING is there, on that tab and not the other.
+  const PULSING = /[·○◎◉]/
+
   it("sits on the tab holding news, and nowhere else", async () => {
     const { stdout, stop } = await mountTwoTabs()
     await advance(TRANSIT_HOLD_MS + 500)
 
     const bar = tabBar(stdout.lastFrame())
     expect(bar).toBeTruthy()
-    expect(bar).toContain(`${TAB_MARK} Review`)
+    expect(bar.slice(0, bar.indexOf("Review"))).toMatch(PULSING)
     // Not on the tab you are already reading, which has nothing to report.
-    expect(bar).not.toContain(`${TAB_MARK} Open`)
+    expect(bar.slice(0, bar.indexOf("Open"))).not.toMatch(PULSING)
     stop()
   })
 
@@ -506,18 +517,35 @@ describe("the tab marker", () => {
 
     const bar = tabBar(stdout.lastFrame())
     expect(bar).toBeTruthy()
-    expect(bar).not.toContain(TAB_MARK)
+    expect(bar).not.toMatch(PULSING)
     stop()
   })
 
-  it("reserves its cell on every tab while any tab wears one", () => {
+  /*
+   * The invariant the whole marker exists to keep, and the one it used to break.
+   *
+   * The cell is two columns on EVERY tab, always — not only while something is
+   * marked. It used to collapse to nothing on a quiet board, which slid the whole
+   * bar sideways twice per refresh: out when news landed, back when the last tab
+   * settled. Two columns permanently is the cheaper trade by a distance, because
+   * the bar shifted at exactly the moment you were trying to read it.
+   */
+  it("reserves its cell on every tab, marked or not", () => {
     const marked = new Set(["review"])
-    expect(tabLabel("Review", marked, "review")).toBe(`${TAB_MARK} Review`)
-    // Same indent on the unmarked tab, so the bar does not shift sideways
-    // every time one of them settles.
-    expect(tabLabel("Open", marked, "open")).toBe("  Open")
-    // And no dead indent at all on a bar with nothing to report.
-    expect(tabLabel("Open", new Set(), "open")).toBe("Open")
+    expect(tabMarker(marked, "review")).toMatch(PULSING)
+    expect(tabMarker(marked, "review")).toHaveLength(2)
+    // Same width on the unmarked tab, so the bar does not shift when one settles.
+    expect(tabMarker(marked, "open")).toBe("  ")
+    // And the same again on a bar with nothing at all to report.
+    expect(tabMarker(new Set(), "open")).toBe("  ")
+  })
+
+  it("cycles through the pulse rather than holding one glyph", () => {
+    const marked = new Set(["review"])
+    const frames = [0, 1, 2, 3].map((f) => tabMarker(marked, "review", f))
+    expect(new Set(frames).size).toBe(4)
+    // And wraps, so a long hold keeps breathing instead of stopping on the last.
+    expect(tabMarker(marked, "review", 4)).toBe(frames[0])
   })
 })
 
@@ -598,7 +626,11 @@ const mountTasks = async () => {
 describe("applying a refresh on task rows", () => {
   withFakeClock()
 
-  it("says what it did to each row, in words", async () => {
+  // Same as the GitHub rows: the wording is in the header, where a changing
+  // width costs nothing, and the rows keep the glyph, which costs nothing either.
+  // A task row's budget is tighter than a PR row's, not looser — `life` draws
+  // them at full width with a note hanging off the end.
+  it("says what it did, in words, in the header", async () => {
     const { stdout, stdin, stop } = await mountTasks()
     stdin.press("r")
     await settle()
@@ -609,9 +641,14 @@ describe("applying a refresh on task rows", () => {
     await settle()
 
     const frame = stdout.lastFrame()
-    expect(frame).toContain("NEW")
-    expect(frame).toContain("GONE")
-    expect(frame).toContain("UPDATED")
+    // This surface is `life`, not the cockpit — the brand is whatever the host
+    // passed as `title`, so the line is found by what the header always carries.
+    const header = frame.split("\n").find((l) => l.includes("@kud")) ?? ""
+    expect(header).toContain("1 new")
+    expect(header).toContain("1 gone")
+    expect(header).toContain("1 moved")
+    for (const word of ["NEW", "UPDATED", "MOVED"])
+      expect(frame).not.toContain(word)
     expect(frame).toContain(T_ARRIVES)
     stop()
   })
