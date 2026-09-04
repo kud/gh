@@ -42,6 +42,20 @@ export type InboxConfig = {
    * the owner that contains it. Repos matching nothing sort last, together.
    */
   repoPriority: readonly string[]
+  /**
+   * Label ranking, best first, deciding which two labels a row shows when it
+   * carries more than two. An entry ending in `*` matches by prefix; anything
+   * else must equal the label name exactly. Labels matching nothing share the
+   * last rank and are ordered among themselves by name.
+   *
+   * Empty like everything else here, and that is load-bearing rather than
+   * merely consistent: `plan`, `spike` and `app:*` are one reader's filing
+   * conventions, invented in their own notes, and a library that shipped them
+   * as defaults would be ranking a stranger's labels by a scheme they have
+   * never seen. Empty means a labelled row shows its labels in name order,
+   * which is honest about knowing nothing.
+   */
+  labelPriority: readonly string[]
   profiles: readonly RepoProfile[]
   /**
    * Fallback directory holding checkouts, for repos in no profile that names one
@@ -73,6 +87,7 @@ export type InboxConfig = {
 
 const EMPTY: InboxConfig = {
   repoPriority: [],
+  labelPriority: [],
   profiles: [],
   cacheNamespace: "gh-ink",
   cacheTtlMs: 600_000,

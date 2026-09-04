@@ -26,7 +26,7 @@ export const IssueView = ({
     repo: string
     url: string
     title?: string
-    labels?: string[]
+    labels?: readonly string[]
   }
   login: string
   onBack: () => void

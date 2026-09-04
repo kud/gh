@@ -33,6 +33,17 @@ export type CockpitConfig = {
    * one repo, so a repo can outrank the owner containing it.
    */
   repoPriority?: readonly string[]
+  /**
+   * Label ranking, best first — which two labels a row shows when it carries
+   * more than two. `plan` matches that label exactly; `app:*` matches every
+   * label starting `app:`. Unranked labels sort last, by name.
+   *
+   * Worth setting even when it looks like a nicety: with nothing here a row
+   * carrying `plan` and `app:cockpit` shows them in name order, so `app:*`
+   * takes the first slot and the label saying what KIND of thing the row is
+   * takes the second. On a worklist of plan issues that is the wrong way round.
+   */
+  labelPriority?: readonly string[]
   /** Default filter, which `--include` / `--exclude` override. */
   filter?: RepoFilter
   /** Named filters, invoked as `gh-cockpit <name>`. */

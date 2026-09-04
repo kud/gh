@@ -114,6 +114,18 @@ export type GHItem = {
   // Who spoke last, anywhere on the item. Compared against the viewer's login
   // at render time to decide whose turn it is.
   lastActor?: string
+  /**
+   * The item's labels, unordered and by name only — which is all GitHub gives
+   * without the timeline API. `labels(first: N)` orders by when the label was
+   * created IN THE REPO, never by when it was applied here, so "the newest two"
+   * is not derivable and the row ranks them against the host's `labelPriority`
+   * instead.
+   *
+   * Optional because a `minimal` fetch omits the selection entirely — these
+   * fields vanish rather than degrade — so undefined means "not asked for",
+   * which the row draws as nothing at all rather than as an unlabelled item.
+   */
+  labels?: readonly string[]
   detail?: GHDetail
   /**
    * Where YOU stand on this row, when the host knows it per row rather than per
@@ -498,6 +510,24 @@ export const repoPriority = (repo: string): number => {
     p.endsWith("/") ? repo.startsWith(p) : repo === p,
   )
   return i === -1 ? order.length : i
+}
+
+// The same idea for labels, with two deliberate differences. An entry ending in
+// `*` matches by prefix — `app:*` covers every per-app label without listing
+// them — where the repo form uses a trailing `/`, because `/` is a real
+// separator in a repo name and `*` is not a character a label may contain.
+//
+// And unmatched labels rank Infinity rather than `order.length`, so they all
+// share one rank and the localeCompare tiebreak orders them among themselves.
+// With `order.length` an unmatched label would tie with nothing below it and the
+// distinction would be invisible — same behaviour today, but it stops being the
+// same the moment a rank is compared against anything other than another rank.
+export const labelPriority = (name: string): number => {
+  const order = inboxConfig().labelPriority
+  const i = order.findIndex((p) =>
+    p.endsWith("*") ? name.startsWith(p.slice(0, -1)) : name === p,
+  )
+  return i === -1 ? Infinity : i
 }
 
 // Repo grouping is the OUTER key and is deliberately unchanged — priority tier,
@@ -2754,6 +2784,18 @@ const ItemRow = ({
   // The boolean was doing two jobs here. This one is "this row hangs under
   // something, so say which repo it belongs to" — unchanged in meaning.
   const repoLabel = depthOf(item) > 0 ? item.repo : ""
+  /*
+   * At most two labels, best first by the host's ranking and by name after
+   * that. Two because the cap is the whole design: a row that shows every label
+   * has stopped being a row and become a paragraph, and the title is what it
+   * came for.
+   *
+   * Sorted on a copy — `item.labels` is the caller's array and sorting in place
+   * would reorder it under them.
+   */
+  const labelNames = [...(item.labels ?? [])]
+    .sort((a, b) => labelPriority(a) - labelPriority(b) || a.localeCompare(b))
+    .slice(0, 2)
 
   /*
    * Everything after the title is CONTEXT, and context that costs you the thing
@@ -2774,7 +2816,54 @@ const ItemRow = ({
    * moment, and a row that drops its own headline to keep a repo name has the
    * priority exactly backwards.
    */
-  const givingUp = { author: false, threads: false, age: false, repo: false }
+  // `labels` is a COUNT, not a flag — how many of the (at most two) label names
+  // have been given up. It is the one participant that appears on two rungs of
+  // the ladder below, because the two labels are not worth the same: the second
+  // is speculative, the first is what the row IS. So it degrades two → one →
+  // none rather than vanishing whole.
+  const givingUp = {
+    author: false,
+    threads: false,
+    age: false,
+    repo: false,
+    labels: 0,
+  }
+  /*
+   * `\u{f02b}` (nf-fa-tag) then the names, comma-separated — the same
+   * glyph-then-content shape `\u{f086} 2` already uses for unresolved threads,
+   * so the vocabulary is learned once. Not a Pill: a pill is drawn filled and
+   * means "the row belongs to this category", and two filled pills on the most
+   * contended row in the app out-shout the health glyph and the title both.
+   *
+   * 24 columns for the names is a design cap, not a width fallback — it holds on
+   * a 200-column frame too, because past it the cell stops being a marker and
+   * becomes a second title. Whole labels only: a clipped classification is a lie
+   * you cannot check, since `stat…` could be `status:blocked` or `status:done`,
+   * where a clipped title still carries its sense. The one exception is a lone
+   * first label longer than the cap, which is truncated rather than dropped —
+   * a clipped label still says the row is classified, and nothing says it isn't.
+   *
+   * Math.max around the subtraction because `slice(0, -1)` drops from the TAIL:
+   * a single-label row on the second rung would otherwise keep the very label it
+   * was told to give up.
+   */
+  const LABEL_CELL_MAX = 24
+  const labelCell = () => {
+    const shown = labelNames.slice(
+      0,
+      Math.max(0, labelNames.length - givingUp.labels),
+    )
+    if (shown.length === 0) return ""
+    const fitted: string[] = []
+    for (const name of shown) {
+      const next = [...fitted, name].join(", ")
+      if (next.length <= LABEL_CELL_MAX) fitted.push(name)
+    }
+    if (fitted.length === 0) {
+      return `\u{f02b} ${truncate(shown[0], LABEL_CELL_MAX)}`
+    }
+    return `\u{f02b} ${fitted.join(", ")}`
+  }
   const widthOf = () => {
     const suffix = [
       givingUp.age ? "" : ageLabel || "",
@@ -2784,12 +2873,26 @@ const ItemRow = ({
     ]
       .filter(Boolean)
       .join("  ")
+    // Charged apart from the suffix array because it sits BETWEEN the title and
+    // the repo, not in the trailing group — same as repoLabel.
+    //
+    // The cell's own string counts its glyph as one character; it is charged as
+    // two. `\u{f02b}` is a PUA codepoint and this file's turn-arrow comment
+    // above already records that PUA can render double-width in some fonts.
+    // Tolerable here for exactly the reason it was not there: this cell sits
+    // right of the title, so a double-width render shifts trailing furniture
+    // rather than the aligned zone. But under-charge it by one and every row
+    // carrying a label overflows by one in those fonts — which is the class of
+    // bug this whole block exists to prevent. Two leading spaces, then the cell,
+    // then the glyph's second column.
+    const cell = labelCell()
     return (
       2 +
       prefix.length +
       2 /* health */ +
       2 /* turn */ +
       7 +
+      (cell ? 2 + cell.length + 1 : 0) +
       (givingUp.repo ? 0 : repoLabel.length) +
       suffix.length +
       pillCaps +
@@ -2799,24 +2902,25 @@ const ItemRow = ({
   // Short enough to still say something, long enough to be worth reading. Below
   // this the row is better off shedding its context than its subject.
   const MIN_TITLE = 24
+  //
+  // The label cell takes two of these rungs. The second label goes early — it is
+  // the most speculative thing on the row — and the first outlives both the
+  // thread count and the repo, because by then the row is down to what it IS.
+  //
+  // Assignment rather than `+= 1`, so each rung states the resulting count
+  // outright and reordering this array cannot silently produce the wrong one.
   for (const give of [
     () => (givingUp.author = true),
+    () => (givingUp.labels = 1),
     () => (givingUp.threads = true),
+    () => (givingUp.labels = 2),
     () => (givingUp.repo = true),
     () => (givingUp.age = true),
   ]) {
     if (cols - widthOf() >= MIN_TITLE) break
     give()
   }
-  const suffix = [
-    givingUp.age ? "" : ageLabel || "",
-    givingUp.threads ? "" : unresolvedLabel,
-    showAuthor && !givingUp.author ? `by ${item.author}` : "",
-    mergedLabel,
-    farewellLabel,
-  ]
-    .filter(Boolean)
-    .join("  ")
+  const labelLabel = labelCell()
   // Never below 1: with everything given up the row is as short as it can be, and
   // a negative budget would hand `truncate` nonsense. A frame that narrow has
   // bigger problems than this row.
@@ -2840,6 +2944,17 @@ const ItemRow = ({
       >
         {truncate(item.title, titleMax) + "  "}
       </Text>
+      {/* Straight after the title and before the repo, not out in the trailing
+          furniture: a label says what the row IS, so it is read as part of the
+          subject rather than scanned down a column — which is why `age` is
+          pinned right and this is not. Dim and hueless on purpose. GitHub's own
+          per-label colour is authored in a repo with no knowledge of this
+          palette, and it would be the one place on the row where hue alone did
+          the discriminating, which is the failure health-display.ts exists to
+          prevent. Casing is verbatim: the string is what you would type back
+          into `gh --label`, and uppercase is already claimed here by the pills,
+          which are announcements rather than standing classifications. */}
+      {labelLabel ? <Text dimColor>{labelLabel + "  "}</Text> : null}
       {repoLabel && !givingUp.repo ? <Text dimColor>{repoLabel}</Text> : null}
       {/* Follows the turn arrow, because an unresolved thread is not by itself
           a claim on you: GitHub keeps a thread open until someone clicks

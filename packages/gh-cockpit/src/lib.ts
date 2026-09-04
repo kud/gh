@@ -60,6 +60,7 @@ export {
   itermRun,
   jumpToRepo,
   jumpToRepoPane,
+  labelPriority,
   layoutGHItems,
   matchesFilter,
   maxViewStart,
@@ -278,7 +279,11 @@ const detailOf = (node: any, lastEventAt?: string): GHDetail => {
   }
 }
 
-export type CockpitItem = GHItem & { labels?: string[] }
+// `labels` moved onto GHItem itself once the row learned to draw it — the row
+// is where it was always headed, and a host-side widening was the shape of a
+// field the library did not know about. Kept as an alias because it is on the
+// public surface and the name reads better at cockpit's call sites.
+export type CockpitItem = GHItem
 
 export const toGHItem = (
   node: any,

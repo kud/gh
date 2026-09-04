@@ -12,6 +12,7 @@ export {
   insertRepoHeaders,
   sortItems,
   sortByRecency,
+  labelPriority,
   repoPriority,
   relativeTime,
   explainItem,
