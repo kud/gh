@@ -148,6 +148,55 @@ describe("overlays", () => {
       expect(line.slice(left, right + 1)).not.toMatch(/pull request/)
   })
 
+  // The three tests above all press `?`, and all three passed while the list
+  // column had no width of its own: `HelpModal` is nearly as wide as the frame,
+  // so a column sized to the panel is close enough to a column sized to the list
+  // that "rows still visible" and "opaque over rows" both held. `ActionMenu` is
+  // the narrowest of the four overlays and the only fixture that exposes it,
+  // which is why the two below press `m`.
+  it("keeps the rows behind an overlay at full width", async () => {
+    const { stdout, stdin, done } = await mount(120, 44)
+    stdin.press("m")
+    await settle()
+    const frame = stdout.lastFrame()
+    done()
+
+    // Located by the PR number, which is the one part of a row that survives
+    // being squeezed. Line length is no use as the measure — the frame's right
+    // border pads every line to the terminal's width whatever the row did — so
+    // the claim is the row's own CONTENT extent, taken with that border removed.
+    // Collapsed, the same row measured 35.
+    const row = frame
+      .split("\n")
+      .map(stripAnsi)
+      .find((line) => line.includes("#1201"))
+    expect(row).toBeDefined()
+    expect(row!.slice(0, -1).trimEnd().length).toBeGreaterThan(60)
+    expect(row).toContain("pull request title number 0 padded out a fair way")
+  })
+
+  it("centres the action menu over the list", async () => {
+    const { stdout, stdin, done } = await mount(120, 44)
+    stdin.press("m")
+    await settle()
+    const frame = stdout.lastFrame()
+    done()
+
+    const lines = frame.split("\n").map(stripAnsi)
+    // The outer frame draws the same corners and always outside the panel's, so
+    // the panel's top is the LAST `╭` and its bottom the FIRST `╰`.
+    const top = lines.findLastIndex((line) => line.includes("╭"))
+    const left = lines[top]!.indexOf("╭")
+    const right = lines[top]!.indexOf("╮")
+    // Against the mounted `columns`, not a literal: the panel's own width is the
+    // sum of its longest action label and its chrome, and pinning that would
+    // fail on any wording change. What is being asserted is that the panel's
+    // midpoint sits near the frame's, which was ~6 with the column collapsed.
+    const centre = (left + right) / 2
+    expect(centre).toBeGreaterThan(stdout.columns * 0.35)
+    expect(centre).toBeLessThan(stdout.columns * 0.65)
+  })
+
   it("shows the whole legend when it is taller than the list area", async () => {
     // 24 rows leaves a list area far shorter than the legend. Laid out the other
     // way round — panel absolute inside a fixed-height box — this centre-clipped

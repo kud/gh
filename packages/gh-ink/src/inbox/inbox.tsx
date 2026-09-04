@@ -4544,12 +4544,24 @@ const BrowseScreen = ({
           because it is the only half that can truncate. `width` is stated rather
           than left to flexGrow — a row long enough to overflow compresses every
           flexible sibling, and the rail is exactly the sort of narrow column that
-          would collapse first. */}
+          would collapse first.
+
+          `listCols` UNCONDITIONALLY, and the rail branch belongs to it alone.
+          This used to read `showRail ? listCols : undefined`, applying the same
+          ternary twice and withholding the width in exactly the case where
+          `listCols` is already the right answer. With no width and an overlay up,
+          the column's only IN-FLOW child is the panel — the list is absolute and
+          contributes nothing to its parent's intrinsic size — so the column sized
+          itself to the panel. `width="100%"` on the backdrop then resolved
+          against the panel's width, truncating every row behind to about twelve
+          columns and spilling the remains outside the frame, and
+          `alignItems="center"` centred the panel inside a box that WAS the panel,
+          which is no centring at all. Both bugs, one missing number. */}
       <Box>
         <Box
           flexDirection="column"
           minHeight={listHeight}
-          width={showRail ? listCols : undefined}
+          width={listCols}
           flexShrink={0}
         >
           <Backdrop dimmed={!!overlay} absolute={!!overlay} height={listHeight}>
