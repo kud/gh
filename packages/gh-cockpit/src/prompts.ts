@@ -25,7 +25,11 @@ export type PromptContext = {
   /** `owner/name` of the repo the row belongs to. */
   repo: string
   url: string
-  labels?: string[]
+  /**
+   * Readonly, matching `GHItem` — a prompt form reads the row's labels to word
+   * itself and has no business reordering the array it was handed.
+   */
+  labels?: readonly string[]
 }
 
 export type PromptForms = {
