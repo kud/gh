@@ -2452,17 +2452,25 @@ const MERGED_COLOUR = "#A371F7"
 // has to survive being noticed rather than just seen.
 export const TRANSIT_HOLD_MS = 7000
 /**
- * How many ticks of the shared frame counter one transit frame lasts.
+ * How many ticks of the shared frame counter one ROW transit frame lasts.
  *
- * The two animations on this screen want opposite tempos and were sharing one.
  * The merge sparkle is a celebration of something you did a second ago: it runs
  * for 2.5s and 150ms a frame is what makes it read as a sparkle. A transit mark
  * is the opposite errand — it reports work done in another window, it stands for
  * 7s, and at that rate it strobes. Something blinking six times a second beside
  * text you are trying to read is not a marker, it is an interruption.
  *
- * A divisor rather than a second interval, deliberately: one ticker means the two
- * cannot drift, which is the whole reason there was one to begin with.
+ * That argument is about INLINE motion, and the divisor was applied to the tab
+ * marker as well on the strength of it. The tab marker does not sit beside text:
+ * it lives in the peripheral bar, where vision is motion-sensitive and
+ * text-blind, which is the whole reason the pulse is up there at all. Nothing is
+ * being read next to it, so there is nothing for it to interrupt, and it now
+ * takes the ticker undivided. The split was made by ANIMATION when the thing
+ * that actually differs is WHERE ON THE SCREEN it lands.
+ *
+ * A divisor rather than a second interval, deliberately: one ticker means these
+ * cannot drift, which is the whole reason there was one to begin with — and the
+ * tab pulse stays phase-locked to the sparkle by dividing by nothing.
  */
 const TRANSIT_FRAME_TICKS = 3
 // One shared empty map, so clearing the marks compares equal to already-clear
@@ -2557,9 +2565,22 @@ export const tabMarker = (
 // The dot breathing rather than sitting still. A tab you are NOT looking at is
 // the whole problem — a marker on a row inside it cannot be seen at all — and
 // motion is the one channel that carries across the screen without costing a
-// column or leaning on a hue. Four frames, same ramp the rows dissolve through,
-// so the vocabulary is learned once.
-const TAB_PULSE = ["·", "○", "◎", "◉"]
+// column or leaning on a hue.
+//
+// Six frames, out and back, at the ticker's own 150ms: a 900ms breath. It was
+// four frames on a sawtooth at 450ms, and the SHAPE is what made the tempo
+// unfixable rather than the rate. ◉ snapping back to · is a discontinuity, and a
+// discontinuity read at speed is a blink — a marker blinking once a second is a
+// smoke alarm. Out and back has no snap, so every step is one ring's change in
+// the same direction and the dot swells instead of flashing. That is what makes
+// 150ms survivable here when it would not be on a sawtooth.
+//
+// Deliberately NOT the row ramps' shape any more. TRANSIT_OUT_FRAMES and
+// TRANSIT_IN_FRAMES keep their sawtooth because their direction of travel IS the
+// information — a row that dissolved and filled back in would be claiming it left
+// and returned. The two shapes differ now because they say different things,
+// which is a better vocabulary than the one where they matched.
+const TAB_PULSE = ["·", "○", "◎", "◉", "◎", "○"]
 
 /** @deprecated Fold the marker into `Tabs`' own `marker` field instead. */
 export const tabLabel = (
@@ -4599,11 +4620,9 @@ const BrowseScreen = ({
             count: topLevelCount(s),
             // Its own cell, always two wide, so news arriving never slides the
             // bar — and free to animate for exactly that reason.
-            marker: tabMarker(
-              markedTabs,
-              s.id,
-              Math.floor(sparkFrame / TRANSIT_FRAME_TICKS),
-            ),
+            // The ticker undivided — see TAB_PULSE. The row marks' /3 buys quiet
+            // for motion sitting beside text, and this is not that.
+            marker: tabMarker(markedTabs, s.id, sparkFrame),
             markerColor: "#FF8700",
           }))}
         />

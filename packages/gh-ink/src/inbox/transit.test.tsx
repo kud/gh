@@ -542,10 +542,16 @@ describe("the tab marker", () => {
 
   it("cycles through the pulse rather than holding one glyph", () => {
     const marked = new Set(["review"])
-    const frames = [0, 1, 2, 3].map((f) => tabMarker(marked, "review", f))
+    const frames = [0, 1, 2, 3, 4, 5].map((f) => tabMarker(marked, "review", f))
+    // Out and back: four distinct glyphs spread over six frames.
     expect(new Set(frames).size).toBe(4)
+    // No two NEIGHBOURS alike, the wrap seam included. The ramp used to snap
+    // ◉ → · there, which is the one step that is not a single ring's change —
+    // and a discontinuity read at 150ms is a blink rather than a breath.
+    for (let i = 0; i < frames.length; i++)
+      expect(frames[i]).not.toBe(frames[(i + 1) % frames.length])
     // And wraps, so a long hold keeps breathing instead of stopping on the last.
-    expect(tabMarker(marked, "review", 4)).toBe(frames[0])
+    expect(tabMarker(marked, "review", 6)).toBe(frames[0])
   })
 })
 
