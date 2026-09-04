@@ -56,9 +56,16 @@ ends when you touch one: `packages/gh/src/health.test.ts` for the token,
 to a published copy: it pins the exact version the workspace carries, changesets
 bumps both in lockstep on every release, and npm therefore links
 `node_modules/@kud/gh-ink` straight at `packages/gh-ink`. The same holds for
-`@kud/gh` and for the three thin CLIs. Only `@kud/ink-ui` still nests — three
-packages pin `0.8.0` against `gh-ink` and `gh-cockpit`'s `0.14.0`, so npm hoists
-0.8.0 and gives those two their own copy.
+`@kud/gh` and for the three thin CLIs.
+
+`@kud/ink-ui` is the one dependency the workspace shares with the outside world
+rather than with itself, and it used to nest: three packages sat on `0.8.0`
+against `gh-ink` and `gh-cockpit`'s `0.14.0`, so npm hoisted one and gave the
+other two their own copy. All six agree on one version now, and they have to —
+two copies of a component library in one process is a module-level singleton
+configured in one instance and read from the other. **Bump all of them together
+or none of them.** `npm ls @kud/ink-ui` reporting a single version with every
+line `deduped` is the check, and it is worth running after any dependency edit.
 
 The good half: **a change to `gh-ink`'s exported types is consumable by cockpit
 in the same commit.** Nothing waits for a publish.
