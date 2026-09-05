@@ -82,3 +82,38 @@ describe("@kud/gh-workflow stays pure", () => {
     }
   })
 })
+
+/*
+ * The allowlist above says WHICH specifiers are permitted. It says nothing about
+ * whether they resolve, and in a workspace they always do — `@kud/gh` is a
+ * symlink to the source, so a subpath added this morning works locally whatever
+ * version is pinned.
+ *
+ * 0.1.0 shipped exactly that way: it imported `@kud/gh/health`, pinned
+ * `@kud/gh@0.9.0`, and 0.9.0 had no such export. Every local check passed and
+ * the package was unusable the moment anyone installed it.
+ *
+ * The cheap invariant that catches it: an exact pin on a sibling must equal the
+ * version that sibling is actually at. If you add an export and use it, you have
+ * to bump and re-pin — and forgetting is what this fails on.
+ */
+describe("sibling pins match the workspace", () => {
+  it("pins each @kud dependency to its current version", () => {
+    const here = dirname(fileURLToPath(import.meta.url))
+    const own = JSON.parse(
+      readFileSync(join(here, "..", "package.json"), "utf8"),
+    ) as { dependencies?: Record<string, string> }
+
+    const wrong = Object.entries(own.dependencies ?? {})
+      .filter(([name]) => name.startsWith("@kud/"))
+      .flatMap(([name, pinned]) => {
+        const sibling = join(here, "..", "..", name.replace("@kud/", ""))
+        const { version } = JSON.parse(
+          readFileSync(join(sibling, "package.json"), "utf8"),
+        ) as { version: string }
+        return version === pinned ? [] : [`${name}: pinned ${pinned}, is ${version}`]
+      })
+
+    expect(wrong).toEqual([])
+  })
+})
