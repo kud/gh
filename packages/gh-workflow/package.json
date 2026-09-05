@@ -1,6 +1,6 @@
 {
   "name": "@kud/gh-workflow",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Pure workflow semantics for a GitHub inbox — whose move it is, how rows sort, group and filter. No renderer, no transport, no filesystem.",
   "type": "module",
   "main": "dist/index.js",
@@ -43,7 +43,7 @@
     "access": "public"
   },
   "dependencies": {
-    "@kud/gh": "0.10.0"
+    "@kud/gh": "0.11.0"
   },
   "devDependencies": {
     "typescript": "5.9.3",
