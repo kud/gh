@@ -8,7 +8,7 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "npm run build -w @kud/gh && npm run build -w @kud/gh-ink && npm run build --workspaces --if-present",
+    "build": "npm run build -w @kud/gh && npm run build -w @kud/gh-workflow && npm run build -w @kud/gh-ink && npm run build --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "changeset": "changeset",
