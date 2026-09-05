@@ -1,4 +1,3 @@
-import { execa } from "execa"
 
 // A PR's aggregate health as a single semantic token. Colour/glyph mapping is a
 // UI concern and lives in the consuming surface (e.g. @kud/gh-ink) — the core
@@ -158,22 +157,4 @@ export const computeHealth = (input: ComputeHealthInput): Health => {
   if (hasPending) return "pending"
   if (input.reviewDecision === "APPROVED") return "approved"
   return "waiting"
-}
-
-// Fetch the detail-panel payload for one PR via the gh CLI. Uses `gh pr view`
-// (not `gh api`) for the ready-shaped `--json` projection a panel renders.
-export const fetchHealth = async (
-  repo: string,
-  number: number,
-): Promise<PrHealthData> => {
-  const { stdout } = await execa("gh", [
-    "pr",
-    "view",
-    String(number),
-    "--repo",
-    repo,
-    "--json",
-    "statusCheckRollup,reviews,reviewDecision,mergeable,mergeStateStatus,author",
-  ])
-  return JSON.parse(stdout) as PrHealthData
 }
