@@ -1,7 +1,7 @@
 {
-  "name": "@kud/gh",
-  "version": "0.9.0",
-  "description": "Surface-agnostic GitHub core — gh CLI primitives, PR review comments, health, and webhook logic.",
+  "name": "@kud/gh-workflow",
+  "version": "0.1.0",
+  "description": "Pure workflow semantics for a GitHub inbox — whose move it is, how rows sort, group and filter. No renderer, no transport, no filesystem.",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -9,14 +9,6 @@
     ".": {
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
-    },
-    "./health": {
-      "import": "./dist/health.js",
-      "types": "./dist/health.d.ts"
-    },
-    "./inbox": {
-      "import": "./dist/inbox.js",
-      "types": "./dist/inbox.d.ts"
     }
   },
   "files": [
@@ -25,24 +17,23 @@
   "scripts": {
     "build": "tsc -p .",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
+    "test": "npm run build && vitest run",
     "test:watch": "vitest",
     "prepublishOnly": "npm run build"
   },
   "keywords": [
     "github",
+    "inbox",
+    "workflow",
     "pull-request",
-    "code-review",
-    "gh-cli",
-    "graphql",
-    "core"
+    "triage"
   ],
   "author": "Erwann Mest <m@kud.io>",
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/kud/gh",
-    "directory": "packages/gh"
+    "directory": "packages/gh-workflow"
   },
   "engines": {
     "node": ">=22"
@@ -52,10 +43,9 @@
     "access": "public"
   },
   "dependencies": {
-    "execa": "9.6.1"
+    "@kud/gh": "0.9.0"
   },
   "devDependencies": {
-    "@types/node": "26.1.1",
     "typescript": "5.9.3",
     "vitest": "4.1.10"
   }
