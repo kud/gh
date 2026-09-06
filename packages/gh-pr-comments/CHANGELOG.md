@@ -1,5 +1,12 @@
 # @kud/gh-pr-comments
 
+## 0.1.79
+
+### Patch Changes
+
+- Updated dependencies [142abc6]
+  - @kud/gh-ink@0.45.1
+
 ## 0.1.78
 
 ### Patch Changes
