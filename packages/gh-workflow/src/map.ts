@@ -3,13 +3,39 @@
 // filesystem. It does not any more.
 
 import {
-  computeHealth,
+  computeHealth as deriveHealth,
   latestChecks,
   isPassCheck,
   isFailCheck,
   isPendingCheck,
 } from "@kud/gh/health"
 import { relativeTime, type GHDetail, type GHItem } from "./core.js"
+import type { Health } from "@kud/gh/health"
+
+/*
+ * The node → ComputeHealthInput adapter, and it is load-bearing.
+ *
+ * `deriveHealth` takes a transport-agnostic shape; a GraphQL node keeps its
+ * checks under `statusCheckRollup.contexts.nodes` and its threads under
+ * `reviewThreads.nodes`. Handing the raw node straight to it throws "checks is
+ * not iterable" on the first PR that has any checks at all.
+ *
+ * This lived in @kud/gh-cockpit and was left behind when toGHItem moved here —
+ * which shipped a toGHItem that throws on real data, in a release whose tests
+ * only ever asserted what the package IMPORTS. Behaviour needs a test with a
+ * real node shape, which is what map.test.ts now is.
+ */
+export const computeHealth = (node: any): Health =>
+  deriveHealth({
+    state: node.state,
+    isDraft: "isDraft" in node ? node.isDraft : undefined,
+    checks: node.statusCheckRollup?.contexts?.nodes ?? [],
+    mergeable: node.mergeable,
+    reviewDecision: node.reviewDecision,
+    unresolvedThreads: ((node.reviewThreads?.nodes ?? []) as any[]).filter(
+      (t) => t && !t.isResolved,
+    ).length,
+  })
 
 const viewerReacted = (n: any, content: string): boolean =>
   ((n?.reactionGroups ?? []) as any[]).some(
