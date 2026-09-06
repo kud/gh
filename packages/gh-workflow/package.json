@@ -1,6 +1,6 @@
 {
   "name": "@kud/gh-workflow",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Pure workflow semantics for a GitHub inbox — whose move it is, how rows sort, group and filter. No renderer, no transport, no filesystem.",
   "type": "module",
   "main": "dist/index.js",
