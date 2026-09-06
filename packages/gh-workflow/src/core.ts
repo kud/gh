@@ -9,12 +9,7 @@ import { inboxConfig } from "./config.js"
 /** Mirrors `@kud/ink-ui`'s `PillVariant`, structurally, so this package needs
  * no renderer dependency to say which fill a row's pill takes. */
 export type PillVariant =
-  | "success"
-  | "error"
-  | "warning"
-  | "info"
-  | "accent"
-  | "muted"
+  "success" | "error" | "warning" | "info" | "accent" | "muted"
 
 export type GHDetail = {
   reviewDecision?: string
@@ -264,6 +259,27 @@ export type Section = {
   id: string
   label: string
   items: AnyItem[]
+  /**
+   * Present when `items` is a SAMPLE of a larger set rather than the set —
+   * because a source behind it matched more rows than its query was allowed to
+   * return. `total` is how many there really are.
+   *
+   * It exists for the DIFF before it exists for the display. A surface that
+   * marks arrivals and departures by comparing two fetches is asking what
+   * changed in the world and reading the answer off a fixed-size window; where
+   * the window is smaller than the world those are different questions, and any
+   * update to any row reorders the window, evicts one, and gets the eviction
+   * reported as news about a row that never moved.
+   *
+   * Measured 2026-09-07: `authoredIssues` matched 95 and returned 30,
+   * `repoIssues` 94 and 30, `assigned` 37 and 30. Three sources inventing
+   * arrivals and departures all day, which is what made the board flicker.
+   *
+   * Absent means whole. A host that cannot tell must leave it unset rather than
+   * guess: an invented sample silences real news, which is the worse failure of
+   * the two.
+   */
+  sampled?: { total: number }
 }
 
 // Everything a host needs to render a drilled-into row. `kind` is narrowed so a
@@ -659,4 +675,3 @@ export const filterByRepos = (
       ),
     )
 }
-

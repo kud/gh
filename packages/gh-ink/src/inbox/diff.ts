@@ -25,6 +25,10 @@ export const markKey = (sectionId: string, rowKey: string): string =>
 export const rowKeyOfMark = (mark: string): string =>
   mark.slice(mark.indexOf(MARK_SEP) + 1)
 
+/** The section a mark belongs to. */
+export const sectionIdOfMark = (mark: string): string =>
+  mark.slice(0, mark.indexOf(MARK_SEP))
+
 // Stable identity for a row across fetches: the URL for anything from GitHub,
 // the ticket URL (or key) for Jira.
 //
@@ -169,11 +173,39 @@ export const diffSections = (prev: Section[], next: Section[]): DiffResult => {
   const transients = new Map<string, Transient>()
   const leaving: Placed[] = []
 
+  /* Where a section is a SAMPLE of a larger set, presence carries no news.
+   *
+   * Arrivals and departures are inferred from one fetch against the next, which
+   * answers "what changed in the world?" only while the window and the world are
+   * the same size. Behind a sampled section they are not: 95 issues competing for
+   * 30 slots means any update to any of them reorders the window and evicts one,
+   * and the row that fell out never moved. Marking it `out` — and marking
+   * whatever took its place `in` — is the board reporting its own scrolling as
+   * news, every fetch, all day. That is what a reader experiences as flicker, and
+   * the marks that DO mean something get read as more of the same.
+   *
+   * `changed` is deliberately still raised here. Truncation corrupts which rows
+   * you can see, never what a row you can see says — a title, a health token or a
+   * review state that moved between two fetches is real news about a row that was
+   * present in both, and suppressing it would throw away the half of the signal
+   * that still works.
+   *
+   * A section marks itself, so a whole section beside a sampled one keeps its
+   * arrivals: the noise is quarantined to where it comes from.
+   */
+  const sampled = new Set(
+    next
+      .concat(prev)
+      .filter((s) => s.sampled)
+      .map((s) => s.id),
+  )
+  const isSampled = (mark: string) => sampled.has(sectionIdOfMark(mark))
+
   // Arriving in this tab. Whether that is news about the BOARD depends on where
   // the row was a moment ago: on it already means the row travelled, and saying
   // NEW to a ticket you have been watching for a fortnight is the marker lying.
   for (const [mark] of after)
-    if (!before.has(mark))
+    if (!before.has(mark) && !isSampled(mark))
       transients.set(
         mark,
         boardBefore.has(rowKeyOfMark(mark)) ? "moved-in" : "in",
@@ -182,10 +214,15 @@ export const diffSections = (prev: Section[], next: Section[]): DiffResult => {
   for (const [mark, was] of before) {
     const now = after.get(mark)
     if (!now) {
-      transients.set(
-        mark,
-        boardAfter.has(rowKeyOfMark(mark)) ? "moved-out" : "out",
-      )
+      // Still spliced back in for the hold even when the mark is suppressed:
+      // `leaving` is what keeps a row on screen where it was, and a row that
+      // vanishes mid-read is the jarring half of this whether or not anything
+      // is drawn beside it.
+      if (!isSampled(mark))
+        transients.set(
+          mark,
+          boardAfter.has(rowKeyOfMark(mark)) ? "moved-out" : "out",
+        )
       leaving.push(was)
     } else if (renderedState(was.item) !== renderedState(now.item)) {
       transients.set(mark, "changed")
@@ -200,12 +237,22 @@ export const diffSections = (prev: Section[], next: Section[]): DiffResult => {
   const changedRows = new Set<string>()
   for (const [mark, kind] of transients)
     if (kind === "changed") changedRows.add(rowKeyOfMark(mark))
+  // The headline needs the same quarantine as the marks, and needs it more: a
+  // row can carry a suppressed mark quietly, but "12 new · 9 gone" in the header
+  // is the loudest thing on screen and it was counting the window scrolling.
+  // A row is only ignored when EVERY section holding it is sampled — one that
+  // also sits in a whole section really did arrive, and still counts there.
+  const onlySampled = (sections: Set<string>) =>
+    sections.size > 0 && [...sections].every((id) => sampled.has(id))
+
   for (const [key, sections] of boardAfter) {
     const had = boardBefore.get(key)
-    if (!had) added += 1
-    else if (!sameSections(had, sections)) changedRows.add(key)
+    if (!had) {
+      if (!onlySampled(sections)) added += 1
+    } else if (!sameSections(had, sections)) changedRows.add(key)
   }
-  for (const key of boardBefore.keys()) if (!boardAfter.has(key)) removed += 1
+  for (const [key, sections] of boardBefore)
+    if (!boardAfter.has(key) && !onlySampled(sections)) removed += 1
 
   return {
     transients,
