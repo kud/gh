@@ -52,8 +52,16 @@ export const cacheTtlMs = (): number => inboxConfig().cacheTtlMs
  * 3 — `budget` added. Optional, so a v2 entry would deserialise harmlessly, but
  * an inbox that cannot see the last known budget makes exactly the decision this
  * exists to prevent: it fetches.
+ *
+ * 4 — `Section.sampled` added. Optional, so a v3 entry deserialises perfectly
+ * well, and that is exactly the problem: a cached section written before this
+ * existed carries no flag, reads as whole, and the first diff after upgrading
+ * compares it against a fetch that knows better. Every row the window had
+ * rotated since would be reported as an arrival or a departure — one burst of
+ * precisely the false marks this release exists to stop, landing on the first
+ * refresh after installing it. One cold fetch is the cheaper trade.
  */
-const CACHE_VERSION = 3
+const CACHE_VERSION = 4
 
 /**
  * What the last fetch cost and what was left afterwards, as reported INSIDE the
