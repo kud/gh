@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest"
 
 import {
   INBOX_SOURCES,
+  SOURCE_LIMITS,
+  sourceCoverage,
+  truncatedSources,
   buildInboxQueries,
   buildInboxQuery,
   mergeInboxData,
@@ -298,5 +301,76 @@ describe("mergeInboxData", () => {
   it("has nothing to say when nothing answered", () => {
     expect(mergeInboxData([])).toBeUndefined()
     expect(mergeInboxData([undefined, null])).toBeUndefined()
+  })
+})
+
+describe("source coverage", () => {
+  it("every source asks for issueCount", () => {
+    // The guard this pins used to exist only in a comment. `issueCount` was
+    // fetched for `myPRs` and nothing else, so seven of eight sources could
+    // truncate with nothing anywhere able to notice — which is what turned a
+    // 30-row window over 95 issues into a stream of invented arrivals and
+    // departures. A scalar costs nothing; there is no reason for a source to
+    // opt out, so this asserts all of them rather than a list.
+    const query = buildInboxQuery()
+    for (const source of INBOX_SOURCES)
+      expect(blockFor(query, source)).toContain("issueCount")
+  })
+
+  it("every source asks for exactly its declared cap", () => {
+    // Cap and query used to be two copies of the same number, one of them
+    // unreadable from outside. A comparison against a literal nobody can import
+    // is not a comparison, so they are one value now and this stops them
+    // becoming two again.
+    const query = buildInboxQuery()
+    for (const source of INBOX_SOURCES)
+      expect(blockFor(query, source)).toContain(`first: ${SOURCE_LIMITS[source]}`)
+  })
+
+  it("calls a source truncated when it matched more than it returned", () => {
+    const coverage = sourceCoverage({
+      authoredIssues: { issueCount: 95, nodes: new Array(30).fill({}) },
+    })
+    expect(coverage.authoredIssues).toEqual({
+      total: 95,
+      shown: 30,
+      truncated: true,
+    })
+  })
+
+  it("calls a source whole when it returned everything it matched", () => {
+    const coverage = sourceCoverage({
+      myPRs: { issueCount: 8, nodes: new Array(8).fill({}) },
+    })
+    expect(coverage.myPRs?.truncated).toBe(false)
+  })
+
+  it("treats a missing issueCount as whole, never as truncated", () => {
+    // The direction to fail in. A source that answered without a count must not
+    // invent a truncation, because a consumer reads truncation as "presence
+    // changes here mean nothing" — inventing one would silence real news.
+    const coverage = sourceCoverage({ repoPRs: { nodes: [{}, {}] } })
+    expect(coverage.repoPRs).toEqual({ total: 2, shown: 2, truncated: false })
+  })
+
+  it("says nothing about a source that did not answer", () => {
+    // A part of the split query can fail on its own. An absent source is
+    // unknown, not empty, and must not be reported as a whole source of zero.
+    expect(sourceCoverage({ myPRs: { issueCount: 1, nodes: [{}] } }).repoIssues)
+      .toBeUndefined()
+  })
+
+  it("lists only the truncated sources", () => {
+    const data = {
+      myPRs: { issueCount: 8, nodes: new Array(8).fill({}) },
+      assigned: { issueCount: 37, nodes: new Array(30).fill({}) },
+      repoIssues: { issueCount: 94, nodes: new Array(30).fill({}) },
+    }
+    expect(truncatedSources(data)).toEqual(["assigned", "repoIssues"])
+  })
+
+  it("survives no data at all", () => {
+    expect(sourceCoverage(undefined)).toEqual({})
+    expect(truncatedSources(undefined)).toEqual([])
   })
 })

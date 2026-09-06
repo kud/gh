@@ -43,6 +43,32 @@
  */
 export const MY_PRS_LIMIT = 30
 
+/**
+ * How many rows each source asks for — the cap, as DATA rather than a literal
+ * buried in eight query strings.
+ *
+ * It has to be readable from outside, because a cap you cannot compare against
+ * `issueCount` is a cap that truncates in silence. Measured 2026-09-07 on a real
+ * account: `assigned` 37 rows against 30, `repoIssues` 94 against 30,
+ * `authoredIssues` 95 against 30. Two sources showing under a third of what they
+ * matched, and nothing anywhere said so.
+ *
+ * That silence is not merely a display gap. A surface that diffs one fetch
+ * against the next reads a row leaving the WINDOW as a row leaving the WORLD, so
+ * every update to any of those 95 issues evicted something and was reported as
+ * news about the evicted one. See `sourceCoverage`.
+ */
+export const SOURCE_LIMITS: Record<InboxSource, number> = {
+  myPRs: MY_PRS_LIMIT,
+  reviewRequests: 20,
+  reviewed: 20,
+  assigned: 30,
+  repoIssues: 30,
+  authoredIssues: 30,
+  repoPRs: 30,
+  recentlyDone: 30,
+}
+
 export type InboxShape = "full" | "minimal"
 
 /** One search in the inbox, addressable by the alias it answers under. */
@@ -185,7 +211,11 @@ type Selections = {
  * appears in the document.
  */
 const SOURCES: Record<InboxSource, (s: Selections) => string> = {
-  myPRs: ({ scope, health, conversation }) => `  myPRs: search(query: "${scope}is:pr is:open author:@me", type: ISSUE, first: ${MY_PRS_LIMIT}) {
+  myPRs: ({
+    scope,
+    health,
+    conversation,
+  }) => `  myPRs: search(query: "${scope}is:pr is:open author:@me", type: ISSUE, first: ${SOURCE_LIMITS.myPRs}) {
     issueCount
     nodes { __typename ... on PullRequest {
       number title createdAt url headRefName isDraft
@@ -196,7 +226,12 @@ const SOURCES: Record<InboxSource, (s: Selections) => string> = {
     }}
   }`,
 
-  reviewRequests: ({ scope, health, conversation }) => `  reviewRequests: search(query: "${scope}is:pr is:open review-requested:@me", type: ISSUE, first: 20) {
+  reviewRequests: ({
+    scope,
+    health,
+    conversation,
+  }) => `  reviewRequests: search(query: "${scope}is:pr is:open review-requested:@me", type: ISSUE, first: ${SOURCE_LIMITS.reviewRequests}) {
+    issueCount
     nodes { __typename ... on PullRequest {
       number title createdAt url headRefName isDraft
       repository { nameWithOwner }
@@ -206,7 +241,12 @@ const SOURCES: Record<InboxSource, (s: Selections) => string> = {
     }}
   }`,
 
-  reviewed: ({ scope, health, conversation }) => `  reviewed: search(query: "${scope}is:pr is:open reviewed-by:@me -author:@me -review-requested:@me", type: ISSUE, first: 20) {
+  reviewed: ({
+    scope,
+    health,
+    conversation,
+  }) => `  reviewed: search(query: "${scope}is:pr is:open reviewed-by:@me -author:@me -review-requested:@me", type: ISSUE, first: ${SOURCE_LIMITS.reviewed}) {
+    issueCount
     nodes { __typename ... on PullRequest {
       number title createdAt url headRefName isDraft
       repository { nameWithOwner }
@@ -222,7 +262,8 @@ const SOURCES: Record<InboxSource, (s: Selections) => string> = {
     conversation,
     issueConversation,
     issueLabels,
-  }) => `  assigned: search(query: "${scope}is:open assignee:@me", type: ISSUE, first: 30) {
+  }) => `  assigned: search(query: "${scope}is:open assignee:@me", type: ISSUE, first: ${SOURCE_LIMITS.assigned}) {
+    issueCount
     nodes {
       __typename
       ... on Issue {
@@ -243,7 +284,8 @@ const SOURCES: Record<InboxSource, (s: Selections) => string> = {
     owned,
     issueConversation,
     issueLabels,
-  }) => `  repoIssues: search(query: "${scope}${owned}is:issue is:open archived:false", type: ISSUE, first: 30) {
+  }) => `  repoIssues: search(query: "${scope}${owned}is:issue is:open archived:false", type: ISSUE, first: ${SOURCE_LIMITS.repoIssues}) {
+    issueCount
     nodes { __typename ... on Issue {
       number title createdAt url
       repository { nameWithOwner }
@@ -257,7 +299,8 @@ const SOURCES: Record<InboxSource, (s: Selections) => string> = {
     scope,
     issueConversation,
     issueLabels,
-  }) => `  authoredIssues: search(query: "${scope}is:issue is:open author:@me archived:false", type: ISSUE, first: 30) {
+  }) => `  authoredIssues: search(query: "${scope}is:issue is:open author:@me archived:false", type: ISSUE, first: ${SOURCE_LIMITS.authoredIssues}) {
+    issueCount
     nodes { ... on Issue {
       number title createdAt url
       repository { nameWithOwner }
@@ -272,7 +315,8 @@ const SOURCES: Record<InboxSource, (s: Selections) => string> = {
     owned,
     health,
     conversation,
-  }) => `  repoPRs: search(query: "${scope}${owned}is:pr is:open -author:@me archived:false", type: ISSUE, first: 30) {
+  }) => `  repoPRs: search(query: "${scope}${owned}is:pr is:open -author:@me archived:false", type: ISSUE, first: ${SOURCE_LIMITS.repoPRs}) {
+    issueCount
     nodes { __typename ... on PullRequest {
       number title createdAt url headRefName isDraft
       repository { nameWithOwner }
@@ -285,7 +329,8 @@ const SOURCES: Record<InboxSource, (s: Selections) => string> = {
   recentlyDone: ({
     scope,
     doneSince,
-  }) => `  recentlyDone: search(query: "${scope}is:pr author:@me -is:open closed:>=${doneSince}", type: ISSUE, first: 30) {
+  }) => `  recentlyDone: search(query: "${scope}is:pr author:@me -is:open closed:>=${doneSince}", type: ISSUE, first: ${SOURCE_LIMITS.recentlyDone}) {
+    issueCount
     nodes { __typename ... on PullRequest {
       number title state isDraft createdAt mergedAt closedAt url
       repository { nameWithOwner }
@@ -433,9 +478,64 @@ export const mergeInboxData = (parts: any[]): any => {
           rateLimit: {
             ...scarcest,
             cost: limits.reduce((total, l) => total + (l.cost ?? 0), 0),
-            nodeCount: limits.reduce((total, l) => total + (l.nodeCount ?? 0), 0),
+            nodeCount: limits.reduce(
+              (total, l) => total + (l.nodeCount ?? 0),
+              0,
+            ),
           },
         }
       : {}),
   }
 }
+
+/** What a source matched, against what it was allowed to return. */
+export type SourceCoverage = {
+  /** Everything the search matched, from GitHub's own `issueCount`. */
+  total: number
+  /** What actually came back — at most this source's cap. */
+  shown: number
+  /** `total > shown`: the rows are a sample of the set, not the set. */
+  truncated: boolean
+}
+
+/**
+ * What each source could see, against what it was allowed to show.
+ *
+ * The reason this exists is not the display gap, it is what a truncated source
+ * does to a DIFF. A surface that marks arrivals and departures by comparing one
+ * fetch with the next is asking "what changed in the world?" and reading the
+ * answer off a fixed-size window. Where the window is smaller than the world,
+ * those are different questions: any update to any of the 95 issues behind a
+ * 30-row window reorders it, evicts something, and the eviction is reported as
+ * news about the row that left — which never moved at all.
+ *
+ * So a consumer should treat presence changes on a truncated source as carrying
+ * no information, and say what it is not showing instead. Both halves need this
+ * number, and until 2026-09-07 it was fetched for exactly one source out of
+ * eight and read by nobody — the guarantee lived in a comment and not in the
+ * code.
+ *
+ * A source that answered with no `issueCount` reports `total: shown`, which
+ * reads as "not truncated". That is the deliberate direction to fail in: a
+ * missing count must never invent a truncation and silence real news.
+ */
+export const sourceCoverage = (
+  data: any,
+): Partial<Record<InboxSource, SourceCoverage>> => {
+  const out: Partial<Record<InboxSource, SourceCoverage>> = {}
+  if (!data) return out
+
+  for (const source of INBOX_SOURCES) {
+    const answered = data[source]
+    if (!answered) continue
+    const shown = answered.nodes?.length ?? 0
+    const total = typeof answered.issueCount === "number" ? answered.issueCount : shown
+    out[source] = { total, shown, truncated: total > shown }
+  }
+
+  return out
+}
+
+/** The sources whose rows are a sample rather than the set. */
+export const truncatedSources = (data: any): InboxSource[] =>
+  INBOX_SOURCES.filter((source) => sourceCoverage(data)[source]?.truncated)

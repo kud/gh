@@ -232,3 +232,81 @@ describe("summariseDiff", () => {
     expect(summariseDiff({ added: 0, removed: 0, changed: 0 })).toBe("")
   })
 })
+
+describe("a sampled section", () => {
+  /*
+   * The whole reason the flicker existed. Behind a section showing 30 of 95
+   * rows, presence is not news: any update anywhere reorders the window and
+   * evicts somebody, and the evicted row never moved. These pin that the diff
+   * stays quiet about presence there — and, just as importantly, that it does
+   * not go quiet about everything else.
+   */
+  const sampled = (items: GHItem[]): Section[] => [
+    { id: "mine", label: "Mine", items, sampled: { total: 95 } },
+  ]
+
+  it("raises no arrival when a row scrolls into the window", () => {
+    const { transients } = diffSections(sampled([a, b]), sampled([a, b, c]))
+    expect(transients.get(markKey("mine", "u/c"))).toBeUndefined()
+  })
+
+  it("raises no departure when a row scrolls out of it", () => {
+    const { transients } = diffSections(sampled([a, b, c]), sampled([a, b]))
+    expect(transients.get(markKey("mine", "u/c"))).toBeUndefined()
+  })
+
+  it("still holds the departing row in place while it leaves", () => {
+    // Suppressing the MARK must not stop the row being spliced back at its old
+    // index — a row vanishing from under the cursor mid-read is the jarring
+    // half of this, and it is jarring whether or not anything is drawn beside
+    // it.
+    const { union } = diffSections(sampled([a, b, c]), sampled([a, b]))
+    expect(union[0]?.items.map((i) => keyOf(i))).toEqual(["u/a", "u/b", "u/c"])
+  })
+
+  it("still reports a row whose content changed", () => {
+    // Truncation corrupts WHICH rows you see, never what a row you can see
+    // says. A health token that moved between two fetches is real news about a
+    // row present in both, and this is the half of the signal that survives.
+    const before = sampled([a, b])
+    const after = sampled([a, { ...b, health: "ci-fail" }])
+    expect(diffSections(before, after).transients.get(markKey("mine", "u/b")))
+      .toBe("changed")
+  })
+
+  it("keeps the headline count out of the window's scrolling", () => {
+    // "12 new · 9 gone" in the header is the loudest thing on screen, and it was
+    // counting the window moving.
+    const { counts } = diffSections(sampled([a, b]), sampled([a, b, c]))
+    expect(counts).toEqual({ added: 0, removed: 0, changed: 0 })
+  })
+
+  it("leaves a whole section beside it alone", () => {
+    // The quarantine has to be per section, or one noisy source would silence
+    // the board.
+    const before: Section[] = [
+      { id: "mine", label: "Mine", items: [a], sampled: { total: 95 } },
+      { id: "review", label: "Review", items: [b] },
+    ]
+    const after: Section[] = [
+      { id: "mine", label: "Mine", items: [a, c], sampled: { total: 95 } },
+      { id: "review", label: "Review", items: [b, c] },
+    ]
+    const { transients, counts } = diffSections(before, after)
+    expect(transients.get(markKey("mine", "u/c"))).toBeUndefined()
+    expect(transients.get(markKey("review", "u/c"))).toBe("in")
+    expect(counts.added).toBe(1)
+  })
+
+  it("marks a section sampled in either fetch", () => {
+    // A source can cross its cap between two fetches. Reading the flag off
+    // `next` alone would let the crossing fetch report the whole backlog as
+    // arrivals, once, which is exactly the burst worth avoiding.
+    const before: Section[] = [{ id: "mine", label: "Mine", items: [a] }]
+    const after: Section[] = [
+      { id: "mine", label: "Mine", items: [a, c], sampled: { total: 95 } },
+    ]
+    expect(diffSections(before, after).transients.get(markKey("mine", "u/c")))
+      .toBeUndefined()
+  })
+})
