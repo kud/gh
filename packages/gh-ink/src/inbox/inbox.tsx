@@ -133,7 +133,6 @@ export type {
   OriginSplit,
 }
 
-
 // ─── Work filter ─────────────────────────────────────────────────────────────
 
 export type DetailContext = {
@@ -1895,6 +1894,45 @@ export const TRANSIT_HOLD_MS = 7000
  * tab pulse stays phase-locked to the sparkle by dividing by nothing.
  */
 const TRANSIT_FRAME_TICKS = 3
+
+/**
+ * How long the shared ticker is allowed to run before the pulse settles.
+ *
+ * Every other hold in this file is bounded by a timer. The TAB pulse is not,
+ * and could not be: it is gated on `markedTabs`, and a mark on a tab nobody has
+ * opened deliberately never expires — that promise is the point, and it stays.
+ *
+ * What did not survive contact is running the TICKER for the same span. The
+ * ticker used to be scoped to the rows this tab draws, so an untouched tab left
+ * it stopped; moving the marker to the tab bar widened the gate to "any marked
+ * tab" without anyone noticing that the gate's OTHER end had no bound at all.
+ * A cockpit left open with one uncollected mark then re-rendered the whole
+ * inbox 6.7 times a second, for as long as it was up.
+ *
+ * Measured 2026-09-06: 22 hours of that took one process to 4.15 GB, still
+ * climbing 1.4 GB/min, on a host with 10 MB of RAM free and its swap full. The
+ * sibling running `--here` — same binary, longer uptime, no marked tabs — sat
+ * at 13 MB throughout.
+ *
+ * 60s is chosen against the eye, not the machine: a pulse nobody has looked at
+ * in a minute is not going to be noticed by pulsing longer. It is also eight
+ * times the longest row hold (TRANSIT_HOLD_MS), so no row animation can be cut
+ * short by it — this ceiling only ever ends the open-ended tab case.
+ */
+export const PULSE_SETTLE_MS = 60_000
+const PULSE_MAX_FRAMES = Math.ceil(PULSE_SETTLE_MS / MERGED_FRAME_MS)
+
+/**
+ * Where the pulse comes to rest — TAB_PULSE's widest glyph, never wherever the
+ * ticker happened to stop.
+ *
+ * Settling on an arbitrary frame is how this fix would quietly undo the feature
+ * it is protecting: five of TAB_PULSE's six frames are smaller than `◉`, and one
+ * of them is a bare `·` that reads as no marker at all. The mark has to stay
+ * legible after it stops moving, because staying is the whole promise.
+ */
+export const PULSE_SETTLED_FRAME = 3
+
 // One shared empty map, so clearing the marks compares equal to already-clear
 // and React skips the repaint instead of redrawing the list to change nothing.
 const NO_TRANSIENTS: Map<string, Transient> = new Map()
@@ -3311,13 +3349,14 @@ const BrowseScreen = ({
   }, [localSections, transients])
 
   // ONE interval for every sparkling row, not one per row: the frame is shared,
-  // so N timers would only produce N chances to fall out of step. It runs solely
-  // while something is merging and is cleared the moment the last row goes, so a
-  // cockpit sitting idle redraws exactly as often as it did before.
+  // so N timers would only produce N chances to fall out of step.
   //
-  // Scoped to what this tab draws, not to the marks as a whole: a mark now
-  // waits for its own tab to be opened, so an untouched tab would otherwise
-  // keep the ticker running against rows nobody can see.
+  // The paragraph that stood here said the ticker was "scoped to what this tab
+  // draws, not to the marks as a whole". That stopped being true the day the
+  // marker moved to the tab bar and the gate widened to `markedTabs`, and it was
+  // left behind saying the opposite of what the code did — which is how the
+  // unbounded pulse survived review. The ticker is gated on the marks as a whole
+  // and bounded by PULSE_SETTLE_MS instead; see it for what that cost.
   // Open by default wherever a host supplies one. A rail you have to remember to
   // ask for is a rail you do not consult, and the roadmap is the half of the
   // picture the tabs cannot show at all — it earns its columns by being there.
@@ -3352,11 +3391,37 @@ const BrowseScreen = ({
     markedTabs.size > 0 ||
     (!!transients?.size &&
       section.items.some((item) => transientOf(transients, item, section.id)))
+  // What the ticker is currently pulsing ABOUT, not merely whether it should be.
+  // The restart is the whole reason this is a string: `sparkling` stays true from
+  // the first uncollected mark to the last, so news arriving on a second tab
+  // while the first is still marked would never re-arm a settled pulse — the
+  // ceiling below would have silenced the marker for everything that came after
+  // it. Keyed this way, each new thing worth pulsing about buys its own minute.
+  const sparkKey = sparkling
+    ? [
+        [...markedTabs].sort().join(","),
+        mergedUrls?.length ?? 0,
+        leavingUrls?.length ?? 0,
+      ].join("|")
+    : ""
   useEffect(() => {
-    if (!sparkling) return
-    const id = setInterval(() => setSparkFrame((f) => f + 1), MERGED_FRAME_MS)
+    if (!sparkKey) return
+    // Counted here rather than off `sparkFrame`, which is shared with the row
+    // animations and does not reset between runs — reading the ceiling off a
+    // counter that only ever climbs would settle the pulse instantly on the
+    // second thing to happen in a long session.
+    let frames = 0
+    const id = setInterval(() => {
+      frames += 1
+      if (frames >= PULSE_MAX_FRAMES) {
+        clearInterval(id)
+        setSparkFrame(PULSE_SETTLED_FRAME)
+        return
+      }
+      setSparkFrame((f) => f + 1)
+    }, MERGED_FRAME_MS)
     return () => clearInterval(id)
-  }, [sparkling])
+  }, [sparkKey])
 
   // A failed background refresh used to be swallowed: the list kept rendering
   // from cache with no hint it had gone stale, and the only thing the user saw
