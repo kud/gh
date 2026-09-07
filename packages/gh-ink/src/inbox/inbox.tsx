@@ -1875,11 +1875,11 @@ export const TRANSIT_HOLD_MS = 7000
 /**
  * How many ticks of the shared frame counter one ROW transit frame lasts.
  *
- * The merge sparkle is a celebration of something you did a second ago: it runs
- * for 2.5s and 150ms a frame is what makes it read as a sparkle. A transit mark
- * is the opposite errand — it reports work done in another window, it stands for
- * 7s, and at that rate it strobes. Something blinking six times a second beside
- * text you are trying to read is not a marker, it is an interruption.
+ * The merge sparkle is a celebration of something you did a second ago, and
+ * 150ms a frame is what makes it read as a sparkle. A transit mark is the
+ * opposite errand — it reports work done in another window and it stands for 7s,
+ * so it takes a divisor: something blinking six times a second beside text you
+ * are trying to read is not a marker, it is an interruption.
  *
  * That argument is about INLINE motion, and the divisor was applied to the tab
  * marker as well on the strength of it. The tab marker does not sit beside text:
@@ -1889,11 +1889,25 @@ export const TRANSIT_HOLD_MS = 7000
  * takes the ticker undivided. The split was made by ANIMATION when the thing
  * that actually differs is WHERE ON THE SCREEN it lands.
  *
+ * The divisor was 3, and 450ms overshot: a farewell that slow does not read as
+ * gentle, it reads as unresolved. 300ms is half the tab's rate, so a goodbye
+ * still cannot be mistaken for a summons, and the interruption argument above is
+ * unharmed — it was calibrated at 6.7Hz, and this is 3.3Hz, the far side of
+ * where flicker discomfort falls away.
+ *
+ * What 300ms DOES spend is the margin the sawtooth was living on. TRANSIT_OUT
+ * snaps ◉→· at the end of every cycle and loops for the whole hold; at 450ms
+ * that snap reads as a restart, and the faster it comes round the more it reads
+ * as a blink — the exact discontinuity TAB_PULSE was given six out-and-back
+ * frames to avoid. MERGED_FRAMES survives 150ms precisely because ✦✧✶✧ has no
+ * snap in it. The standing fix is to play each ramp ONCE and hold rather than
+ * loop it; until then, do not divide this any further.
+ *
  * A divisor rather than a second interval, deliberately: one ticker means these
  * cannot drift, which is the whole reason there was one to begin with — and the
  * tab pulse stays phase-locked to the sparkle by dividing by nothing.
  */
-const TRANSIT_FRAME_TICKS = 3
+const TRANSIT_FRAME_TICKS = 2
 
 /**
  * How long the shared ticker is allowed to run before the pulse settles.
