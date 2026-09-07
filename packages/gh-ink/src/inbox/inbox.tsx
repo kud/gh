@@ -667,6 +667,31 @@ export const maxViewStart = (items: AnyItem[], budget: number): number => {
 
 // Where a section's cursor starts: the first row that is not a header. findIndex
 // returns -1 for a section of headers alone, which Math.max floors to 0.
+/**
+ * A row's identity, stable across refetches — which its INDEX is not.
+ *
+ * Two callers, and they want the same answer for the same reason: React's key
+ * needs a row to stay the same row when the list around it moves, and so does
+ * the cursor. It was written out inline for the first and simply not available
+ * to the second, which is how the cursor came to be restored by position.
+ *
+ * `instanceKey` before `key` on a task, because one ticket can legitimately be
+ * drawn twice in a section under different subgroup headers, and the two copies
+ * must not collapse into one identity.
+ */
+export const rowKey = (item: AnyItem): string =>
+  item.kind === "task"
+    ? (item.instanceKey ?? item.key)
+    : item.kind === "repo-header"
+      ? `header:${item.repo}`
+      : item.kind === "subgroup-header"
+        ? `subgroup:${item.label}`
+        : item.kind === "show-more"
+          ? `show-more:${item.hidden[0]?.repo ?? ""}`
+          : item.kind === "show-less"
+            ? `show-less:${item.toHide[0]?.repo ?? ""}`
+            : `${item.repo}/${item.number}`
+
 const firstSelectable = (section: Section): number =>
   Math.max(
     0,
@@ -3444,11 +3469,39 @@ const BrowseScreen = ({
     setLocalSections(applyWork(sections))
   }, [sections])
 
+  /*
+   * The cursor follows the ROW it was on, not the position it was at.
+   *
+   * A refetch reshapes the list — rows arrive, rows leave, a group grows — so an
+   * index is a promise about a list that no longer exists. Pressing `r` while
+   * standing on something would silently land you on whatever had moved into
+   * that slot, which is a worse outcome than not restoring at all: nothing on
+   * screen says you were moved, and the next key acts on the wrong row.
+   *
+   * Resolved against the PREVIOUS items rather than a key tracked alongside the
+   * cursor, because the cursor is written from half a dozen places and a
+   * parallel field would only give them half a dozen chances to disagree.
+   */
+  const prevItems = useRef<Record<string, AnyItem[]>>({})
   useEffect(() => {
+    // Read into a local BEFORE the updater is queued. `setCursors` defers its
+    // callback, while the assignment below runs immediately — so a closure over
+    // the ref would resolve every anchor against the list that just replaced the
+    // one the cursor was standing in, and restore the index unchanged.
+    const before = prevItems.current
     setTabIdx((prev) => Math.min(prev, Math.max(0, localSections.length - 1)))
     setCursors((prev) =>
       Object.fromEntries(
         localSections.map((s) => {
+          const wasAt = prev[s.id]
+          const anchor = wasAt === undefined ? undefined : before[s.id]?.[wasAt]
+          const moved = anchor
+            ? s.items.findIndex((i) => rowKey(i) === rowKey(anchor))
+            : -1
+          // The row is still here — follow it wherever it went. Otherwise fall
+          // back to holding position, which is the best available answer once
+          // the thing you were looking at has genuinely gone.
+          if (moved >= 0) return [s.id, moved]
           const c = Math.min(
             prev[s.id] ?? firstSelectable(s),
             s.items.length - 1,
@@ -3456,13 +3509,22 @@ const BrowseScreen = ({
           if (c < 0) return [s.id, 0]
           return [
             s.id,
-            s.items[c]?.kind === "repo-header" ||
+            // Only `subgroup-header`, which is the one kind the arrows refuse to
+            // stand on — `moveCursor` skips it and nothing else. A REPO header is
+            // selectable on purpose: it opens the repo and `C` copies the group,
+            // and the footer advertises both. Stepping off it here meant that
+            // standing on a repo and pressing `r` moved you onto an issue, every
+            // single time, and the rule predated repo headers being selectable
+            // at all.
             s.items[c]?.kind === "subgroup-header"
               ? moveCursor(s.items, c, 1)
               : c,
           ]
         }),
       ),
+    )
+    prevItems.current = Object.fromEntries(
+      localSections.map((s) => [s.id, s.items]),
     )
     setViewStarts((prev) =>
       Object.fromEntries(
@@ -4405,19 +4467,7 @@ const BrowseScreen = ({
                   // Prefix the absolute index so keys stay unique even when the
                   // same repo header recurs down a time-sorted list (Done). The
                   // sum viewStart + i is stable per underlying item across scroll.
-                  key={`${viewStart + i}:${
-                    item.kind === "task"
-                      ? (item.instanceKey ?? item.key)
-                      : item.kind === "repo-header"
-                        ? `header:${item.repo}`
-                        : item.kind === "subgroup-header"
-                          ? `subgroup:${item.label}`
-                          : item.kind === "show-more"
-                            ? `show-more:${item.hidden[0]?.repo ?? i}`
-                            : item.kind === "show-less"
-                              ? `show-less:${item.toHide[0]?.repo ?? i}`
-                              : `${item.repo}/${item.number}`
-                  }`}
+                  key={`${viewStart + i}:${rowKey(item)}`}
                   item={item}
                   active={viewStart + i === cursor}
                   login={login}
