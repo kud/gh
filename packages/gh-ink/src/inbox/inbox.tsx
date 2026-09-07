@@ -1861,7 +1861,11 @@ const RepoHeaderRow = ({
 // MERGED is a word, not a colour: kud is colourblind, and purple here only
 // reinforces what the label already says — the same rule healthDisplay follows
 // for every other state in this list.
-export const MERGED_HOLD_MS = 5000
+// 3s, which is five full turns of the 600ms sparkle — long enough to read as a
+// repeating twinkle rather than a loop you can count. It shipped at 3000, drifted
+// to 5000, and the rationale on TRANSIT_FRAME_TICKS went on describing the
+// original the whole time. Restored rather than re-chosen.
+export const MERGED_HOLD_MS = 3000
 export const MERGED_FRAME_MS = 150
 const MERGED_FRAMES = ["✦", "✧", "✶", "✧"]
 const MERGED_COLOUR = "#A371F7"
@@ -1928,13 +1932,44 @@ const TRANSIT_FRAME_TICKS = 2
  * sibling running `--here` — same binary, longer uptime, no marked tabs — sat
  * at 13 MB throughout.
  *
- * 60s is chosen against the eye, not the machine: a pulse nobody has looked at
- * in a minute is not going to be noticed by pulsing longer. It is also eight
- * times the longest row hold (TRANSIT_HOLD_MS), so no row animation can be cut
- * short by it — this ceiling only ever ends the open-ended tab case.
+ * The window was 60s, chosen against the eye on the reasoning that a pulse
+ * nobody has looked at in a minute will not be noticed by pulsing longer. True,
+ * and aimed at the wrong clock: the window is armed by NEWS ARRIVING, and the
+ * eye it exists to catch arrives later and separately. A minute spent breathing
+ * into an empty room is a minute of full-inbox re-render bought for nobody, and
+ * what the reader then finds is a mark that has already settled — which reads as
+ * a feature someone removed. See PULSE_IDLE_MS for the other half.
+ *
+ * 12s is what a window is worth once it starts when somebody is there. It is
+ * also, and this is now LOAD-BEARING, longer than TRANSIT_HOLD_MS: the settle
+ * used to sit eight times clear of the longest row hold, so it could never land
+ * mid-animation, and shortening it spends that margin down to 1.7x. Anything at
+ * or under TRANSIT_HOLD_MS would truncate row animations with nothing in the
+ * code to say so.
  */
-export const PULSE_SETTLE_MS = 60_000
+export const PULSE_SETTLE_MS = 12_000
 const PULSE_MAX_FRAMES = Math.ceil(PULSE_SETTLE_MS / MERGED_FRAME_MS)
+
+/**
+ * How long the keyboard must be quiet before the next keypress counts as
+ * somebody ARRIVING rather than somebody working.
+ *
+ * The pulse exists to be seen. Arming it only on news means the one event it
+ * cannot afford to miss — the reader coming back to the window — buys nothing,
+ * so this arms a fresh window on the first keypress after a quiet stretch, and
+ * on a tab change, where the reader is demonstrably scanning the bar.
+ *
+ * NOT on every keystroke, which is the shape that would put the original leak
+ * straight back: someone heads-down in one tab with an old uncollected mark
+ * would re-arm continuously and restore sustained 6.7fps for a whole working
+ * session. Presence is the gate; the ARRIVAL of presence is the trigger.
+ *
+ * PULSE_IDLE_MS : PULSE_SETTLE_MS is the worst-case duty cycle, and that is the
+ * number this constant is really choosing. Someone tapping a key just past the
+ * threshold forever buys a fresh window every time — 12/60 is a fifth of the old
+ * cost sustained, where a 30s threshold would be two fifths.
+ */
+export const PULSE_IDLE_MS = 60_000
 
 /**
  * Where the pulse comes to rest — TAB_PULSE's widest glyph, never wherever the
@@ -1944,6 +1979,13 @@ const PULSE_MAX_FRAMES = Math.ceil(PULSE_SETTLE_MS / MERGED_FRAME_MS)
  * it is protecting: five of TAB_PULSE's six frames are smaller than `◉`, and one
  * of them is a bare `·` that reads as no marker at all. The mark has to stay
  * legible after it stops moving, because staying is the whole promise.
+ *
+ * Read through a `settled` flag rather than written INTO `sparkFrame`, which is
+ * the counter the row ramps also read (`transitFrame`). Writing it there was
+ * safe only by accident, on the old 60s window's eight-fold clearance over
+ * TRANSIT_HOLD_MS: nothing could still be animating that late. At 12s, and armed
+ * by a keypress that can land anywhere, the settle would otherwise snap a row
+ * mid-dissolve. Same glyph, no shared mutable state.
  */
 export const PULSE_SETTLED_FRAME = 3
 
@@ -3418,8 +3460,22 @@ const BrowseScreen = ({
         leavingUrls?.length ?? 0,
       ].join("|")
     : ""
+  // The second thing that arms a window, beside news: somebody arriving. A
+  // counter rather than a timestamp, because two arms inside one millisecond
+  // would collide and React bails on a set-to-same-value — a timestamp can
+  // silently fail to re-arm, a counter cannot.
+  const [pulseArm, setPulseArm] = useState(0)
+  // A ref, not state: a keypress that does NOT arm has to cost nothing, and a
+  // state write would re-render on every key and defeat the whole exercise.
+  const lastKeyAt = useRef(Date.now())
+  // `sparkKey` kept INSIDE the token rather than replaced by it: its empty
+  // string is what stops the ticker dead when nothing is marked, and keying off
+  // the arm alone would lose that and pulse about nothing.
+  const pulseKey = sparkKey ? `${sparkKey}#${pulseArm}` : ""
+  const [pulseSettled, setPulseSettled] = useState(false)
   useEffect(() => {
-    if (!sparkKey) return
+    if (!pulseKey) return
+    setPulseSettled(false)
     // Counted here rather than off `sparkFrame`, which is shared with the row
     // animations and does not reset between runs — reading the ceiling off a
     // counter that only ever climbs would settle the pulse instantly on the
@@ -3429,13 +3485,23 @@ const BrowseScreen = ({
       frames += 1
       if (frames >= PULSE_MAX_FRAMES) {
         clearInterval(id)
-        setSparkFrame(PULSE_SETTLED_FRAME)
+        // The flag, never `setSparkFrame` — see PULSE_SETTLED_FRAME. Landing on
+        // the shared counter would snap whatever row happened to be mid-ramp.
+        setPulseSettled(true)
         return
       }
       setSparkFrame((f) => f + 1)
     }, MERGED_FRAME_MS)
     return () => clearInterval(id)
-  }, [sparkKey])
+  }, [pulseKey])
+
+  // Changing tab arms a window too: that is the moment the reader is scanning
+  // the bar, which is the one place a mark on a tab they are NOT on can be seen.
+  // Gated on something being marked, so walking a quiet board costs nothing.
+  useEffect(() => {
+    if (sparkKey) setPulseArm((n) => n + 1)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tabIdx])
 
   // A failed background refresh used to be swallowed: the list kept rendering
   // from cache with no hint it had gone stale, and the only thing the user saw
@@ -3484,6 +3550,15 @@ const BrowseScreen = ({
   }
 
   useInput((input, key) => {
+    // ABOVE both guards below, deliberately. They exist to stop a key ACTING on
+    // the list; neither is a reason to miss the reader coming back — a swallowed
+    // Ctrl+D is still evidence of a person at the keyboard, and so is a key
+    // pressed at a hidden tab. Re-arming only where something is actually
+    // marked, so an idle return to a quiet board buys no render at all.
+    const idleFor = Date.now() - lastKeyAt.current
+    lastKeyAt.current = Date.now()
+    if (idleFor >= PULSE_IDLE_MS && sparkKey) setPulseArm((n) => n + 1)
+
     if (hidden) return
     // Every shortcut below is a bare letter/arrow with no modifier — none of
     // them are meant to fire on a ctrl/meta chord. Without this, a Ctrl+<key>
@@ -4123,7 +4198,11 @@ const BrowseScreen = ({
             // bar — and free to animate for exactly that reason.
             // The ticker undivided — see TAB_PULSE. The row marks' /3 buys quiet
             // for motion sitting beside text, and this is not that.
-            marker: tabMarker(markedTabs, s.id, sparkFrame),
+            marker: tabMarker(
+              markedTabs,
+              s.id,
+              pulseSettled ? PULSE_SETTLED_FRAME : sparkFrame,
+            ),
             markerColor: "#FF8700",
           }))}
         />
@@ -4918,6 +4997,22 @@ export const App = ({
   // unmount two chances to miss one.
   const holdTimers = useRef<ReturnType<typeof setTimeout>[]>([])
   useEffect(() => () => holdTimers.current.forEach(clearTimeout), [])
+  /**
+   * Start a hold, and take it off the roster when it fires.
+   *
+   * The list exists to be cleared on unmount, so a FIRED timer has no business
+   * still being in it — and every entry retains its own callback closure, which
+   * captures the `GHItem` it was holding. Pushing without ever removing made the
+   * roster grow for the life of the process, one entry per merge or close, each
+   * pinning a row that left the screen seconds later.
+   */
+  const holdFor = (fn: () => void, ms: number) => {
+    const id = setTimeout(() => {
+      holdTimers.current = holdTimers.current.filter((t) => t !== id)
+      fn()
+    }, ms)
+    holdTimers.current.push(id)
+  }
 
   // The three list-less states share the browse screen's frame so that whichever
   // one you land on, the header still says what was looked at — which under
@@ -5015,16 +5110,14 @@ export const App = ({
     setLeavingUrls((prev) =>
       prev.includes(target.url) ? prev : [...prev, target.url],
     )
-    holdTimers.current.push(
-      setTimeout(() => {
-        setLeavingUrls((prev) => prev.filter((u) => u !== target.url))
-        setState((s) =>
-          s.phase === "browse"
-            ? { ...s, sections: withoutItem(s.sections, target) }
-            : s,
-        )
-      }, LEAVING_HOLD_MS),
-    )
+    holdFor(() => {
+      setLeavingUrls((prev) => prev.filter((u) => u !== target.url))
+      setState((s) =>
+        s.phase === "browse"
+          ? { ...s, sections: withoutItem(s.sections, target) }
+          : s,
+      )
+    }, LEAVING_HOLD_MS)
   }
 
   // Back to the list first, so the sparkle happens where you can see it — the
@@ -5035,16 +5128,14 @@ export const App = ({
     setMergedUrls((prev) =>
       prev.includes(target.url) ? prev : [...prev, target.url],
     )
-    holdTimers.current.push(
-      setTimeout(() => {
-        setMergedUrls((prev) => prev.filter((u) => u !== target.url))
-        setState((s) =>
-          s.phase === "browse"
-            ? { ...s, sections: withoutItem(s.sections, target) }
-            : s,
-        )
-      }, MERGED_HOLD_MS),
-    )
+    holdFor(() => {
+      setMergedUrls((prev) => prev.filter((u) => u !== target.url))
+      setState((s) =>
+        s.phase === "browse"
+          ? { ...s, sections: withoutItem(s.sections, target) }
+          : s,
+      )
+    }, MERGED_HOLD_MS)
   }
   return (
     <>
