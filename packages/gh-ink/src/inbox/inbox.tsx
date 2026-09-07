@@ -2011,6 +2011,15 @@ export const rampFrame = (
  * sibling running `--here` — same binary, longer uptime, no marked tabs — sat
  * at 13 MB throughout.
  *
+ * TWO CAVEATS ON THOSE FIGURES, because they read like a baseline and are not
+ * one. 1.4 GB/min is a terminal-phase rate off a host whose swap was already
+ * full, so GC was paging its own heap; the honest average is 3.1 MB/min. And the
+ * 13 MB is `heapUsed`, not RSS — an EMPTY node process is 42 MB here, and 89 MB
+ * once react and ink are merely imported. A healthy cockpit rests around 109 MB
+ * RSS, which is that floor plus its board. Neither correction touches the
+ * argument, which was three orders of magnitude wide; both matter to anyone
+ * reaching for these numbers as a reference. Re-measured 2026-09-07.
+ *
  * The window was 60s, chosen against the eye on the reasoning that a pulse
  * nobody has looked at in a minute will not be noticed by pulsing longer. True,
  * and aimed at the wrong clock: the window is armed by NEWS ARRIVING, and the
