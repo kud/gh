@@ -39,13 +39,22 @@ class FakeStdout extends EventEmitter {
 
 class FakeStdin extends EventEmitter {
   isTTY = true
+  private buffer: string | null = null
   setEncoding() {}
   setRawMode() {}
   resume() {}
   pause() {}
   ref() {}
   unref() {}
-  read = () => null
+  read = () => {
+    const d = this.buffer
+    this.buffer = null
+    return d
+  }
+  press = (key: string) => {
+    this.buffer = key
+    this.emit("readable")
+  }
 }
 
 const settle = () => new Promise((r) => setImmediate(r))
@@ -107,6 +116,7 @@ const sidebar: Sidebar = {
 
 const frameAt = async (columns: number, withSidebar: boolean) => {
   const stdout = new FakeStdout(columns, 30)
+  const stdin = new FakeStdin()
   const instance = render(
     <App
       fetcher={async () => ({
@@ -118,7 +128,7 @@ const frameAt = async (columns: number, withSidebar: boolean) => {
     />,
     {
       stdout: stdout as never,
-      stdin: new FakeStdin() as never,
+      stdin: stdin as never,
       debug: true,
       exitOnCtrlC: false,
       patchConsole: false,
@@ -126,6 +136,13 @@ const frameAt = async (columns: number, withSidebar: boolean) => {
   )
   await settle()
   await settle()
+  // The rail is closed at mount, so supplying one narrows nothing — and the
+  // narrowing is the whole lever these specs pull.
+  if (withSidebar) {
+    stdin.press("i")
+    await settle()
+    await settle()
+  }
   const frame = stdout.lastFrame()
   instance.unmount()
   instance.cleanup()

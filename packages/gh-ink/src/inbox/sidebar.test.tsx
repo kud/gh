@@ -139,22 +139,33 @@ const mount = async (withSidebar: boolean, columns = 120) => {
   }
 }
 
+// The rail is closed at mount, so every spec about what it LOOKS like has to
+// ask for it first. Bundled here rather than repeated, so a spec reads as the
+// thing it asserts rather than as a press and then the thing.
+const mountOpen = async () => {
+  const harness = await mount(true)
+  await harness.press("i")
+  return harness
+}
+
 describe("the initiatives rail", () => {
-  // A rail you have to remember to ask for is one you never consult, and the
-  // roadmap is the half of the picture the tabs cannot show at all.
-  it("is open by default wherever a host supplies one", async () => {
+  // Forty columns out of the list is a real price, and the list is what the
+  // cockpit is opened for. The footer carries the key while the rail is away —
+  // a closed rail nobody can find is the same as no rail at all.
+  it("is closed by default, and says which key brings it in", async () => {
     const { frame, stop } = await mount(true)
-    expect(frame()).toContain("Initiatives")
-    expect(frame()).toContain("PROJ-900")
+    expect(frame()).not.toContain("PROJ-900")
+    expect(frame()).toContain("i initiatives")
     stop()
   })
 
-  it("closes on i and comes back on i", async () => {
+  it("opens on i and goes away again on i", async () => {
     const { frame, press, stop } = await mount(true)
     await press("i")
-    expect(frame()).not.toContain("PROJ-900")
-    await press("i")
+    expect(frame()).toContain("Initiatives")
     expect(frame()).toContain("PROJ-900")
+    await press("i")
+    expect(frame()).not.toContain("PROJ-900")
     stop()
   })
 
@@ -174,7 +185,7 @@ describe("the initiatives rail", () => {
   // not know the rail is there overflows by exactly the rail, and the frame is
   // sized to fill the terminal — so it scrolls the panel rather than clipping.
   it("takes its columns out of the list, not out of the frame", async () => {
-    const { frame, stop } = await mount(true)
+    const { frame, stop } = await mountOpen()
     for (const line of frame().split("\n"))
       expect([...line].length).toBeLessThanOrEqual(COLS + 4)
     stop()
@@ -182,7 +193,7 @@ describe("the initiatives rail", () => {
 
   // Same arrow, same orange, same question as the PR rows: does this want me.
   it("marks an initiative that wants you", async () => {
-    const { lineWith, stop } = await mount(true)
+    const { lineWith, stop } = await mountOpen()
     expect(lineWith("PROJ-900")).toContain("←")
     expect(lineWith("PROJ-901")).not.toContain("←")
     stop()
@@ -191,13 +202,13 @@ describe("the initiatives rail", () => {
 
 describe("browsing the rail", () => {
   it("is not focused until you cross into it", async () => {
-    const { frame, stop } = await mount(true)
+    const { frame, stop } = await mountOpen()
     expect(frame()).not.toContain("● focus")
     stop()
   })
 
   it("takes focus on tab, and says so in words", async () => {
-    const { frame, press, stop } = await mount(true)
+    const { frame, press, stop } = await mountOpen()
     await press(TAB)
     expect(frame()).toContain("● focus")
     stop()
@@ -207,7 +218,7 @@ describe("browsing the rail", () => {
   // Advertising `m actions` beside a cursor that cannot reach a row names a key
   // that does nothing where you are standing.
   it("swaps the footer for its own keymap while focused", async () => {
-    const { frame, press, stop } = await mount(true)
+    const { frame, press, stop } = await mountOpen()
     expect(frame()).toContain("m actions")
     await press(TAB)
     expect(frame()).toContain("back to list")
@@ -216,7 +227,7 @@ describe("browsing the rail", () => {
   })
 
   it("moves its own cursor with the arrows", async () => {
-    const { lineWith, press, stop } = await mount(true)
+    const { lineWith, press, stop } = await mountOpen()
     await press(TAB)
     expect(lineWith("PROJ-900")).toContain("❯")
     await press(DOWN)
@@ -228,7 +239,7 @@ describe("browsing the rail", () => {
   })
 
   it("stops at the ends rather than wrapping", async () => {
-    const { lineWith, press, stop } = await mount(true)
+    const { lineWith, press, stop } = await mountOpen()
     await press(TAB)
     await press(UP)
     expect(lineWith("PROJ-900")).toContain("❯")
@@ -240,7 +251,7 @@ describe("browsing the rail", () => {
   })
 
   it("hands the arrows back on esc", async () => {
-    const { frame, press, stop } = await mount(true)
+    const { frame, press, stop } = await mountOpen()
     await press(TAB)
     await press(ESC)
     expect(frame()).not.toContain("● focus")
@@ -249,7 +260,7 @@ describe("browsing the rail", () => {
   })
 
   it("hands the arrows back on tab as well", async () => {
-    const { frame, press, stop } = await mount(true)
+    const { frame, press, stop } = await mountOpen()
     await press(TAB)
     await press(TAB)
     expect(frame()).not.toContain("● focus")
@@ -259,7 +270,7 @@ describe("browsing the rail", () => {
   // Focus left behind on a hidden rail is the one state where nothing on screen
   // says which region ↵ would act on.
   it("cannot be left focused on a rail that has been closed", async () => {
-    const { frame, press, stop } = await mount(true)
+    const { frame, press, stop } = await mountOpen()
     await press(TAB)
     await press("i")
     expect(frame()).not.toContain("● focus")
