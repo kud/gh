@@ -75,13 +75,22 @@ class FakeStdout extends EventEmitter {
 
 class FakeStdin extends EventEmitter {
   isTTY = true
+  private buffer: string | null = null
   setEncoding() {}
   setRawMode() {}
   resume() {}
   pause() {}
   ref() {}
   unref() {}
-  read = () => null
+  read = () => {
+    const d = this.buffer
+    this.buffer = null
+    return d
+  }
+  press = (key: string) => {
+    this.buffer = key
+    this.emit("readable")
+  }
 }
 
 const settle = () => new Promise((r) => setImmediate(r))
@@ -126,6 +135,7 @@ const frameOf = async (item: GHItem, withSidebar: boolean) => {
     { id: "in-progress", label: "In progress", items: [item] },
   ]
   const stdout = new FakeStdout(COLS + 4, 30)
+  const stdin = new FakeStdin()
   const instance = render(
     <App
       fetcher={async () => ({
@@ -137,7 +147,7 @@ const frameOf = async (item: GHItem, withSidebar: boolean) => {
     />,
     {
       stdout: stdout as never,
-      stdin: new FakeStdin() as never,
+      stdin: stdin as never,
       debug: true,
       exitOnCtrlC: false,
       patchConsole: false,
@@ -145,6 +155,13 @@ const frameOf = async (item: GHItem, withSidebar: boolean) => {
   )
   await settle()
   await settle()
+  // The rail is closed at mount, so supplying one is not the same as showing
+  // one — and it is the SHOWING that narrows the row this spec measures.
+  if (withSidebar) {
+    stdin.press("i")
+    await settle()
+    await settle()
+  }
   const frame = stdout.lastFrame()
   instance.unmount()
   instance.cleanup()

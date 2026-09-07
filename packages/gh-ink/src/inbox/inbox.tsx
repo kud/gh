@@ -3357,11 +3357,11 @@ const BrowseScreen = ({
   // left behind saying the opposite of what the code did — which is how the
   // unbounded pulse survived review. The ticker is gated on the marks as a whole
   // and bounded by PULSE_SETTLE_MS instead; see it for what that cost.
-  // Open by default wherever a host supplies one. A rail you have to remember to
-  // ask for is a rail you do not consult, and the roadmap is the half of the
-  // picture the tabs cannot show at all — it earns its columns by being there.
-  // `i` still closes it for the stretches where the list wants the whole width.
-  const [railOpen, setRailOpen] = useState(true)
+  // Closed by default, even where a host supplies one. The rail costs forty
+  // columns out of the list, and the list is what the cockpit is opened for —
+  // a roadmap consulted now and then does not get to narrow every row all day.
+  // `i` brings it in, and the footer advertises that key while it is away.
+  const [railOpen, setRailOpen] = useState(false)
   const showRail = railOpen && !!sidebar
   // Which half of the screen owns the arrow keys. Two regions, one at a time —
   // the alternative is a second visible cursor and no way to tell which one ↵
