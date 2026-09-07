@@ -1,12 +1,13 @@
 import { $ } from "zx"
 import React, { useState } from "react"
-import { Box, useInput } from "ink"
+import { Box, Text, useInput } from "ink"
 import { Tabs, useTabs, type TabItem } from "@kud/ink-ui"
 import { DrillView } from "./drill-view.js"
 import { ActionMenu, buildActions, useActionMenu, type GHItem } from "../lib.js"
 import { HealthPanel } from "@kud/gh-ink"
 import { fetchHealth, type PrCheck } from "@kud/gh"
 import { CommentsPanel, fetchComments } from "./comments-panel.js"
+import { summaryOf } from "./pr-summary.js"
 import { CheckLogView, jobIdOf } from "./check-log-view.js"
 import { checkDrillFor } from "./check-drill.js"
 import { AiLauncher, CopyPromptNotice } from "./ai-panel.js"
@@ -101,6 +102,11 @@ export const PrView = ({
     `pr-health-${item.repo}-${item.number}`,
     () => fetchHealth(item.repo, item.number),
   )
+
+  // Off the health fetch, which already goes to `gh pr view` per PR on demand —
+  // so the four extra field names ride along for nothing rather than costing a
+  // second call. Absent while it loads, and the line simply is not drawn.
+  const summary = summaryOf(item, health.data, process.stdout.columns ?? 80)
 
   const checkLabel = (c: PrCheck) =>
     c.workflowName
@@ -263,7 +269,18 @@ export const PrView = ({
       subtitle={item.title}
       hints={hints}
     >
-      <Box marginBottom={1}>
+      {/* Above the tabs, never below: below, it would read as belonging to the
+          active panel, which is exactly the claim not being made. The size is
+          the bright element and the rest is dim — the eye lands on how big this
+          is, then reads outward if it cares. */}
+      {summary.size || summary.rest ? (
+        <Box>
+          {summary.size ? <Text>{summary.size}</Text> : null}
+          {summary.size && summary.rest ? <Text dimColor> · </Text> : null}
+          {summary.rest ? <Text dimColor>{summary.rest}</Text> : null}
+        </Box>
+      ) : null}
+      <Box marginBottom={1} marginTop={1}>
         <Tabs active={tab} items={tabItems} />
       </Box>
       {menu.actions ? (
