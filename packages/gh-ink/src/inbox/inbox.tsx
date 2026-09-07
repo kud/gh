@@ -1058,33 +1058,78 @@ const Backdrop = ({
 )
 
 /**
- * What the tab badge and the header total both count: rows that are somebody's
- * work, at the top level.
+ * What the tab badge and the header total both count.
  *
- * The exclusions are two different kinds of thing. Headers and the
- * show-more/show-less affordances are furniture — not entities at all, which is
- * why the search and repo filters drop them too. This function used to exclude
- * only the two header kinds while its three siblings excluded all four, so a
- * collapsed tail sitting at the top level counted as an item.
- * `role: "container"` rows ARE entities, selectable and openable; they simply
- * are not work. An epic is the case that forced the distinction: real, owned,
- * and on screen until it closes, but the work is the stories under it, and
+ * ONE INVARIANT: a piece of work counts once, at whatever depth the board
+ * happens to file it. Everything below follows from that, and the name says so
+ * because the old one — `workCount` — read as a fact about the tree and so
+ * nobody re-asked whether the tree still meant what it had when it was written.
+ * It did not, and the count silently went to zero.
+ *
+ * Furniture never counts: headers and the show-more/show-less affordances are
+ * not entities at all, which is why the search and repo filters drop them too.
+ * `role: "container"` rows ARE entities, selectable and openable; they are
+ * simply not work. An epic is the case that forced the distinction — real,
+ * owned, on screen until it closes, but the work is the stories under it, and
  * counting it as well reported five things to do where there were four.
+ *
+ * Everything else counts when it is a LEAF — when nothing hangs under it. That
+ * is the only predicate under which the invariant holds. A PR on a tab of its
+ * own counts one; the same PR after its ticket becomes parseable, so that it now
+ * hangs under a story, still counts one. Counting every non-container row would
+ * make that transition raise the total, which is the epic bug one level down:
+ * nothing was created, the board merely got tidier, and the header claims you
+ * have more to do.
+ *
+ * It also settles the 0-to-1 case in the right direction. A story with no PR is
+ * its own leaf and counts one — a ticket in review with nothing to show is real
+ * work, arguably the most actionable row on the board. It gains its first PR and
+ * still counts one: the story stops being the item and its PR becomes the item.
+ * A row earns container-hood by HAVING children, which is why this lives in the
+ * predicate rather than in a flag the host has to remember to set.
+ *
+ * A collapsed tail contributes what it HIDES, and that line is load-bearing:
+ * pressing return on a `show-more` splices its rows into `items` in place, so
+ * without it the badge would rise on expanding and fall on collapsing — a key
+ * that only changes what is drawn would change how much work you have. With it,
+ * collapsed contributes `hidden.length` and expanded contributes the same rows
+ * as leaves, and the number holds still.
+ *
+ * Leaf-ness is read off the RENDERED list, so a search that hides a story's PRs
+ * turns that story back into a leaf and it counts itself. That is deliberate:
+ * the badge describes what is on screen to act on.
  *
  * One function, both consumers, on purpose. The badge and the whole-board total
  * are the same claim at two scales; computed apart they drift, and a header that
  * disagrees with the sum of its own tabs is worse than either number alone.
  */
-export const topLevelCount = (s: Section) =>
-  s.items.filter(
-    (i) =>
-      i.kind !== "repo-header" &&
-      i.kind !== "subgroup-header" &&
-      i.kind !== "show-more" &&
-      i.kind !== "show-less" &&
-      !("role" in i && i.role === "container") &&
-      depthOf(i) === 0,
-  ).length
+export const workCount = (s: Section): number => {
+  let n = 0
+  for (let i = 0; i < s.items.length; i++) {
+    const item = s.items[i]
+    if (!item) continue
+    // Counted by its payload rather than as a row, so collapsing and expanding
+    // report the same number. Stays in the furniture list below for its own
+    // sake: it passes the leaf test, so it would otherwise count as one MORE
+    // than the rows it stands for.
+    if (item.kind === "show-more") {
+      n += item.hidden.length
+      continue
+    }
+    if (
+      item.kind === "repo-header" ||
+      item.kind === "subgroup-header" ||
+      item.kind === "show-less"
+    )
+      continue
+    if ("role" in item && item.role === "container") continue
+    // The next row deeper than this one means something hangs here. `depthOf`
+    // answers 0 for a missing row, so the last item in a section is a leaf.
+    if (depthOf(s.items[i + 1]) > depthOf(item)) continue
+    n += 1
+  }
+  return n
+}
 
 export const drillCmd = (item: AnyItem): string | null => {
   if (item.kind === "task")
@@ -1594,7 +1639,7 @@ const InboxHeader = ({
   appliedSummary?: string
   fetchedAt?: number | null
 }) => {
-  const total = sections.reduce((n, s) => n + topLevelCount(s), 0)
+  const total = sections.reduce((n, s) => n + workCount(s), 0)
   // padStart, not padEnd: the count needs a stable width so the header doesn't
   // shuffle as it changes, but padding after the digits splits "47" from
   // "items". The slack belongs in front of the number, where it reads as a gap
@@ -4257,7 +4302,7 @@ const BrowseScreen = ({
           items={localSections.map((s) => ({
             value: s.id,
             label: s.label,
-            count: topLevelCount(s),
+            count: workCount(s),
             // Its own cell, always two wide, so news arriving never slides the
             // bar — and free to animate for exactly that reason.
             // The ticker undivided — see TAB_PULSE. The row marks' /3 buys quiet

@@ -22,7 +22,7 @@ export {
   filterByRepos,
   withoutItem,
   reposInSections,
-  topLevelCount,
+  workCount,
   truncate,
   buildActions,
   buildCheckoutCmd,
