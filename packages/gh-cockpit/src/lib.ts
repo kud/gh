@@ -88,7 +88,7 @@ export {
   counts,
   railCapacity,
   toCiStatusState,
-  topLevelCount,
+  workCount,
   truncate,
   useActionMenu,
   whoseMove,
