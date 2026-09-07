@@ -1912,6 +1912,40 @@ export const TRANSIT_HOLD_MS = 7000
  * tab pulse stays phase-locked to the sparkle by dividing by nothing.
  */
 const TRANSIT_FRAME_TICKS = 2
+/** One row-ramp frame in milliseconds, for anything counting off wall time. */
+const TRANSIT_FRAME_MS = MERGED_FRAME_MS * TRANSIT_FRAME_TICKS
+
+/**
+ * Which frame of a row ramp to draw: once through, then hold on the last.
+ *
+ * Off WALL TIME rather than off the shared counter, because each row starts its
+ * own ramp at its own moment — a departure when you pressed the key, a refresh
+ * mark when you arrived on its tab. The shared counter can only say how long the
+ * ticker has been running, which is a fact about the session and not about this
+ * row, and dividing it gives every row on screen the same phase whatever time it
+ * actually entered transit.
+ *
+ * `Math.min` rather than `%` is the whole of the one-shot. A modulo restarts the
+ * sawtooth, and a departure that dissolves, snaps back and dissolves again never
+ * arrives anywhere — see TRANSIT_OUT_FRAMES.
+ *
+ * No origin falls back to the looping counter, which is what a row whose start
+ * nobody recorded has always done. Kept deliberately rather than defaulted to
+ * zero: `now - 0` is a clamp to the last frame, so a missing origin would render
+ * as an already-finished animation instead of an obviously unanimated one.
+ */
+export const rampFrame = (
+  len: number,
+  loopFrame: number,
+  transitAt?: number,
+  now = Date.now(),
+): number =>
+  transitAt == null
+    ? loopFrame % len
+    : Math.max(
+        0,
+        Math.min(len - 1, Math.floor((now - transitAt) / TRANSIT_FRAME_MS)),
+      )
 
 /**
  * How long the shared ticker is allowed to run before the pulse settles.
@@ -1997,6 +2031,15 @@ const NO_HOLDS: Map<string, number> = new Map()
 // Dissolving and coalescing, so the direction of travel is in the SHAPE. Read
 // them as one animation played forwards and backwards: a row on its way out
 // thins to a dot, a row arriving fills in from one.
+//
+// Played ONCE and then held, never looped — see `rampAt`. These are sawtooths,
+// and the snap back to the first frame is the whole reason TAB_PULSE was given
+// six out-and-back frames instead. On a loop a departure never arrives anywhere:
+// it dissolves, restarts, dissolves again, and that is what "the animation feels
+// too slow" usually turns out to mean — not the tempo, the lack of an ending.
+// Held on its last frame it says one thing, once. A departure resting on `·` is
+// the row admitting it has gone, which is the reading that was wrong for the tab
+// mark (see PULSE_SETTLED_FRAME) and is exactly right here.
 const TRANSIT_OUT_FRAMES = ["◉", "◎", "○", "·"]
 const TRANSIT_IN_FRAMES = ["·", "○", "◎", "◉"]
 // Reinforcement only. NEW / GONE / UPDATED below are the actual signal, for the
@@ -2116,6 +2159,7 @@ const ItemRow = ({
   merged,
   transient: refreshMark,
   leaving,
+  transitAt,
   prefix = "",
   parent,
   sparkFrame = 0,
@@ -2151,6 +2195,15 @@ const ItemRow = ({
   transient?: Transient
   /** You just closed it, or removed yourself from it: on its way out. */
   leaving?: boolean
+  /**
+   * When THIS row's transit began, so its ramp can play once from there.
+   *
+   * Absent falls back to the shared counter's looping behaviour, which is right
+   * for a row whose origin nobody recorded and wrong for every row that has one:
+   * the ramps are a sawtooth, and a sawtooth on a loop restarts rather than
+   * arrives. See the one-shot note on TRANSIT_OUT_FRAMES.
+   */
+  transitAt?: number
   sparkFrame?: number
 }) => {
   // One vocabulary, because the row is saying the same thing either way: it is
@@ -2164,6 +2217,11 @@ const ItemRow = ({
   const transient: Transient | undefined = leaving ? "out" : refreshMark
   // Slower than the merge sparkle, off the same counter — see TRANSIT_FRAME_TICKS.
   const transitFrame = Math.floor(sparkFrame / TRANSIT_FRAME_TICKS)
+  // Where this row is along its ramp. Once, then hold — a goodbye is a one-shot,
+  // and looping one is what makes it read as unresolved rather than as slow.
+  // Clamped rather than modulo'd, so it comes to rest on the last frame: `·` for
+  // a departure, which is the row saying it has gone, and `◉` for an arrival.
+  const rampAt = (len: number) => rampFrame(len, transitFrame, transitAt)
   // The one distinction the fold above deliberately loses, and the one place it
   // matters: whether YOU caused this.
   //
@@ -2226,13 +2284,9 @@ const ItemRow = ({
     const transitIcon = !transient
       ? " "
       : isDeparture(transient)
-        ? (TRANSIT_OUT_FRAMES[
-            transitFrame % TRANSIT_OUT_FRAMES.length
-          ] as string)
+        ? (TRANSIT_OUT_FRAMES[rampAt(TRANSIT_OUT_FRAMES.length)] as string)
         : isArrival(transient)
-          ? (TRANSIT_IN_FRAMES[
-              transitFrame % TRANSIT_IN_FRAMES.length
-            ] as string)
+          ? (TRANSIT_IN_FRAMES[rampAt(TRANSIT_IN_FRAMES.length)] as string)
           : "\u25C9"
     // The prefix term is new here and easy to miss: a task row had no indent
     // to price until stories became tasks hanging under an epic, so this
@@ -2343,9 +2397,9 @@ const ItemRow = ({
   const icon = merged
     ? (MERGED_FRAMES[sparkFrame % MERGED_FRAMES.length] as string)
     : transient && isDeparture(transient)
-      ? (TRANSIT_OUT_FRAMES[transitFrame % TRANSIT_OUT_FRAMES.length] as string)
+      ? (TRANSIT_OUT_FRAMES[rampAt(TRANSIT_OUT_FRAMES.length)] as string)
       : transient && isArrival(transient)
-        ? (TRANSIT_IN_FRAMES[transitFrame % TRANSIT_IN_FRAMES.length] as string)
+        ? (TRANSIT_IN_FRAMES[rampAt(TRANSIT_IN_FRAMES.length)] as string)
         : healthIcon
   const color = merged
     ? MERGED_COLOUR
@@ -3174,6 +3228,7 @@ const BrowseScreen = ({
   brand,
   mergedUrls,
   leavingUrls,
+  transitSince,
   onLeave,
   transients,
   onTabChange,
@@ -3195,6 +3250,15 @@ const BrowseScreen = ({
   mergedUrls?: string[]
   /** URLs of rows closed or dismissed from here, still inside their hold. */
   leavingUrls?: string[]
+  /**
+   * When each animating row's transit began, keyed by URL, so its ramp can play
+   * once from there rather than looping off the shared counter.
+   *
+   * App's to own for the same reason `onLeave` is: a departure's origin is the
+   * keypress, and a refresh mark's is the moment the reader arrived on the tab
+   * holding it — both are events App sees and the list does not.
+   */
+  transitSince?: Map<string, number>
   /**
    * This row has been dismissed — closed, or you off its reviewer list. The host
    * owns what happens next, because the row has to keep being RENDERED for the
@@ -4284,6 +4348,9 @@ const BrowseScreen = ({
                     !!leavingUrls?.includes(item.url)
                   }
                   transient={transientOf(transients, item, section.id)}
+                  transitAt={
+                    "url" in item ? transitSince?.get(item.url) : undefined
+                  }
                   // Computed against section.items, never the visible slice: a
                   // window boundary is not the end of a group, and slicing first
                   // would draw a closing corner wherever the scroll happens to cut.
@@ -4992,6 +5059,29 @@ export const App = ({
 
   const [mergedUrls, setMergedUrls] = useState<string[]>([])
   const [leavingUrls, setLeavingUrls] = useState<string[]>([])
+  // When each departure began. A ref rather than state: it is written in the
+  // keypress handler immediately before the `setLeavingUrls` that causes the
+  // render which reads it, so it is never the thing a repaint is waiting on.
+  const leavingSince = useRef<Map<string, number>>(new Map())
+  /**
+   * Where every animating row is counting from, in one map for the list.
+   *
+   * Two origins, because the two kinds of transit begin at different moments. A
+   * departure starts when you pressed the key. A REFRESH mark starts when you
+   * arrived on the tab holding it — not when the refresh found it, which may
+   * have been minutes ago behind a tab you were not on, and a ramp that played
+   * out unwatched would leave you the last frame and nothing else. That is the
+   * same instant `heldSince` already stamps for the hold, so the ramp and the
+   * hold now start together rather than merely overlapping.
+   */
+  const transitSince = useMemo(() => {
+    const out = new Map(leavingSince.current)
+    for (const [url, tab] of transitTabs.current) {
+      const at = heldSince.get(tab)
+      if (at != null && !out.has(url)) out.set(url, at)
+    }
+    return out
+  }, [heldSince, transients, leavingUrls])
   // One list for both holds: they are the same kind of promise — a row kept on
   // screen past the moment its state changed — and two refs would only give the
   // unmount two chances to miss one.
@@ -5107,10 +5197,15 @@ export const App = ({
     // `sections` for an identical copy, and BrowseScreen resyncs off that prop
     // identity — collapsing every expanded group at the moment you closed a row.
     if (state.phase !== "browse") toBrowse()
+    // Stamped before the state that renders it, so the ramp's first frame is
+    // drawn against an origin rather than against a missing one.
+    if (!leavingSince.current.has(target.url))
+      leavingSince.current.set(target.url, Date.now())
     setLeavingUrls((prev) =>
       prev.includes(target.url) ? prev : [...prev, target.url],
     )
     holdFor(() => {
+      leavingSince.current.delete(target.url)
       setLeavingUrls((prev) => prev.filter((u) => u !== target.url))
       setState((s) =>
         s.phase === "browse"
@@ -5160,6 +5255,7 @@ export const App = ({
         hidden={overlay !== null}
         mergedUrls={mergedUrls}
         leavingUrls={leavingUrls}
+        transitSince={transitSince}
         onLeave={markLeaving}
         transients={transients}
         onTabChange={setVisibleTab}
