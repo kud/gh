@@ -14,7 +14,11 @@ export const fetchHealth = async (
     "--repo",
     repo,
     "--json",
-    "statusCheckRollup,reviews,reviewDecision,mergeable,mergeStateStatus,author",
+    // The last four are for the detail view's summary line rather than for
+    // health. They ride along because this call is already per-PR and on demand:
+    // adding field names to a `gh pr view` costs nothing measurable, where a
+    // second call would cost a round trip on every drill-in.
+    "statusCheckRollup,reviews,reviewDecision,mergeable,mergeStateStatus,author,additions,deletions,changedFiles,baseRefName",
   ])
   return JSON.parse(stdout) as PrHealthData
 }

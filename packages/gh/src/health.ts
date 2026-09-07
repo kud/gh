@@ -1,4 +1,3 @@
-
 // A PR's aggregate health as a single semantic token. Colour/glyph mapping is a
 // UI concern and lives in the consuming surface (e.g. @kud/gh-ink) — the core
 // only decides which token applies.
@@ -42,6 +41,16 @@ export type PrHealthData = {
   mergeable: string
   mergeStateStatus: string
   author: { login: string } | null
+  /**
+   * Size and target, for the detail view's summary line. Not health — the panel
+   * does not read them — but fetched here because this is already a per-PR,
+   * on-demand `gh pr view` and adding fields to it costs nothing against the
+   * inbox budget, where a second call would cost a round trip.
+   */
+  additions?: number
+  deletions?: number
+  changedFiles?: number
+  baseRefName?: string
 }
 
 // The canonical check classifiers — one source of truth, unifying the two

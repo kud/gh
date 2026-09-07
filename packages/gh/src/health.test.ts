@@ -180,7 +180,28 @@ describe("fetchHealth", () => {
       "--repo",
       "kud/gh",
       "--json",
-      "statusCheckRollup,reviews,reviewDecision,mergeable,mergeStateStatus,author",
+      "statusCheckRollup,reviews,reviewDecision,mergeable,mergeStateStatus,author,additions,deletions,changedFiles,baseRefName",
     ])
+  })
+
+  /*
+   * The last four are NOT health — the panel never reads them — and they are
+   * here because this call is already per-PR and on demand, so field names ride
+   * along for nothing where a second call would cost a round trip on every
+   * drill-in. Asserted by name so that dropping one to "tidy the projection"
+   * fails here rather than silently emptying the detail view's summary line.
+   */
+  it("asks for the summary line's fields on the same call", async () => {
+    mockedExeca.mockResolvedValueOnce({ stdout: "{}" } as never)
+    await fetchHealth("kud/gh", 7)
+    const json = mockedExeca.mock.calls[0]?.[1] as string[]
+    const projection = json[json.length - 1] ?? ""
+    for (const field of [
+      "additions",
+      "deletions",
+      "changedFiles",
+      "baseRefName",
+    ])
+      expect(projection.split(",")).toContain(field)
   })
 })
