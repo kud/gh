@@ -53,6 +53,25 @@ const processLog = (raw: string[]): { lines: StyledLine[]; jumpTo: number } => {
   return { lines, jumpTo }
 }
 
+/**
+ * Everything a terminal would act on, removed before the log is drawn.
+ *
+ * A CI log is written BY programs that colour their own output, so most of them
+ * arrive full of escape sequences — this is the normal case, not an edge. Two
+ * separate reasons they cannot reach the frame:
+ *
+ * `gh` refuses to print them at all without `--allow-escape-sequences`, which is
+ * a sensible default for a CLI whose output might be piped anywhere; and once
+ * allowed through, they are still someone else's styling arriving inside a view
+ * that does its own. A `\x1b[2J` in a build log would clear the frame around it.
+ *
+ * The pattern covers CSI sequences and OSC strings (`\x1b]8;;…` hyperlinks are
+ * common in modern build tools) — the two forms that carry a terminator rather
+ * than a fixed length.
+ */
+export const ANSI = /\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g
+export const stripAnsi = (s: string): string => s.replace(ANSI, "")
+
 // Mounted view of a GitHub Actions job log — reached from the checks list /
 // health panel. Fetches the raw log via `gh api`, windows it with ScrollView.
 export const CheckLogView = ({
@@ -76,11 +95,19 @@ export const CheckLogView = ({
 
   useEffect(() => {
     let live = true
-    $`gh api repos/${repo}/actions/jobs/${jobId}/logs`
+    // `--allow-escape-sequences` or `gh` exits 1 on any log carrying colour,
+    // which is most of them: "the response contains terminal escape sequences".
+    // Asking for them and then stripping them is not a contradiction — the flag
+    // is `gh` declining to decide on our behalf, and stripping is us deciding.
+    $`gh api --allow-escape-sequences repos/${repo}/actions/jobs/${jobId}/logs`
       .quiet()
       .then(
         (r) =>
-          live && setState({ phase: "ready", lines: r.stdout.split("\n") }),
+          live &&
+          setState({
+            phase: "ready",
+            lines: stripAnsi(r.stdout).split("\n"),
+          }),
       )
       .catch(
         (e) =>
