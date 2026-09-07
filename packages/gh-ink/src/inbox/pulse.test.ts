@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest"
 import {
   tabMarker,
   PULSE_SETTLE_MS,
+  PULSE_IDLE_MS,
   PULSE_SETTLED_FRAME,
   MERGED_FRAME_MS,
   TRANSIT_HOLD_MS,
@@ -48,6 +49,10 @@ describe("tab pulse ceiling", () => {
     // so a ceiling shorter than the longest hold would freeze a sparkle
     // mid-animation. Assert the ordering rather than the numbers, so moving any
     // hold has to come back through here.
+    //
+    // This used to hold by eight-fold accident at a 60s ceiling. At 12s the
+    // margin over TRANSIT_HOLD_MS is 1.7x, which makes this spec the only thing
+    // standing between a shortened window and rows that snap mid-dissolve.
     const ceiling = PULSE_MAX_FRAMES * MERGED_FRAME_MS
     for (const hold of [TRANSIT_HOLD_MS, MERGED_HOLD_MS, LEAVING_HOLD_MS])
       expect(ceiling).toBeGreaterThan(hold)
@@ -57,6 +62,22 @@ describe("tab pulse ceiling", () => {
     // The other end of the same trade. A ceiling of a few frames would bound the
     // render loop perfectly and deliver no pulse, which is a silent way to
     // delete the feature.
-    expect(PULSE_MAX_FRAMES).toBeGreaterThan(100)
+    //
+    // Asserted in BREATHS rather than frames. The old floor was 100 frames,
+    // which was a fact about a 60s window rather than about the eye — the thing
+    // that has to survive is that the reader sees the dot swell and fall several
+    // times over, and one breath is TAB_PULSE's six frames.
+    const breaths = (PULSE_MAX_FRAMES * MERGED_FRAME_MS) / (6 * MERGED_FRAME_MS)
+    expect(breaths).toBeGreaterThan(10)
+  })
+
+  it("never re-arms faster than it settles, so the duty cycle stays under 1", () => {
+    // The whole memory argument in one line. Arming on presence means somebody
+    // tapping a key just past the idle threshold buys a fresh window every time,
+    // for as long as they keep it up — so PULSE_SETTLE_MS : PULSE_IDLE_MS IS the
+    // sustained worst-case share of the old unbounded cost. An idle threshold
+    // shorter than the window would mean a pulse that never stops at all, which
+    // is precisely the bug the ceiling was introduced to end.
+    expect(PULSE_IDLE_MS).toBeGreaterThan(PULSE_SETTLE_MS)
   })
 })
