@@ -57,14 +57,46 @@ export const MY_PRS_LIMIT = 30
  * against the next reads a row leaving the WINDOW as a row leaving the WORLD, so
  * every update to any of those 95 issues evicted something and was reported as
  * news about the evicted one. See `sourceCoverage`.
+ *
+ * THE NUMBERS ARE NOT ONE NUMBER, because a row is not one weight. 30 was set
+ * for PULL REQUESTS and the issue sources inherited it, which is how a cap sized
+ * against `reviewThreads(first: 50)` came to govern a row carrying
+ * `comments(last: 1)` and ten labels. A PR drags roughly 80 nested nodes; an
+ * issue drags about 12.
+ *
+ * Measured 2026-09-07, same account, same selections that actually ship:
+ *
+ *   repoIssues  first:30   cost 1   360 nodes
+ *   repoIssues  first:100  cost 2  1200 nodes   ← every issue he has
+ *   assigned    first:100  cost 2  6100 nodes   (mixed source, see below)
+ *   the real 2-source batch at first:100: cost 4, 2400 nodes, 5.3s
+ *
+ * So showing every issue costs about three points a fetch, against a 5000/hour
+ * budget and a 10-minute cache — six fetches an hour, call it 0.4% of budget.
+ * The cap was never buying anything on these three.
+ *
+ * WHAT IT DOES SPEND is headroom against the proxy, which fails on WALL CLOCK
+ * rather than cost: eight sources at ~16,870 nodes 502s two runs in three. The
+ * batch above is 2,400 nodes and 5.3s, roughly a seventh of that, which is why
+ * this is safe today rather than merely cheap. If 502s start appearing, this is
+ * the first thing to put back, and it is one constant.
+ *
+ * `assigned` is the one to watch: it is a MIXED source, so a PR assigned to you
+ * arrives with the full health fragment behind it. Today it returns 38 rows and
+ * no PRs, but its node count is budgeted for the PR shape whatever comes back —
+ * hence 6,100 for 38 rows. A day spent with fifty PRs assigned would make this
+ * the heaviest search in the query.
+ *
+ * The PR sources keep their caps. There the outer number really does multiply
+ * ~80 nested nodes, and `myPRs` at 30 is already half the cost of the whole call.
  */
 export const SOURCE_LIMITS: Record<InboxSource, number> = {
   myPRs: MY_PRS_LIMIT,
   reviewRequests: 20,
   reviewed: 20,
-  assigned: 30,
-  repoIssues: 30,
-  authoredIssues: 30,
+  assigned: 100,
+  repoIssues: 100,
+  authoredIssues: 100,
   repoPRs: 30,
   recentlyDone: 30,
 }
