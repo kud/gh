@@ -53,8 +53,37 @@ export const registerPrompts = (forms: PromptForms): void => {
   registered = forms
 }
 
+/**
+ * What a delegated agent is told when the host has registered nothing — prose
+ * carrying a URL, and deliberately no command vocabulary at all.
+ *
+ * The registry above exists because four hardcoded `/k-pr` templates once
+ * shipped inside this package. Lifting them out fixed WHO supplies the prompt
+ * and left a subtler version standing: whoever supplies it writes it in some
+ * dialect, and the launcher hands that same string to every agent. A slash
+ * command is the sharpest case — Codex accepts a positional argument perfectly
+ * well and cannot resolve `/k-pr 733` — but the trap is general. Any prompt
+ * phrased in one agent's idiom fails in another's, and it fails INSIDE the
+ * agent, minutes later, where nothing in the cockpit looks wrong.
+ *
+ * Prose sidesteps the whole class. Every agent worth launching can read a
+ * sentence and fetch a URL, so the seed stops being a thing that must be matched
+ * to a vocabulary and becomes a thing that simply works — which is what lets
+ * CANDIDATES stay general rather than being narrowed to whichever agent the
+ * host's dialect happened to suit.
+ *
+ * The default rather than the only option: a host with a genuine vocabulary can
+ * still register `seed`, and takes on the matching problem knowingly when it
+ * does. Silence used to mean a cold start, which was correct while the fallback
+ * would have had to invent a command. It no longer has to.
+ */
+export const DEFAULT_SEED = (ctx: PromptContext): string =>
+  ctx.kind === "pr"
+    ? `Review the pull request at ${ctx.url}. Its branch is already checked out here.`
+    : `Work on the issue at ${ctx.url}. Its repository is already checked out here.`
+
 export const seedPromptFor = (ctx: PromptContext): string | undefined =>
-  registered.seed?.(ctx)
+  registered.seed?.(ctx) ?? DEFAULT_SEED(ctx)
 
 // Falls back to the row's URL rather than to nothing. Pasting a bare link into a
 // session that is already warm is the habit this key exists to save, it is

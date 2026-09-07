@@ -17,41 +17,46 @@ type Agent = {
   id: string
   label: string
   cmd: string
+  /**
+   * Whether the binary takes a prompt as its positional argument. A fact about
+   * the COMMAND, true for every install — not about whether the prompt makes
+   * sense to it, which is a different question the seed no longer raises.
+   */
+  acceptsPrompt?: boolean
 }
 type Placement = "here" | "tab" | "vpane" | "hpane"
 
 /**
  * AI agents we know how to launch — only those actually on PATH are offered.
  *
- * ONE ENTRY, and that is the whole fix rather than a shortcut. A seeded prompt
- * is not a string an agent merely accepts; it is a string an agent has to
- * UNDERSTAND. The host supplies it (see `registerPrompts`), and the host's
- * vocabulary is its own — ambre seeds `/k-pr 733`, a Claude Code slash command.
+ * `acceptsPrompt` is per-agent because a seeded prompt is not a uniform trailing
+ * argument. `claude [prompt]` and `codex [PROMPT]` take one and stay
+ * interactive; opencode's positional is `[project]`, a path, so appending a
+ * prompt makes it try to start in a directory called "Review the pull request…".
+ * Its message form, `opencode run`, is headless, which throws away the
+ * conversation this handoff exists to open. So opencode launches cold-started,
+ * and the UI says so rather than silently dropping the seed.
  *
- * The table used to carry three, guarded by an `acceptsPrompt` flag that modelled
- * whether an agent takes a positional argument at all. That is a different
- * question, and the gap between the two is where this broke:
+ * WHAT THIS FLAG DOES NOT MEAN, learned the hard way. It answers "does the
+ * binary take a positional prompt", never "will the prompt mean anything once it
+ * arrives". Those came apart when the seed was a Claude Code slash command:
+ * Codex passed the flag, was handed `/k-pr 733`, and opened on a string it could
+ * not resolve — failing inside the agent, minutes later, with nothing here
+ * looking wrong.
  *
- *   claude    takes a positional, understands the prompt   → worked
- *   opencode  positional is a PATH, so no prompt at all    → started cold, and said so
- *   codex     takes a positional, understands nothing      → opened on a string it could not resolve
+ * The seed is plain prose now (see DEFAULT_SEED in prompts.ts), which is what
+ * makes this table safe to keep general. A sentence carrying a URL needs no
+ * command vocabulary, so there is nothing left for an agent to fail to
+ * understand, and every install can be offered every agent it actually has.
  *
- * Codex was the bad one precisely because it passed the flag. opencode's
- * limitation was declared on screen; Codex's failure landed inside the agent,
- * minutes later, with nothing in the cockpit looking wrong — the exact failure
- * mode `prompts.ts`' own header was written about, shipped again one layer down.
- *
- * The general fix is a host-registered agent table paired with the prompt forms,
- * since a prompt and the vocabulary it is written in are one fact. Deliberately
- * NOT built: that is standing machinery for a package with no installers, to
- * serve a divergence that does not exist while this list has one row in it.
- *
- * So the invariant to hold, and the only one: EVERY AGENT HERE UNDERSTANDS THE
- * HOST'S SEED PROMPT. Adding a row means answering that first, not checking
- * whether the binary takes an argument.
+ * Narrowing this list to one agent is therefore the wrong repair: it would bake
+ * one host's vocabulary into a published package, which is the mistake
+ * `prompts.ts` was written to undo, made again from the other end.
  */
 export const CANDIDATES: Agent[] = [
-  { id: "claude", label: "Claude Code", cmd: "claude" },
+  { id: "claude", label: "Claude Code", cmd: "claude", acceptsPrompt: true },
+  { id: "opencode", label: "opencode", cmd: "opencode" },
+  { id: "codex", label: "Codex", cmd: "codex", acceptsPrompt: true },
 ]
 
 const PLACEMENTS: { id: Placement; label: string }[] = [

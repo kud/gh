@@ -29,18 +29,45 @@ beforeEach(() => {
 })
 
 describe("seedPromptFor", () => {
-  it("is undefined when nothing is registered, so the agent starts cold", () => {
-    expect(seedPromptFor(item)).toBeUndefined()
+  /*
+   * This used to be undefined — a cold start — which was right while any
+   * fallback would have had to invent a command. Prose does not: a sentence
+   * carrying a URL belongs to no agent's dialect, so there is something honest
+   * to say by default and no reason to say nothing.
+   */
+  it("falls back to prose carrying the URL, not to silence", () => {
+    const seed = seedPromptFor(item)
+    expect(seed).toContain(item.url)
+    expect(seed).toMatch(/pull request/i)
   })
 
-  it("returns what the host supplies", () => {
+  it("names an issue as an issue rather than a pull request", () => {
+    expect(seedPromptFor({ ...item, kind: "issue" })).toMatch(/issue/i)
+  })
+
+  /*
+   * The property that actually matters, and the reason this is prose at all.
+   * The launcher hands ONE string to whichever agent was picked, so a default
+   * phrased in any agent's idiom fails in another's — and fails inside the
+   * agent, minutes later, where nothing in the cockpit looks wrong. That is how
+   * `/k-pr 733` reached Codex.
+   */
+  it("carries no command vocabulary, so any agent can read it", () => {
+    for (const kind of ["pr", "issue"] as const) {
+      const seed = seedPromptFor({ ...item, kind }) ?? ""
+      expect(seed.startsWith("/")).toBe(false)
+      expect(seed).not.toMatch(/^[\w-]+\s+--/)
+    }
+  })
+
+  it("returns what the host supplies, in preference to the default", () => {
     registerPrompts({ seed: (ctx) => `work on #${ctx.number}` })
     expect(seedPromptFor(item)).toBe("work on #42")
   })
 
-  it("stays undefined when only portable is registered", () => {
+  it("still defaults when only portable is registered", () => {
     registerPrompts({ portable: (ctx) => ctx.url })
-    expect(seedPromptFor(item)).toBeUndefined()
+    expect(seedPromptFor(item)).toContain(item.url)
   })
 })
 
