@@ -1,5 +1,61 @@
 # @kud/gh-ink
 
+## 0.45.2
+
+### Patch Changes
+
+- 02a44d2: Row transit ramps play once and hold, instead of looping for the length of the hold.
+
+  A row on its way out dissolves `◉ ◎ ○ ·` in the health cell, and an arriving one coalesces the other way. Both were indexed with `%` off the shared ticker, so they looped: at the 7s transit hold the dissolve played roughly four times over, and at 2.5s a departure played about one and a half.
+
+  That is what "the animation feels too slow" turned out to mean. Not the tempo — the lack of an ending. These ramps are sawtooths, and a sawtooth on a loop restarts rather than arrives: the row thins to nothing, snaps back to solid, and thins again. It never says the thing it was drawn to say. `TAB_PULSE` was given six out-and-back frames specifically to avoid that snap, and `MERGED_FRAMES` gets away with 150ms precisely because `✦✧✶✧` has no snap in it — the rate difference between the two was always downstream of the shape difference.
+
+  So the index is clamped rather than wrapped, and a departure now comes to rest on `·`. That is the reading which was wrong for the tab marker and is exactly right here: the tab mark rests on its widest glyph because staying legible is its whole promise, while the row is genuinely going, the GONE pill carries the state, and dissolving to nothing IS the message.
+
+  Playing once needs each row to know when its own transit began, which the shared counter cannot say — it only knows how long the ticker has been running, so dividing it puts every row on screen in identical phase however far apart they actually started. `rampFrame` counts off wall time from a per-row origin instead, threaded down as `transitSince`.
+
+  Two origins, because the two kinds of transit begin at different moments. A departure starts when you pressed the key. A refresh mark starts when you **arrived on the tab holding it** — not when the refresh found it, which may have been minutes earlier behind a tab you were not on, and a ramp that played out unwatched would leave you the last frame and nothing else. That is the same instant `heldSince` already stamps for the hold, so the ramp and the hold now start together rather than merely overlapping.
+
+  A row with no recorded origin keeps the old looping behaviour rather than defaulting to frame zero, which sounds like the safer default and is not: `now - 0` clamps to the last frame, so a missing origin would render as an animation that had already finished instead of one that visibly never ran.
+
+- 89bbec5: The row transit ramps run at 300ms a frame instead of 450ms.
+
+  A row leaving — merged, closed, or dropped off the board — dissolves through `◉ ◎ ○ ·` in the health cell, and an arriving one coalesces back the other way. Both took the shared 150ms ticker divided by three. Watched on the real board, 450ms overshot: a farewell that slow does not read as gentle, it reads as unresolved.
+
+  The divisor is 2 now. That is deliberately not the tab pulse's rate — the pulse takes the ticker undivided, and a goodbye running as fast as a summons would be saying the wrong thing about itself. Half the tab's rate is the only other stop on the dial, since ticks are integers off a shared period, and it happens to be the right one.
+
+  The interruption argument that put the divisor there in the first place is unharmed. It was calibrated against 6.7Hz beside text you are reading; this is 3.3Hz, the far side of where flicker discomfort falls away. Nothing about inline motion at 150ms has been relitigated — the merge sparkle, which was already undivided, is untouched, and so is the tab pulse.
+
+  What this does spend is the margin the sawtooth was living on. `TRANSIT_OUT_FRAMES` snaps `◉`→`·` at the end of each cycle and loops for the length of the hold; at 450ms that snap read as a restart, and the faster it comes round the more it reads as a blink — the same discontinuity `TAB_PULSE` was given six out-and-back frames to avoid. `MERGED_FRAMES` survives 150ms precisely because `✦✧✶✧` has no snap in it, which is the tell that the rate difference was always downstream of the shape difference.
+
+  So the note above the divisor now says what the standing fix is — play each ramp once and hold, rather than loop it — and says not to divide this any further before that lands. A goodbye that keeps restarting is the thing "too slow" gets reached for to describe.
+
+- c69d97f: The tab pulse arms when you arrive, not when the news does — and stops writing into the row animations' counter.
+
+  The 60s ceiling stopped the runaway ticker, but it was hung off the wrong clock. The window opened when NEWS ARRIVED; the eye it exists to catch arrives later and separately. A minute spent breathing into an empty room is a minute of full-inbox re-render bought for nobody, and what the reader finds when they do come back is a mark that settled while they were away — which reads as a feature somebody removed rather than as one that already did its job.
+
+  So the window is 12s now, and three things arm it: news landing (unchanged), the first keypress after a quiet stretch, and a tab change. The last two are the reader demonstrably being there — walking back to the window, or scanning the bar, which is the one place a mark on a tab you are not on can be seen at all.
+
+  Deliberately not every keystroke. Someone heads-down in one tab with an old uncollected mark would re-arm continuously and put sustained 6.7fps straight back. Presence is the gate; the arrival of presence is the trigger. `PULSE_IDLE_MS` is 60s, and that ratio is the real number here: 12 in 60 is a fifth of the old cost as a sustained worst case, where a 30s threshold would be two fifths. A spec now pins `PULSE_IDLE_MS > PULSE_SETTLE_MS`, because an idle threshold shorter than the window is a pulse that never stops — the original bug wearing a new hat.
+
+  **The settle no longer writes `sparkFrame`.** It set the shared counter to `PULSE_SETTLED_FRAME` to park the mark on its widest glyph, and `sparkFrame` is what the row ramps divide for their own frames. That was safe purely by accident: at 60s the ceiling sat eight times clear of the longest row hold, so nothing could still be animating when it landed. At 12s the margin is 1.7x and a keypress can arm at any moment, so the settle would eventually snap a row mid-dissolve. It is a `settled` boolean now, read at the marker. Same glyph, no shared mutable state.
+
+  That also makes `PULSE_SETTLE_MS > TRANSIT_HOLD_MS` load-bearing where it never was, so the spec that asserts it says so, and the perceptibility floor it sits beside is expressed in breaths rather than in a frame count that was only ever a fact about 60s.
+
+  **Unrelated, found in the same pass:** `holdTimers` was pushed to on every merge and every close and never spliced. Each entry retains its callback closure, which captures the `GHItem` it was holding, so the roster grew for the life of the process — one entry per action, each pinning a row that left the screen seconds later. Holds now take themselves off the list when they fire; the unmount sweep is unchanged.
+
+  `MERGED_HOLD_MS` goes back to 3000. It shipped at that, drifted to 5000, and the rationale block on `TRANSIT_FRAME_TICKS` went on describing the original the whole time — restored rather than re-chosen.
+
+- 31d78d9: The initiatives rail starts closed, and `i` brings it in.
+
+  It used to open on mount wherever a host supplied one, on the reasoning that a rail you have to remember to ask for is a rail you never consult. That reasoning holds for the rail and ignores what it is standing next to. The rail is forty columns, and it takes them out of the list — every row, on every tab, for the whole session — while the roadmap it draws is something you check now and then. Living with it, the trade came out the other way round: a permanently narrower list to keep a panel warm that gets read in bursts.
+
+  Nothing else moves. `i` toggles it as it always did, `⇥` still crosses into it once it is up, and closing it while focused still hands the arrows back, because focus left behind on a hidden rail is the one state where nothing on screen says which region `↵` would act on.
+
+  What makes closed-by-default survivable is that the footer already named the key: with a rail available and away, the hints carry `i initiatives` — the host's own word for it, not "sidebar". A closed rail nobody can find would be the same as no rail at all, so that hint is now pinned by a spec rather than left as a nicety.
+
+  The specs that narrow a row by opening the rail — `narrow.test.tsx`, `labels.test.tsx` — now press `i` before they measure. Supplying a rail and showing one have come apart, and it is the showing that moves the width a row actually reads.
+
 ## 0.45.1
 
 ### Patch Changes
