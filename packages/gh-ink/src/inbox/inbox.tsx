@@ -1938,27 +1938,43 @@ export const TRANSIT_HOLD_MS = 7000
  * takes the ticker undivided. The split was made by ANIMATION when the thing
  * that actually differs is WHERE ON THE SCREEN it lands.
  *
- * The divisor was 3, and 450ms overshot: a farewell that slow does not read as
- * gentle, it reads as unresolved. 300ms is half the tab's rate, so a goodbye
- * still cannot be mistaken for a summons, and the interruption argument above is
- * unharmed — it was calibrated at 6.7Hz, and this is 3.3Hz, the far side of
- * where flicker discomfort falls away.
+ * The divisor is 1: the row ramps run at the ticker's own rate, the same as the
+ * tab pulse and the merge sparkle. It went 3 → 2 → 1 over one afternoon, and the
+ * middle step is the one worth understanding, because the argument that had kept
+ * it above 1 died rather than being overruled.
  *
- * What 300ms DOES spend is the margin the sawtooth was living on. TRANSIT_OUT
- * snaps ◉→· at the end of every cycle and loops for the whole hold; at 450ms
- * that snap reads as a restart, and the faster it comes round the more it reads
- * as a blink — the exact discontinuity TAB_PULSE was given six out-and-back
- * frames to avoid. MERGED_FRAMES survives 150ms precisely because ✦✧✶✧ has no
- * snap in it. The standing fix is to play each ramp ONCE and hold rather than
- * loop it; until then, do not divide this any further.
+ * At 450ms and then 300ms these ramps LOOPED for the length of the hold, and a
+ * sawtooth on a loop snaps ◉→· at the end of every cycle. The faster it comes
+ * round, the more that snap reads as a blink — the exact discontinuity TAB_PULSE
+ * was given six out-and-back frames to avoid, and the reason MERGED_FRAMES
+ * survives 150ms is that ✦✧✶✧ has no snap in it. So the divisor was not really
+ * protecting against SPEED. It was protecting against REPETITION at speed.
+ *
+ * `rampFrame` plays each ramp once and holds it, so there is no second cycle and
+ * no snap to arrive at all. A departure now dissolves ◉◎○· over 600ms and rests
+ * on `·` — one gesture, finished, at the tempo everything else on this screen
+ * already moves at. The interruption argument at the top still stands and is
+ * simply not engaged: it is about sustained motion beside text you are reading,
+ * and nothing here sustains.
+ *
+ * That is also why this is not a floor to keep pushing. There is nowhere left to
+ * go — 1 is the ticker itself — and anything faster means shortening the ramp,
+ * which costs a frame of the dissolve rather than time.
  *
  * A divisor rather than a second interval, deliberately: one ticker means these
- * cannot drift, which is the whole reason there was one to begin with — and the
- * tab pulse stays phase-locked to the sparkle by dividing by nothing.
+ * cannot drift, which is the whole reason there was one to begin with — and it
+ * is what keeps the ramps phase-locked to the sparkle now they share its rate.
  */
-const TRANSIT_FRAME_TICKS = 2
-/** One row-ramp frame in milliseconds, for anything counting off wall time. */
-const TRANSIT_FRAME_MS = MERGED_FRAME_MS * TRANSIT_FRAME_TICKS
+const TRANSIT_FRAME_TICKS = 1
+/**
+ * One row-ramp frame in milliseconds, for anything counting off wall time.
+ *
+ * Exported so specs read the real number rather than restating the divisor. A
+ * test carrying its own `MERGED_FRAME_MS * 2` passes against the arithmetic it
+ * wrote down instead of the arithmetic that ships, and goes on passing after the
+ * divisor moves — which is a spec that has quietly stopped watching.
+ */
+export const TRANSIT_FRAME_MS = MERGED_FRAME_MS * TRANSIT_FRAME_TICKS
 
 /**
  * Which frame of a row ramp to draw: once through, then hold on the last.

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest"
 import {
   rampFrame,
-  MERGED_FRAME_MS,
+  TRANSIT_FRAME_MS,
   TRANSIT_HOLD_MS,
   LEAVING_HOLD_MS,
 } from "./inbox.js"
@@ -20,7 +20,7 @@ import {
 
 // The ramps are four frames; the arrays themselves live private to the module.
 const LEN = 4
-const FRAME_MS = MERGED_FRAME_MS * 2
+const FRAME_MS = TRANSIT_FRAME_MS
 
 describe("rampFrame", () => {
   it("starts at the first frame", () => {
