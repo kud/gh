@@ -178,6 +178,63 @@ describe("buildInboxQuery", () => {
   })
 })
 
+/*
+ * A merged tab sums its sources' `issueCount`s, and a sum is only meaningful if
+ * the sets cannot intersect. That disjointness is bought in the QUERY TEXT — by
+ * each source negating the ones that claim rows before it — and these pin it,
+ * because it is invisible at every other layer: the rows come out right either
+ * way, since `pick` dedups by URL, and only the totals go wrong.
+ *
+ * Measured 2026-09-07: 94 own-repo issues, 95 authored, 92 of them BOTH. Summed
+ * naively that claimed 189 where the truth was 97.
+ */
+describe("merged tabs stay disjoint by construction", () => {
+  it("asks for authored issues only OUTSIDE the repos you own", () => {
+    const q = searchFor(buildInboxQuery(), "authoredIssues")
+    expect(q).toContain("author:@me")
+    expect(q).toContain("-user:@me")
+  })
+
+  it("pairs it with a repoIssues that claims exactly what it excludes", () => {
+    // The two halves of one partition. If this ever stops saying `user:@me`,
+    // the negation above is excluding something nothing else collects.
+    expect(searchFor(buildInboxQuery(), "repoIssues")).toContain("user:@me")
+  })
+
+  // Review carried this shape from the start, which is why it was never wrong
+  // while Issues was. Pinned so the pattern reads as a rule rather than a quirk.
+  it("keeps reviewed disjoint from reviewRequests the same way", () => {
+    expect(searchFor(buildInboxQuery(), "reviewed")).toContain(
+      "-review-requested:@me",
+    )
+  })
+
+  /*
+   * Under a `repo:` scope `user:@me` is REPLACED rather than joined, so there is
+   * no "outside the repos you own" for the negation to name, and the search
+   * degrades to a strict subset of `repoIssues` — every row discarded by `pick`,
+   * paid for on every scoped fetch.
+   */
+  it("drops authored issues entirely under a repo scope", () => {
+    const query = buildInboxQuery({ repo: "kud/ambre" })
+    expect(query).not.toContain("authoredIssues: search(")
+    expect(query).toContain("repoIssues: search(")
+  })
+
+  // Both builders resolved the source list independently, which is the exact
+  // shape where this half-lands: one path drops the source, the other keeps
+  // asking, and nothing reports the disagreement.
+  it("drops it on the split path too, not just the single document", () => {
+    const queries = buildInboxQueries({ repo: "kud/ambre" })
+    expect(queries.join("\n")).not.toContain("authoredIssues: search(")
+    expect(queries.join("\n")).toContain("repoIssues: search(")
+  })
+
+  it("still asks for it when no repo scope is set", () => {
+    expect(buildInboxQueries().join("\n")).toContain("authoredIssues: search(")
+  })
+})
+
 describe("sources", () => {
   it("asks only for what was named", () => {
     const query = buildInboxQuery({ sources: ["myPRs", "recentlyDone"] })
@@ -324,7 +381,9 @@ describe("source coverage", () => {
     // becoming two again.
     const query = buildInboxQuery()
     for (const source of INBOX_SOURCES)
-      expect(blockFor(query, source)).toContain(`first: ${SOURCE_LIMITS[source]}`)
+      expect(blockFor(query, source)).toContain(
+        `first: ${SOURCE_LIMITS[source]}`,
+      )
   })
 
   it("calls a source truncated when it matched more than it returned", () => {
@@ -356,8 +415,9 @@ describe("source coverage", () => {
   it("says nothing about a source that did not answer", () => {
     // A part of the split query can fail on its own. An absent source is
     // unknown, not empty, and must not be reported as a whole source of zero.
-    expect(sourceCoverage({ myPRs: { issueCount: 1, nodes: [{}] } }).repoIssues)
-      .toBeUndefined()
+    expect(
+      sourceCoverage({ myPRs: { issueCount: 1, nodes: [{}] } }).repoIssues,
+    ).toBeUndefined()
   })
 
   it("lists only the truncated sources", () => {

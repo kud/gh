@@ -4328,6 +4328,18 @@ const BrowseScreen = ({
             value: s.id,
             label: s.label,
             count: workCount(s),
+            /*
+             * The denominator, and only where it can still be true.
+             *
+             * `sampled.total` is what the SEARCHES matched; `count` is what this
+             * frame draws. A filter moves the numerator and cannot move the
+             * denominator, so `20/97` under an active search would be a fraction
+             * of two different populations — worse than no fraction, because it
+             * reads as precise. Dropping it here rather than upstream is the
+             * whole reason the total arrives as a number instead of baked into
+             * the label: this is the only layer that knows a filter is on.
+             */
+            total: filterActive ? undefined : s.sampled?.total,
             // Its own cell, always two wide, so news arriving never slides the
             // bar — and free to animate for exactly that reason.
             // The ticker undivided — see TAB_PULSE. The row marks' /3 buys quiet
