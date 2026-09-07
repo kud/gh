@@ -17,23 +17,41 @@ type Agent = {
   id: string
   label: string
   cmd: string
-  acceptsPrompt?: boolean
 }
 type Placement = "here" | "tab" | "vpane" | "hpane"
 
-// AI agents we know how to launch — only those actually on PATH are offered.
-//
-// acceptsPrompt is per-agent because a seeded prompt is NOT a uniform trailing
-// argument. `claude [prompt]` and `codex [PROMPT]` take one and stay interactive;
-// opencode's positional is `[project]`, a path — handing it a prompt makes it try
-// to start in a directory called "/k-pr 42". Its message form, `opencode run`, is
-// headless, which throws away the conversation this handoff exists to open. So
-// opencode launches warm but cold-started, and the UI says so rather than
-// silently dropping the seed.
+/**
+ * AI agents we know how to launch — only those actually on PATH are offered.
+ *
+ * ONE ENTRY, and that is the whole fix rather than a shortcut. A seeded prompt
+ * is not a string an agent merely accepts; it is a string an agent has to
+ * UNDERSTAND. The host supplies it (see `registerPrompts`), and the host's
+ * vocabulary is its own — ambre seeds `/k-pr 733`, a Claude Code slash command.
+ *
+ * The table used to carry three, guarded by an `acceptsPrompt` flag that modelled
+ * whether an agent takes a positional argument at all. That is a different
+ * question, and the gap between the two is where this broke:
+ *
+ *   claude    takes a positional, understands the prompt   → worked
+ *   opencode  positional is a PATH, so no prompt at all    → started cold, and said so
+ *   codex     takes a positional, understands nothing      → opened on a string it could not resolve
+ *
+ * Codex was the bad one precisely because it passed the flag. opencode's
+ * limitation was declared on screen; Codex's failure landed inside the agent,
+ * minutes later, with nothing in the cockpit looking wrong — the exact failure
+ * mode `prompts.ts`' own header was written about, shipped again one layer down.
+ *
+ * The general fix is a host-registered agent table paired with the prompt forms,
+ * since a prompt and the vocabulary it is written in are one fact. Deliberately
+ * NOT built: that is standing machinery for a package with no installers, to
+ * serve a divergence that does not exist while this list has one row in it.
+ *
+ * So the invariant to hold, and the only one: EVERY AGENT HERE UNDERSTANDS THE
+ * HOST'S SEED PROMPT. Adding a row means answering that first, not checking
+ * whether the binary takes an argument.
+ */
 export const CANDIDATES: Agent[] = [
-  { id: "claude", label: "Claude Code", cmd: "claude", acceptsPrompt: true },
-  { id: "opencode", label: "opencode", cmd: "opencode" },
-  { id: "codex", label: "Codex", cmd: "codex", acceptsPrompt: true },
+  { id: "claude", label: "Claude Code", cmd: "claude" },
 ]
 
 const PLACEMENTS: { id: Placement; label: string }[] = [
@@ -142,8 +160,10 @@ export const AiLauncher = ({
     setNote(`⋯ opening ${a.label}…`)
     try {
       const base = await buildCheckoutCmd(item.repo, item.branch ?? "", login)
-      const run =
-        prompt && a.acceptsPrompt ? `${a.cmd} ${shellQuote(prompt)}` : a.cmd
+      // Every agent in CANDIDATES understands the seed by construction, so the
+      // only thing left to check is whether there is a command to hand it to —
+      // "Shell (no AI)" carries an empty `cmd` and takes you to the checkout.
+      const run = prompt && a.cmd ? `${a.cmd} ${shellQuote(prompt)}` : a.cmd
       const full = a.cmd ? `${base} && ${run}` : base
       if (placement === "here") {
         runHere(full)
@@ -204,14 +224,15 @@ export const AiLauncher = ({
               {row.hint ? <Text dimColor>{"  " + row.hint}</Text> : null}
             </Box>
           ))}
-          {prompt ? (
-            <Box marginTop={1} flexDirection="column">
+          {/* Shown only where it will actually be used. It used to render
+              unconditionally and then apologise underneath — "opencode takes no
+              prompt — starts cold" — which put a value and its retraction on
+              screen at the same dim weight, so the line that mattered was the
+              one styled as skippable. A seed that is not going to be sent is
+              simply not drawn. */}
+          {prompt && focused?.cmd ? (
+            <Box marginTop={1}>
               <Text dimColor>{`prompt  ${prompt}`}</Text>
-              {focused && focused.cmd && !focused.acceptsPrompt ? (
-                <Text
-                  dimColor
-                >{`        ${focused.label} takes no prompt — starts cold`}</Text>
-              ) : null}
             </Box>
           ) : null}
           {note ? (
