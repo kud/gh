@@ -295,11 +295,39 @@ const SOURCES: Record<InboxSource, (s: Selections) => string> = {
     }}
   }`,
 
+  /*
+   * `-user:@me` is what makes this DISJOINT from `repoIssues`, and it is not an
+   * optimisation — it is the thing that makes a merged tab's totals addable.
+   *
+   * THE INVARIANT, which belongs here and nowhere else: the negations in a
+   * merged tab's queries mirror the order `pick` claims rows in. `repoIssues`
+   * runs first and takes anything on a repo you own, so this one asks for the
+   * remainder — exactly what the host already documents it wants ("issues I
+   * filed on repos I don't own") and already achieves at ROW level by deduping.
+   * Only `issueCount` never knew, because the query still asked for the superset.
+   *
+   * `reviewed` has carried the same shape all along (`-review-requested:@me`),
+   * which is why `Review` was never wrong and this tab was.
+   *
+   * Measured 2026-09-07: 94 own-repo issues, 95 authored, 92 of them BOTH — so
+   * summing the two `issueCount`s claimed 189 where the truth was 97. Overlap is
+   * the normal case, not an edge: a plans repo you own and file into is in both
+   * sets by construction. With the negation, 94 + 3 = 97 and the sum is trivially
+   * right because the sets cannot intersect.
+   *
+   * It also fetches BETTER rows for fewer nodes. Without it, 30 rows arrive of
+   * which ~27 are duplicates `pick` discards, and the handful of external issues
+   * that are this source's entire purpose may not be in that window at all.
+   *
+   * Add a third source to a merged tab and it takes the negations of every
+   * source that claims before it. Measure the overlap instead and you are
+   * carrying a second fact that rots silently.
+   */
   authoredIssues: ({
     scope,
     issueConversation,
     issueLabels,
-  }) => `  authoredIssues: search(query: "${scope}is:issue is:open author:@me archived:false", type: ISSUE, first: ${SOURCE_LIMITS.authoredIssues}) {
+  }) => `  authoredIssues: search(query: "${scope}is:issue is:open author:@me -user:@me archived:false", type: ISSUE, first: ${SOURCE_LIMITS.authoredIssues}) {
     issueCount
     nodes { ... on Issue {
       number title createdAt url
@@ -366,9 +394,30 @@ const selectionsFor = ({
  * render empty and read as "nothing to do here". So `repo:` REPLACES
  * `user:@me` rather than joining it.
  */
+/**
+ * Which sources this scope should actually ask for.
+ *
+ * `authoredIssues` earns its place by asking for issues you filed OUTSIDE the
+ * repos you own — `-user:@me`, see SOURCES. Under a `repo:` scope there is no
+ * outside: `user:@me` is replaced rather than joined (see below), so the
+ * negation has nothing to negate and the search degrades to a strict SUBSET of
+ * `repoIssues`. Every row it returns is one `pick` immediately discards, paid
+ * for on every scoped fetch.
+ *
+ * Shared by both builders on purpose. They resolved `options.sources`apiece,
+ * which is exactly the shape where a change like this half-lands — the
+ * single-document path drops the source and the split path goes on asking.
+ */
+const sourcesFor = (options: InboxQueryOptions): readonly InboxSource[] => {
+  const sources = options.sources ?? INBOX_SOURCES
+  return options.repo
+    ? sources.filter((source) => source !== "authoredIssues")
+    : sources
+}
+
 export const buildInboxQuery = (options: InboxQueryOptions = {}) => {
   const selections = selectionsFor(options)
-  const sources = options.sources ?? INBOX_SOURCES
+  const sources = sourcesFor(options)
 
   /*
    * `rateLimit` is free — it does not count against itself — and it is the only
@@ -424,7 +473,7 @@ export const buildInboxQueries = (
   options: InboxQueryOptions & { sourcesPerQuery?: number } = {},
 ): string[] => {
   const { sourcesPerQuery = INBOX_SOURCES_PER_QUERY, ...queryOptions } = options
-  const sources = options.sources ?? INBOX_SOURCES
+  const sources = sourcesFor(options)
   const size = Math.max(1, Math.trunc(sourcesPerQuery))
 
   const chunks: InboxSource[][] = []
@@ -529,7 +578,8 @@ export const sourceCoverage = (
     const answered = data[source]
     if (!answered) continue
     const shown = answered.nodes?.length ?? 0
-    const total = typeof answered.issueCount === "number" ? answered.issueCount : shown
+    const total =
+      typeof answered.issueCount === "number" ? answered.issueCount : shown
     out[source] = { total, shown, truncated: total > shown }
   }
 
