@@ -178,15 +178,24 @@ describe("whoseMove", () => {
 
   it("falls back to the table when nobody has spoken", () => {
     // An un-updated host passes nothing, and must behave exactly as before.
-    expect(whoseMove("waiting", "mine")).toBe(whoseMove("waiting", "mine", undefined, false))
+    expect(whoseMove("waiting", "mine")).toBe(
+      whoseMove("waiting", "mine", undefined, false),
+    )
     expect(whoseMove("ci-fail", "mine")).toBe("you")
   })
 
   it("never claims an unknown, from any position", () => {
     // An issue has no review state to read, so claiming it would be a guess
     // rather than a reading — including on a tab of your own work.
-    for (const tab of ["open", "mine", "review", "reviewed"])
-      expect(whoseMove("none", tab)).toBe("them")
+    //
+    // It used to answer `them`, which was the same guess pointing the other way
+    // and read as a reading: all 44 rows matching `assignee:@me` are issues, so
+    // 44 rows filed under Their move while the column counting them showed 0.
+    // `unknown` is what "no review state to read" was always describing.
+    for (const tab of ["open", "mine", "review", "reviewed"]) {
+      expect(whoseMove("none", tab)).toBe("unknown")
+      expect(whoseMove("none", tab)).not.toBe("them")
+    }
   })
 
   it("reads a folded `mine` tab exactly like `open` and `draft`", () => {
