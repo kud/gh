@@ -1,5 +1,11 @@
 # @kud/gh-pr-comments
 
+## 0.1.87
+
+### Patch Changes
+
+- @kud/gh-ink@0.45.9
+
 ## 0.1.86
 
 ### Patch Changes
