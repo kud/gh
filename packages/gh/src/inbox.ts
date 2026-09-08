@@ -148,6 +148,60 @@ export type InboxQueryOptions = {
    * reassembled.
    */
   sources?: readonly InboxSource[]
+  /**
+   * Per-source overrides for `SOURCE_LIMITS`. Anything left out keeps its
+   * default, so this is purely additive and a caller that passes nothing gets
+   * exactly the query it got before.
+   *
+   * It exists because the cap and the SHAPE are one decision and were split
+   * across two scopes: `shape` is a per-call option and `SOURCE_LIMITS` is a
+   * module constant, so "ask for a hundred rows of the cheap fragment" — the one
+   * combination that answers — could not be spelled from outside this file.
+   *
+   * That combination is the whole point. Measured 2026-09-08 on a live account,
+   * `reviewRequests` against 99 matching rows:
+   *
+   *   full     first: 20    11 pts   ~2s    200
+   *   full     first: 50    28 pts   7.9s   200
+   *   full     first: 100      —     ~11s   502, twice
+   *   minimal  first: 100    1 pt    2.1s   200
+   *
+   * The 502 is the search timing out at GitHub's proxy rather than a node-count
+   * refusal — cutting the review-thread window by 65% still 502s at ~11s — so
+   * `first: 50` is the ceiling with a foot over the line, and a full fragment
+   * cannot reach 99 at any window. A two-tier fetch can: the full shape at the
+   * default cap for the rows that get a verdict, then `{ shape: "minimal",
+   * limits: { reviewRequests: 100 } }` for the rest.
+   *
+   * A caller doing that owes the overflow rows an honest verdict. A minimal row
+   * carries no health, and health absent is not health `waiting` — see
+   * `computeHealth`'s note on why this set is all-or-nothing, and
+   * `@kud/gh-workflow`'s `whoseMove`, which answers `unknown` rather than
+   * guessing.
+   */
+  limits?: Partial<Record<InboxSource, number>>
+}
+
+/**
+ * The cap each source will actually ask for, defaults merged with the caller's
+ * overrides.
+ *
+ * Floored and clamped to at least 1 rather than trusted: GitHub rejects
+ * `first: 0` and a fractional `first` outright, so a bad number would cost a
+ * whole query rather than a few rows. Capped at 100, the search API's own
+ * maximum, for the same reason — asking for 200 fails the document, it does not
+ * return 200.
+ */
+export const limitsFor = (
+  options: InboxQueryOptions = {},
+): Record<InboxSource, number> => {
+  const merged = { ...SOURCE_LIMITS }
+  for (const source of INBOX_SOURCES) {
+    const asked = options.limits?.[source]
+    if (typeof asked === "number" && Number.isFinite(asked))
+      merged[source] = Math.min(100, Math.max(1, Math.trunc(asked)))
+  }
+  return merged
 }
 
 // computeHealth's precedence needs reviewDecision, mergeable and the check
@@ -242,12 +296,11 @@ type Selections = {
  * Each value is the whole `alias: search(…) { … }` selection, indented as it
  * appears in the document.
  */
-const SOURCES: Record<InboxSource, (s: Selections) => string> = {
-  myPRs: ({
-    scope,
-    health,
-    conversation,
-  }) => `  myPRs: search(query: "${scope}is:pr is:open author:@me", type: ISSUE, first: ${SOURCE_LIMITS.myPRs}) {
+const SOURCES: Record<InboxSource, (s: Selections, first: number) => string> = {
+  myPRs: (
+    { scope, health, conversation },
+    first,
+  ) => `  myPRs: search(query: "${scope}is:pr is:open author:@me", type: ISSUE, first: ${first}) {
     issueCount
     nodes { __typename ... on PullRequest {
       number title createdAt url headRefName isDraft
@@ -258,11 +311,10 @@ const SOURCES: Record<InboxSource, (s: Selections) => string> = {
     }}
   }`,
 
-  reviewRequests: ({
-    scope,
-    health,
-    conversation,
-  }) => `  reviewRequests: search(query: "${scope}is:pr is:open review-requested:@me", type: ISSUE, first: ${SOURCE_LIMITS.reviewRequests}) {
+  reviewRequests: (
+    { scope, health, conversation },
+    first,
+  ) => `  reviewRequests: search(query: "${scope}is:pr is:open review-requested:@me", type: ISSUE, first: ${first}) {
     issueCount
     nodes { __typename ... on PullRequest {
       number title createdAt url headRefName isDraft
@@ -273,11 +325,10 @@ const SOURCES: Record<InboxSource, (s: Selections) => string> = {
     }}
   }`,
 
-  reviewed: ({
-    scope,
-    health,
-    conversation,
-  }) => `  reviewed: search(query: "${scope}is:pr is:open reviewed-by:@me -author:@me -review-requested:@me", type: ISSUE, first: ${SOURCE_LIMITS.reviewed}) {
+  reviewed: (
+    { scope, health, conversation },
+    first,
+  ) => `  reviewed: search(query: "${scope}is:pr is:open reviewed-by:@me -author:@me -review-requested:@me", type: ISSUE, first: ${first}) {
     issueCount
     nodes { __typename ... on PullRequest {
       number title createdAt url headRefName isDraft
@@ -288,13 +339,10 @@ const SOURCES: Record<InboxSource, (s: Selections) => string> = {
     }}
   }`,
 
-  assigned: ({
-    scope,
-    health,
-    conversation,
-    issueConversation,
-    issueLabels,
-  }) => `  assigned: search(query: "${scope}is:open assignee:@me", type: ISSUE, first: ${SOURCE_LIMITS.assigned}) {
+  assigned: (
+    { scope, health, conversation, issueConversation, issueLabels },
+    first,
+  ) => `  assigned: search(query: "${scope}is:open assignee:@me", type: ISSUE, first: ${first}) {
     issueCount
     nodes {
       __typename
@@ -311,12 +359,10 @@ const SOURCES: Record<InboxSource, (s: Selections) => string> = {
     }
   }`,
 
-  repoIssues: ({
-    scope,
-    owned,
-    issueConversation,
-    issueLabels,
-  }) => `  repoIssues: search(query: "${scope}${owned}is:issue is:open archived:false", type: ISSUE, first: ${SOURCE_LIMITS.repoIssues}) {
+  repoIssues: (
+    { scope, owned, issueConversation, issueLabels },
+    first,
+  ) => `  repoIssues: search(query: "${scope}${owned}is:issue is:open archived:false", type: ISSUE, first: ${first}) {
     issueCount
     nodes { __typename ... on Issue {
       number title createdAt url
@@ -355,11 +401,10 @@ const SOURCES: Record<InboxSource, (s: Selections) => string> = {
    * source that claims before it. Measure the overlap instead and you are
    * carrying a second fact that rots silently.
    */
-  authoredIssues: ({
-    scope,
-    issueConversation,
-    issueLabels,
-  }) => `  authoredIssues: search(query: "${scope}is:issue is:open author:@me -user:@me archived:false", type: ISSUE, first: ${SOURCE_LIMITS.authoredIssues}) {
+  authoredIssues: (
+    { scope, issueConversation, issueLabels },
+    first,
+  ) => `  authoredIssues: search(query: "${scope}is:issue is:open author:@me -user:@me archived:false", type: ISSUE, first: ${first}) {
     issueCount
     nodes { ... on Issue {
       number title createdAt url
@@ -370,12 +415,10 @@ const SOURCES: Record<InboxSource, (s: Selections) => string> = {
     }}
   }`,
 
-  repoPRs: ({
-    scope,
-    owned,
-    health,
-    conversation,
-  }) => `  repoPRs: search(query: "${scope}${owned}is:pr is:open -author:@me archived:false", type: ISSUE, first: ${SOURCE_LIMITS.repoPRs}) {
+  repoPRs: (
+    { scope, owned, health, conversation },
+    first,
+  ) => `  repoPRs: search(query: "${scope}${owned}is:pr is:open -author:@me archived:false", type: ISSUE, first: ${first}) {
     issueCount
     nodes { __typename ... on PullRequest {
       number title createdAt url headRefName isDraft
@@ -386,10 +429,10 @@ const SOURCES: Record<InboxSource, (s: Selections) => string> = {
     }}
   }`,
 
-  recentlyDone: ({
-    scope,
-    doneSince,
-  }) => `  recentlyDone: search(query: "${scope}is:pr author:@me -is:open closed:>=${doneSince}", type: ISSUE, first: ${SOURCE_LIMITS.recentlyDone}) {
+  recentlyDone: (
+    { scope, doneSince },
+    first,
+  ) => `  recentlyDone: search(query: "${scope}is:pr author:@me -is:open closed:>=${doneSince}", type: ISSUE, first: ${first}) {
     issueCount
     nodes { __typename ... on PullRequest {
       number title state isDraft createdAt mergedAt closedAt url
@@ -450,6 +493,7 @@ const sourcesFor = (options: InboxQueryOptions): readonly InboxSource[] => {
 export const buildInboxQuery = (options: InboxQueryOptions = {}) => {
   const selections = selectionsFor(options)
   const sources = sourcesFor(options)
+  const limits = limitsFor(options)
 
   /*
    * `rateLimit` is free — it does not count against itself — and it is the only
@@ -465,7 +509,7 @@ export const buildInboxQuery = (options: InboxQueryOptions = {}) => {
 {
   rateLimit { cost nodeCount remaining resetAt }
   viewer { login }
-${sources.map((source) => SOURCES[source](selections)).join("\n")}
+${sources.map((source) => SOURCES[source](selections, limits[source])).join("\n")}
 }
 `
 }

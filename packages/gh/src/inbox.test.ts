@@ -7,6 +7,7 @@ import {
   truncatedSources,
   buildInboxQueries,
   buildInboxQuery,
+  limitsFor,
   mergeInboxData,
 } from "./index.js"
 
@@ -432,5 +433,68 @@ describe("source coverage", () => {
   it("survives no data at all", () => {
     expect(sourceCoverage(undefined)).toEqual({})
     expect(truncatedSources(undefined)).toEqual([])
+  })
+})
+
+describe("per-source limits", () => {
+  it("leaves every default in place when nothing is asked for", () => {
+    // The whole option is additive, and this is what that has to mean: a caller
+    // that passes no limits gets byte-for-byte the query it got before the
+    // option existed.
+    expect(limitsFor()).toEqual(SOURCE_LIMITS)
+    expect(buildInboxQuery({ limits: {} })).toBe(buildInboxQuery())
+  })
+
+  it("overrides one source and leaves its neighbours alone", () => {
+    const query = buildInboxQuery({ limits: { reviewRequests: 100 } })
+    expect(blockFor(query, "reviewRequests")).toContain("first: 100")
+    for (const source of INBOX_SOURCES)
+      if (source !== "reviewRequests")
+        expect(blockFor(query, source)).toContain(
+          `first: ${SOURCE_LIMITS[source]}`,
+        )
+  })
+
+  it("reaches the overflow tier the two-tier fetch is for", () => {
+    // The combination that answers where neither half does alone: 99 rows of
+    // the cheap fragment. A full fragment 502s at this cap and `minimal` at the
+    // default cap still shows 20 of 99.
+    const query = buildInboxQuery({
+      sources: ["reviewRequests"],
+      shape: "minimal",
+      limits: { reviewRequests: 100 },
+    })
+    expect(query).toContain("first: 100")
+    expect(query).not.toContain("statusCheckRollup")
+    expect(query).not.toContain("reviewThreads")
+  })
+
+  it("clamps a limit GitHub would reject rather than losing the query", () => {
+    // `first: 0`, a negative and a fraction are all document errors, so an
+    // unclamped bad number costs the whole search instead of a few rows. 100 is
+    // the search API's own maximum — asking for 200 fails, it does not return
+    // 200.
+    expect(limitsFor({ limits: { myPRs: 0 } }).myPRs).toBe(1)
+    expect(limitsFor({ limits: { myPRs: -5 } }).myPRs).toBe(1)
+    expect(limitsFor({ limits: { myPRs: 30.7 } }).myPRs).toBe(30)
+    expect(limitsFor({ limits: { myPRs: 500 } }).myPRs).toBe(100)
+    expect(limitsFor({ limits: { myPRs: Number.NaN } }).myPRs).toBe(
+      SOURCE_LIMITS.myPRs,
+    )
+  })
+
+  it("carries the override through the split queries too", () => {
+    // `buildInboxQueries` resolves its own options, which is exactly the shape
+    // where a change like this half-lands — the single-document path honours it
+    // and the split path goes on asking for the default.
+    const queries = buildInboxQueries({
+      sources: ["reviewRequests", "reviewed"],
+      limits: { reviewRequests: 50 },
+    })
+    const joined = queries.join("\n")
+    expect(blockFor(joined, "reviewRequests")).toContain("first: 50")
+    expect(blockFor(joined, "reviewed")).toContain(
+      `first: ${SOURCE_LIMITS.reviewed}`,
+    )
   })
 })
