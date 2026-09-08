@@ -34,7 +34,22 @@ export type GHItem = {
   repo: string
   url: string
   branch?: string
-  health: Health
+  /**
+   * The PR's aggregate health, when the fetch paid for it.
+   *
+   * Optional for the same reason `labels` below is: a `minimal` fetch omits the
+   * whole selection, and those fields vanish rather than degrade. The direction
+   * matters here more than anywhere else on the row — `computeHealth`'s ladder
+   * falls THROUGH an absent `reviewDecision`, `mergeable` and check rollup to
+   * `waiting`, so a row nobody looked at reports "awaiting review" with the same
+   * confidence as one that was read. Undefined means not asked for, and
+   * `whoseMove` answers `unknown` for it rather than guessing.
+   *
+   * `merged`, `closed`, `draft` and `none` are exempt: each is readable off
+   * `state` or `isDraft`, which the minimal shape keeps, so those tokens are
+   * honest at any fetch depth.
+   */
+  health?: Health
   author?: string
   // Time since the item was opened — or, on the Done tab, since it was closed.
   age: string
@@ -444,16 +459,44 @@ const YOURS: Record<Standing, Health[]> = {
   spoken: ["threads"],
 }
 
+/**
+ * Whose move it is, or an honest refusal to say.
+ *
+ * Three answers rather than two, and the third is the whole point. Every row
+ * used to resolve to `you` or `them`, which meant a row that could not answer
+ * still got one — `YOURS[position].includes(health)` with an absent health is
+ * `includes(undefined)`, which is false, so it silently became `them`.
+ *
+ * That failed twice, both times in the direction that looks like nothing is
+ * wrong. Every issue carries `none` (an issue has no review state to read), so
+ * 44 rows matching `assignee:@me` filed under Their move while the column that
+ * counts them read `0`. And the two-tier fetch a truncated source needs — a
+ * cheap `minimal` fragment for the rows past the cap, see `@kud/gh`'s `limits`
+ * — would have filed 79 overflow rows the same way, on the exact column that
+ * had been reported missing, reproducing the complaint while appearing to fix
+ * it.
+ *
+ * `unknown` is not a shade of `them`. A row carrying it is present, selectable
+ * and openable, with its title, repo, age and links intact; the one thing it
+ * declines is a verdict it was never given the facts for.
+ */
+export type Move = "you" | "them" | "unknown"
+
 // The row's own standing wins where the host set one; the tab decides otherwise,
 // and an unrecognised tab reads as `queued` — over-claiming a stranger's PR as
 // your work is the worse wrong guess.
+//
+// `health` is optional because a `minimal` fetch omits the whole health
+// selection — the same reason `GHItem.labels` is optional, and the same
+// direction of failure to avoid: those fields vanish rather than degrade, so
+// absent health is not health `waiting`.
 export const whoseMove = (
-  health: Health,
+  health: Health | undefined,
   sectionId: string,
   standing?: Standing,
   theySpokeLast?: boolean,
   pinned?: boolean,
-): "you" | "them" => {
+): Move => {
   const position = standing ?? STANDING[sectionId] ?? "queued"
 
   // First, and unconditionally. Everything below is inference from what GitHub
@@ -489,6 +532,20 @@ export const whoseMove = (
   // after it.
   if (theySpokeLast && position === "authored") return "you"
 
+  // BELOW the two claims above, deliberately. Both of them read something the
+  // row actually carries — a reaction the viewer left, a login that is not
+  // theirs — and neither needs the health selection to be true. A row with no
+  // health can still have been pinned, and somebody can still have spoken last
+  // on your own issue; declining a verdict there would throw away a fact we
+  // hold in order to report one we do not.
+  //
+  // `none` joins the absent case rather than falling through to `them`, which
+  // is what the old comment under YOURS already said and the code did not do:
+  // an issue has no review state to read, so claiming one would be a guess
+  // rather than a reading. `unknown` is that sentence, expressed where a caller
+  // can act on it.
+  if (health === undefined || health === "none") return "unknown"
+
   return YOURS[position].includes(health) ? "you" : "them"
 }
 
@@ -496,8 +553,20 @@ export const whoseMove = (
 // rather than restated as a literal in two files that drift apart.
 export const PIN_MARK = "+"
 
-const BAND_LABEL: Record<"you" | "them", string> = {
+// `Unclassified` breaks the possessive pattern the other two share, and that is
+// the point rather than an oversight. "Your move" and "Their move" are two
+// positions on one axis — ownership — so a third phrase of the same shape
+// ("Move unknown") lands on that axis and reads as a third owner, which is
+// precisely the misreading this band exists to prevent. The grammatical break IS
+// the signal that this band answers a different question.
+//
+// Not "No verdict" or "Not yet read" either: both promise a verdict is coming,
+// which is false for an issue that simply has no review state. And not
+// "Unknown", which reads as a null — 79 things broken rather than 79 things
+// deliberately not claimed.
+const BAND_LABEL: Record<Move, string> = {
   you: "Your move",
+  unknown: "Unclassified",
   them: "Their move",
 }
 
@@ -523,7 +592,21 @@ export const layoutGHItems = (
   if (sectionId === "done") return insertRepoHeaders(sortByRecency(items))
 
   const sorted = sortItems(items)
-  const bands = (["you", "them"] as const).map((side) => ({
+  // `unknown` sits BETWEEN the two, not after them. The bands rank claims on the
+  // reader's attention rather than confidence in the reading, and `them` is the
+  // one band that exists to be skipped — so a row we could not rule out outranks
+  // one we ruled out.
+  //
+  // Sorting it last would have left these rows exactly where
+  // `includes(undefined)` already had them, at the bottom under Their move,
+  // where 44 assigned issues sat while the column counting them read 0. Same
+  // burial, now with a type to make it look deliberate.
+  //
+  // Order within each band is untouched — sortItems still groups by repo
+  // priority and sinks drafts. The band says what is known about a row; how rows
+  // rank among themselves is a separate claim and re-ranking here would smuggle
+  // it in.
+  const bands = (["you", "unknown", "them"] as const).map((side) => ({
     side,
     rows: sorted.filter(
       (i) =>

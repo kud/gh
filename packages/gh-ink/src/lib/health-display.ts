@@ -53,3 +53,25 @@ export const healthLegend: [Health, string][] = [
   ["merged", "Merged"],
   ["closed", "Closed"],
 ]
+
+/**
+ * What a row draws when the fetch never paid for a health at all — the display
+ * half of `@kud/gh-workflow`'s `unknown` verdict.
+ *
+ * Outside `healthDisplay` rather than an eleventh entry in it, and that is the
+ * decision worth keeping. `Health` is a fact about a PULL REQUEST; the absence
+ * of one is a fact about the FETCH. Folding a fetch state into the health
+ * vocabulary would put it in the legend, where there is nothing to explain, and
+ * in every exhaustive switch over `Health`, none of which has anything to say
+ * about it.
+ *
+ * Hollow and muted on purpose: the absence of an answer is not an alarm, and the
+ * brightness on screen belongs to the states that are actually asking for
+ * something. `○` passes the silhouette test this file turns on — it is distinct
+ * from `◆` and from `·` in shape, not merely in weight.
+ */
+export const UNREAD_DISPLAY = { glyph: "○", color: colors.muted }
+
+/** The one lookup that knows a health may never have been fetched. */
+export const displayFor = (h?: Health): { glyph: string; color: string } =>
+  h ? healthDisplay[h] : UNREAD_DISPLAY

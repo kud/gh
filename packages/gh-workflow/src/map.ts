@@ -37,6 +37,46 @@ export const computeHealth = (node: any): Health =>
     ).length,
   })
 
+/*
+ * Whether this node was fetched with the health selection at all, and what to
+ * report when it was not.
+ *
+ * `computeHealth` is total — it always returns a token — which is right for the
+ * shape it takes and wrong for a raw node, because the ladder cannot tell a null
+ * reviewDecision apart from one that was never selected at all. A `minimal`
+ * fetch omits `reviewDecision`, `mergeable` and `statusCheckRollup` while
+ * keeping `isDraft`, so an unread PR walks the whole ladder and lands on
+ * `waiting` — "nothing red, nothing running, nobody has reviewed it" — asserted
+ * from three fields nobody asked for. From the `queued` standing that reads as
+ * YOUR MOVE, so the cheapest possible fetch produced the most confident possible
+ * verdict.
+ *
+ * The four tokens above the selection in that ladder are exempt because they are
+ * read off `state` and `isDraft`, both of which the minimal shape carries:
+ * `merged` and `closed` come from `state`, `none` from a missing `isDraft` (an
+ * issue), `draft` from a true one. Everything below needs the selection, so
+ * without it the answer is an artefact of absence rather than a reading.
+ *
+ * Presence is tested rather than passed in as an option: a caller that forgets
+ * to say which shape it asked for would get the confident wrong answer back,
+ * which is the failure this exists to end.
+ */
+const HEALTH_WITHOUT_SELECTION: readonly Health[] = [
+  "merged",
+  "closed",
+  "none",
+  "draft",
+]
+
+const hasHealthSelection = (node: any): boolean =>
+  "reviewDecision" in node || "mergeable" in node || "statusCheckRollup" in node
+
+export const healthOf = (node: any): Health | undefined => {
+  const derived = computeHealth(node)
+  if (HEALTH_WITHOUT_SELECTION.includes(derived)) return derived
+  return hasHealthSelection(node) ? derived : undefined
+}
+
 const viewerReacted = (n: any, content: string): boolean =>
   ((n?.reactionGroups ?? []) as any[]).some(
     (g) => g?.content === content && g?.viewerHasReacted,
@@ -175,7 +215,7 @@ export const toGHItem = (
     repo: node.repository?.nameWithOwner ?? "",
     url: node.url ?? "",
     branch: node.headRefName,
-    health: computeHealth(node),
+    health: healthOf(node),
     author: node.author?.login,
     age: completedAt ? relativeTime(completedAt) : "",
     activityAge: !isDone && activityAt ? relativeTime(activityAt) : undefined,

@@ -55,7 +55,11 @@ import {
   isFailCheck,
   isPendingCheck,
 } from "@kud/gh"
-import { healthDisplay, healthLegend } from "../lib/health-display.js"
+import {
+  displayFor,
+  healthDisplay,
+  healthLegend,
+} from "../lib/health-display.js"
 
 // Every child process this module spawns goes through here, and none may inherit
 // its output. A bare zx `$` captures a child's stdout but passes its STDERR
@@ -184,7 +188,7 @@ export type JiraTransition = {
 export type ExplainSection = { heading: string; lines: string[] }
 
 const healthSentence = (item: GHItem): string => {
-  const glyph = healthDisplay[item.health].glyph.trim()
+  const glyph = displayFor(item.health).glyph.trim()
   const d = item.detail
   const plural = (n: number, word: string) =>
     `${n} ${word}${n === 1 ? "" : "s"}`
@@ -219,7 +223,13 @@ const healthSentence = (item: GHItem): string => {
     case "waiting":
       return `Nobody has reviewed it yet (${glyph}).`
     default:
-      return "An open issue — no review state applies."
+      // Two absences, one sentence each. `none` is a row with no review state
+      // to read; `undefined` is a row whose review state was never fetched, and
+      // saying "no review state applies" there would assert the fetch's own
+      // shortcut as a fact about the pull request.
+      return item.health === undefined
+        ? `Fetched without its review state (${glyph}), so whose move it is cannot be read from here.`
+        : "An open issue — no review state applies."
   }
 }
 
@@ -2478,7 +2488,7 @@ const ItemRow = ({
     )
   }
 
-  const { glyph: healthIcon, color: healthColor } = healthDisplay[item.health]
+  const { glyph: healthIcon, color: healthColor } = displayFor(item.health)
   // The sparkle replaces the health glyph rather than sitting beside it: the
   // health column is one cell wide and every row's title is aligned off it, so
   // an extra glyph here would shift the title of exactly the row you are
