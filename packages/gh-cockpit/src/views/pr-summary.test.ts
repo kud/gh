@@ -63,15 +63,31 @@ describe("sizeOf", () => {
 
 describe("summaryOf", () => {
   it("reads as size, files, branches, author and age", () => {
-    const { size, rest } = summaryOf(item, health(), WIDE)
+    const { size, files, rest } = summaryOf(item, health(), WIDE)
     expect(size).toBe("+412 -38")
-    expect(rest).toBe("12 files · fix/turn-arrow → main · kud · opened 3d ago")
+    expect(files).toBe("12 files")
+    expect(rest).toBe("fix/turn-arrow → main · kud · opened 3d ago")
+  })
+
+  /*
+   * Three cells, not one string: the renderer draws the size bold and orange,
+   * the file count plain, the rest dim. A tier cannot be expressed inside a
+   * joined line, so the split has to happen here.
+   */
+  it("hands the file count back on its own, out of the dim run", () => {
+    const { files, rest } = summaryOf(item, health(), WIDE)
+    expect(rest).not.toContain("files")
+    expect(files).toBe("12 files")
   })
 
   it("says file, not files, for one", () => {
-    expect(summaryOf(item, health({ changedFiles: 1 }), WIDE).rest).toContain(
-      "1 file ",
+    expect(summaryOf(item, health({ changedFiles: 1 }), WIDE).files).toBe(
+      "1 file",
     )
+  })
+
+  it("has no file count while the fetch is still in flight", () => {
+    expect(summaryOf(item, null, WIDE).files).toBeNull()
   })
 
   /*
@@ -80,7 +96,7 @@ describe("summaryOf", () => {
    * rather than a column because it is rare, and a cell that is usually empty
    * teaches you to skip past it.
    */
-  it("leads with draft, using the glyph the inbox row already speaks", () => {
+  it("leads the dim run with draft, in the inbox row's own glyph", () => {
     const { rest } = summaryOf({ ...item, health: "draft" }, health(), WIDE)
     expect(rest.startsWith("~ draft · ")).toBe(true)
   })
