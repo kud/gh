@@ -32,13 +32,28 @@ export type SummaryItem = {
 const DIVIDER = " · "
 
 /**
- * Size, deliberately uncoloured.
+ * Size, in ONE colour — never one per sign.
  *
- * The trap here is subtler than "do not use red and green". Colour those two
- * numbers and a colourblind reader gets a near-identical pair of hues, leaving
- * the signs as the only channel that carries anything — so the colour has added
- * noise and taken nothing away, which is worse than plain text rather than
- * merely no better. The `+` and `-` are already doing all the work.
+ * The original ruling here was "deliberately uncoloured", and the trap it named
+ * is still real and still avoided: colour `+412` and `-38` differently and a
+ * colourblind reader gets a near-identical pair of hues, leaving the signs as
+ * the only channel carrying anything — colour that adds noise and takes nothing
+ * away, which is worse than plain text rather than merely no better.
+ *
+ * What changed is what the colour is FOR. It is not separating the two numbers
+ * from each other — they share one colour, so that failure is structurally
+ * impossible rather than merely avoided. It separates the pair from the
+ * provenance beside it, which is a job hue is good at. The line was five facts
+ * of two different kinds rendered in one flat run, and flatness was the actual
+ * fault: an undimmed size against a dim remainder is a single small step across
+ * five characters with nothing framing it.
+ *
+ * Rendered bold in the header's own orange (see `pr-view`), so it separates
+ * from the dim run on LUMINANCE — which survives every deficiency type — with
+ * weight and leftmost position as two further non-colour channels. No magnitude
+ * banding: a hue that changes at 400 lines is a traffic light needing a legend,
+ * and it puts a boundary between 399 and 401 while the digits already say the
+ * size exactly. What they lacked was pre-attentive weight, not precision.
  *
  * `+` always before `-`, never reordered by magnitude, so position is a second
  * channel. ASCII hyphen rather than U+2212: this codebase holds a single-column
@@ -51,7 +66,21 @@ export const sizeOf = (data: Pick<PrHealthData, "additions" | "deletions">) =>
     : `+${data.additions} -${data.deletions}`
 
 /**
- * The dim remainder, in a fixed order.
+ * The line, in three tiers: the size, the file count, and the dim remainder.
+ *
+ * Split three ways rather than two because the flat run was the fault. Size is
+ * the answer and takes the emphasis; the file count is the other half of "how
+ * big" and sits one step down — plain and undimmed, grouped with the size by
+ * contrast rather than by a divider; everything after it is provenance you look
+ * at deliberately or not at all, and stays dim. Three cells rather than one
+ * string, because only the renderer can express a tier.
+ *
+ * The draft marker leads the dim run, so on screen it follows the file count
+ * rather than preceding it. It is still ahead of every fact it qualifies, and
+ * it keeps the health vocabulary's own muted `~` — one glyph, one colour,
+ * across screens, which is worth more than one line's emphasis.
+ *
+ * The rest, in a fixed order.
  *
  * Five facts survived the cut and everything else was ruled out. Labels are a
  * triage tool for the LIST — you filter by them, you do not read them once you
@@ -72,7 +101,7 @@ export const summaryOf = (
   item: SummaryItem,
   data: PrHealthData | null | undefined,
   cols: number,
-): { size: string | null; rest: string } => {
+): { size: string | null; files: string | null; rest: string } => {
   const size = data ? sizeOf(data) : null
   const files =
     data?.changedFiles === undefined
@@ -89,12 +118,14 @@ export const summaryOf = (
     : (item.branch ?? null)
 
   const parts = (branch: string | null) =>
-    [files, branch, author, opened].filter((p): p is string => !!p)
+    [branch, author, opened].filter((p): p is string => !!p)
 
   const full = parts(branches)
   const line = (ps: string[]) => ps.join(DIVIDER)
   const width = (ps: string[]) =>
-    (size ? size.length + DIVIDER.length : 0) + line(ps).length
+    (size ? size.length + DIVIDER.length : 0) +
+    (files ? files.length + DIVIDER.length : 0) +
+    line(ps).length
 
   // A draft changes the meaning of everything in Health below it — "6 passed,
   // ready to merge" on a draft is a genuine misread — so it goes first, and as a
@@ -104,7 +135,7 @@ export const summaryOf = (
   const prefix = draft ? `~ draft${DIVIDER}` : ""
 
   if (width(full) + prefix.length <= cols)
-    return { size, rest: prefix + line(full) }
+    return { size, files, rest: prefix + line(full) }
   const shortened = parts(base ? `→ ${base}` : null)
-  return { size, rest: prefix + line(shortened) }
+  return { size, files, rest: prefix + line(shortened) }
 }

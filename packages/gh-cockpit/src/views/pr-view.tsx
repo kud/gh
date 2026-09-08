@@ -270,13 +270,29 @@ export const PrView = ({
       hints={hints}
     >
       {/* Above the tabs, never below: below, it would read as belonging to the
-          active panel, which is exactly the claim not being made. The size is
-          the bright element and the rest is dim — the eye lands on how big this
-          is, then reads outward if it cares. */}
-      {summary.size || summary.rest ? (
+          active panel, which is exactly the claim not being made.
+
+          Three tiers, because two were not enough for five facts of two kinds.
+          The size takes the header's own orange and bold — the same orange as
+          the `#number` a line above, so the two read as one identity block:
+          this PR, this big. The file count is the other half of "how big" and
+          steps down to plain; everything after it is provenance and stays dim.
+
+          ONE colour across both numbers, never one per sign: hue here separates
+          the pair from the run beside it, and is not asked to separate `+` from
+          `-`. The dividers stay dim throughout so the cells read as cells. */}
+      {summary.size || summary.files || summary.rest ? (
         <Box>
-          {summary.size ? <Text>{summary.size}</Text> : null}
-          {summary.size && summary.rest ? <Text dimColor> · </Text> : null}
+          {summary.size ? (
+            <Text color="#FF8700" bold>
+              {summary.size}
+            </Text>
+          ) : null}
+          {summary.size && (summary.files || summary.rest) ? (
+            <Text dimColor> · </Text>
+          ) : null}
+          {summary.files ? <Text>{summary.files}</Text> : null}
+          {summary.files && summary.rest ? <Text dimColor> · </Text> : null}
           {summary.rest ? <Text dimColor>{summary.rest}</Text> : null}
         </Box>
       ) : null}
