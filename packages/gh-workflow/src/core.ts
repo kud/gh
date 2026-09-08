@@ -507,10 +507,11 @@ const BAND_LABEL: Record<"you" | "them", string> = {
 // every case, and restart per band — a repo with work on both sides of the line
 // appears under each.
 //
-// One band is not a band: a tab whose rows all land on the same side gains two
-// header rows and no information, so it keeps the plain list. That is not an
-// edge case, it is the Draft and Issues tabs by construction — every row there
-// carries the same health token, so the split has nothing to say.
+// A single-sided tab still gets its one header. The label is the information —
+// eight rows under "Their move" says nothing is owed by you, which is the
+// answer the tab was opened to get, and an unlabelled list says it only to
+// somebody who already knows how the bands work. The empty side is still
+// omitted: a "(0)" header names a band with nothing in it.
 export const layoutGHItems = (
   items: GHItem[],
   sectionId: string,
@@ -536,7 +537,6 @@ export const layoutGHItems = (
     ),
   }))
   const filled = bands.filter((b) => b.rows.length > 0)
-  if (filled.length < 2) return insertRepoHeaders(sorted)
 
   return filled.flatMap(({ side, rows }) => [
     {
