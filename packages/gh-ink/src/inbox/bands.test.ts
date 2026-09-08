@@ -253,17 +253,28 @@ describe("layoutGHItems bands", () => {
     expect(numbers(layoutGHItems(rows, "open"))).toEqual([1, 2])
   })
 
-  it("leaves a single-sided tab as a plain list", () => {
-    // Not an edge case: Draft and Issues are single-sided by construction, and
-    // two headers over one undivided list is ceremony with no information in it.
+  it("still names the one band on a single-sided tab", () => {
+    // Draft and Issues are single-sided by construction, and the label is what
+    // the reader came for: "Their move (8)" says nothing is owed by you, which
+    // an unlabelled list says only to somebody who already knows the bands.
     const rows = [
       item({ repo: "kud/ambre", number: 1, health: "draft" }),
       item({ repo: "kud/shui", number: 2, health: "draft" }),
     ]
 
     const laid = layoutGHItems(rows, "draft")
-    expect(labels(laid)).toEqual([])
+    expect(labels(laid)).toEqual(["Your move (2)"])
     expect(numbers(laid)).toEqual([1, 2])
+  })
+
+  it("omits the empty side rather than printing a (0) header", () => {
+    const rows = [item({ repo: "kud/ambre", number: 1, health: "waiting" })]
+
+    expect(labels(layoutGHItems(rows, "open"))).toEqual(["Their move (1)"])
+  })
+
+  it("lays out an empty tab as nothing at all", () => {
+    expect(layoutGHItems([], "open")).toEqual([])
   })
 
   it("restarts repo headers inside each band", () => {
