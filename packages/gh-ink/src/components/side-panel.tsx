@@ -56,8 +56,14 @@ const ACCENT = "#FF8700"
  * against a budget, and a budget that does not know the rail is there overflows
  * by the rail's whole width — which in a frame sized to fill the terminal
  * scrolls the panel rather than clipping a row.
+ *
+ * Widened from 40 once the rail carried real initiative titles: at 40 the label
+ * line had 33 columns to spend, which cut the summary of nearly every epic mid
+ * word and left the rail listing keys with an ellipsis after them. The key line
+ * was never the constraint — the label is what makes a key readable, and a rail
+ * you cannot read is forty columns spent on nothing.
  */
-export const SIDEBAR_COLS = 40
+export const SIDEBAR_COLS = 52
 
 // The rule that separates the rail from the list, and the breathing room after
 // it. Both come out of the width above rather than being added to it, so a host

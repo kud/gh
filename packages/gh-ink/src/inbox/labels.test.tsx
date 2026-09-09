@@ -99,20 +99,23 @@ const issue = (labels?: string[]): GHItem => ({
   kind: "issue",
   number: 17,
   title: "cockpit: show GitHub labels on rows",
-  repo: "kud/plans",
-  url: "https://github.com/kud/plans/issues/17",
+  repo: "kud/gh",
+  url: "https://github.com/kud/gh/issues/17",
   health: "none",
   age: "2d",
   ts: 0,
   unresolved: 0,
   conversation: 0,
-  depth: 1,
+  // Depth 0, so the light row is exactly that: the ladder's rungs are measured
+  // in columns and a tree prefix is columns like any other. `heavy` puts the
+  // nesting back for the rows that are meant to be under pressure.
+  depth: 0,
   ...(labels ? { labels } : {}),
 })
 
 const sidebar: Sidebar = {
   title: "Initiatives",
-  rows: [{ key: "SHOP-1", label: "Something", live: 1, done: 0, total: 1 }],
+  rows: [{ key: "PROJ-1", label: "Something", live: 1, done: 0, total: 1 }],
 }
 
 // The shape that puts real pressure on the budget — a long title, a long repo,
@@ -121,6 +124,7 @@ const sidebar: Sidebar = {
 // labels are chosen, and a row under no pressure isolates that from the giving.
 const heavy = (labels: string[]): GHItem => ({
   ...issue(labels),
+  depth: 1,
   title:
     "PROJ-1125: Wire the analytics write key into the qa/uat/prod build pipeline",
   repo: "acme/web-app",
@@ -224,7 +228,7 @@ describe("a row carrying labels", () => {
   })
 
   /*
-   * The rail is a forty-column step, and the two rungs either side of the repo
+   * The rail is a SIDEBAR_COLS step, and the two rungs either side of the repo
    * are narrower than that — so no frame this harness can produce shows the
    * label cell gone while the repo is still standing. That ordering is asserted
    * by the ladder array itself, and what is pinned here is the pair of
@@ -239,7 +243,7 @@ describe("a row carrying labels", () => {
     expect(tight).not.toContain(TAG)
     // The title is elided in the MIDDLE, so assert its head rather than a span
     // truncation would cut through.
-    expect(tight).toContain("PROJ-1125: Wire the Seg")
+    expect(tight).toContain("PROJ-1125: Wire")
     expect(tight).toContain("6d · 1w")
   })
 })

@@ -153,7 +153,7 @@ const frameAt = async (columns: number, withSidebar: boolean) => {
 // Ink into a stack of fragments, which is what the reader actually sees — so
 // counting lines is a truer assertion than measuring the widest one.
 const bodyLines = (frame: string) =>
-  frame.split("\n").filter((l) => /#\d|SHOP-/.test(l)).length
+  frame.split("\n").filter((l) => /#\d|PROJ-/.test(l)).length
 
 describe("a row given less width than it wants", () => {
   it("still draws each row on a single line, with the rail open", async () => {
@@ -182,12 +182,14 @@ describe("a row given less width than it wants", () => {
     // Room for everything: the repo and the author are context worth having.
     expect(roomy).toContain("acme/web-app")
     expect(roomy).toContain("by someone-else")
-    // Forty columns poorer, the same row sheds them and keeps its subject. The
+    // A rail's width poorer, the same row sheds them and keeps its subject. The
     // title is elided in the MIDDLE, so this asserts its head rather than a span
-    // that truncation would cut through.
+    // that truncation would cut through — and only as far in as the narrowest
+    // rail this suite runs against leaves standing, since the assertion is that
+    // the subject SURVIVES, not how much of it does.
     expect(tight).not.toContain("acme/web-app")
     expect(tight).not.toContain("by someone-else")
-    expect(tight).toContain("PROJ-1125: Wire the Seg")
+    expect(tight).toContain("PROJ-1125: Wire")
   })
 
   // The news is never what yields. A row that dropped its own headline to keep a
