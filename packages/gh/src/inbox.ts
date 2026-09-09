@@ -14,19 +14,22 @@
  * title, url, draft, timestamp, repo.
  *
  * This is a cost axis, not a taste one. Measured against GitHub's own
- * `rateLimit { cost }`: the full query costs **73 points** of a 5000/hour
- * budget, at a nodeCount of ~16,870 — because `statusCheckRollup.contexts`
- * appears in five PR fragments and `reviewThreads(first: 50)` multiplies
- * beneath each one. A caller that renders a title and a link was paying for
- * every check run on every open PR.
+ * `rateLimit { cost }` while the review-thread window was still `first: 50`:
+ * the full query cost **73 points** of a 5000/hour budget, at a nodeCount of
+ * ~16,870 — because `statusCheckRollup.contexts` appears in five PR fragments
+ * and `reviewThreads` multiplies beneath each one. A caller that renders a
+ * title and a link was paying for every check run on every open PR. That
+ * window is `first: 10` now and the same document measures 34 points, but the
+ * axis is unchanged: the multiplication is what `minimal` exists to drop.
  */
 /**
  * How many of your own open PRs to ask for.
  *
  * This is the single biggest lever on the query's cost, because connections
- * MULTIPLY: the health and conversation fragments hang ~80 nodes off each PR
- * (`reviewThreads(first: 50)`, `statusCheckRollup.contexts(first: 20)`,
- * `labels(first: 10)`), so the outer number is a multiplier on all of them.
+ * MULTIPLY: the health and conversation fragments hang ~50 nodes off each PR
+ * (`reviewThreads(first: 10)` at two nodes a thread,
+ * `statusCheckRollup.contexts(first: 20)`, `labels(first: 10)`), so the outer
+ * number is a multiplier on all of them.
  * GitHub scores a call by the nodes it could return, not by how many calls you
  * make — which is why splitting the query across requests costs the same, and
  * this saves a lot.
@@ -61,8 +64,8 @@ export const MY_PRS_LIMIT = 30
  * THE NUMBERS ARE NOT ONE NUMBER, because a row is not one weight. 30 was set
  * for PULL REQUESTS and the issue sources inherited it, which is how a cap sized
  * against `reviewThreads(first: 50)` came to govern a row carrying
- * `comments(last: 1)` and ten labels. A PR drags roughly 80 nested nodes; an
- * issue drags about 12.
+ * `comments(last: 1)` and ten labels. A PR drags roughly 50 nested nodes — it
+ * was 80 while the thread window was `first: 50`; an issue drags about 12.
  *
  * Measured 2026-09-07, same account, same selections that actually ship:
  *
@@ -250,13 +253,38 @@ const PR_HEALTH = `
 // differently and have to be. On the last comment it can only speak for that
 // comment, so a newer one undoes it; on the PR it speaks for the PR, where no
 // later comment should quietly erase it. Thread comments get neither:
-// `reviewThreads` is already `first: 50`, and eight more fields fifty times over
-// is exactly the multiplication the budget note above exists to prevent.
+// `reviewThreads` is a window on every PR source at once, and eight more fields
+// ten times over is exactly the multiplication the budget note above exists to
+// prevent.
+//
+// THE WINDOW IS THE DOMINANT COST ON EVERY PR-BEARING SOURCE, because it
+// multiplies beneath five searches at once. It was `first: 50` because fifty is
+// a round number, and nothing measured what a PR actually carries. Measured
+// 2026-09-09 on a live account, the whole inbox query, same selections that
+// ship:
+//
+//   reviewThreads(first: 50)   cost 114   27,230 nodes
+//   reviewThreads(first: 20)   cost  54   15,230 nodes
+//   reviewThreads(first: 10)   cost  34   11,230 nodes
+//
+// Against 5,000 points an hour that is 44 loads versus 147. And the data never
+// justified fifty: across 13 PR rows on that account the deepest carried TWO
+// threads and the median carried none — nothing above ten, on either PR source.
+//
+// `totalCount` is what makes narrowing safe rather than merely cheap. A window
+// smaller than the world is the same trap `sourceCoverage` exists for one level
+// up, and the scalar costs nothing: a consumer comparing it against
+// `nodes.length` knows whether it is holding the threads or a sample of them,
+// instead of counting what came back and calling that the total. Note the
+// coverage it buys is on the COUNT — `isResolved` beyond the window is still
+// unseen, so a PR carrying eleven threads can still under-report unresolved
+// ones to `computeHealth`. That is the direction to fail in and the reason the
+// window keeps five times the observed maximum rather than two.
 const PR_CONVERSATION = `
       reactionGroups { content viewerHasReacted }
       comments(last: 1) { totalCount nodes { author { __typename login } createdAt reactionGroups { content viewerHasReacted } } }
       reviews(last: 1) { nodes { author { __typename login } state submittedAt } }
-      reviewThreads(first: 50) { nodes {
+      reviewThreads(first: 10) { totalCount nodes {
         isResolved
         comments(last: 1) { totalCount nodes { author { __typename login } createdAt } }
       } }
@@ -501,7 +529,8 @@ export const buildInboxQuery = (options: InboxQueryOptions = {}) => {
    * that on 2026-08-14 was wrong, one of them by 25x, because GraphQL cost is
    * node-count based and nested connections multiply: `reviewThreads(first: 50)`
    * beneath `search(first: 100)` is 5,000 nodes from two lines of query text. A
-   * package handing out a 73-point query should hand out the means to see it.
+   * package handing out a query costing tens of points should hand out the
+   * means to see it — and it is what proved the window narrowing worked.
    *
    * (GraphQL has no block comments, only `#`, so this note lives out here.)
    */

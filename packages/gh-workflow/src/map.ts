@@ -145,6 +145,13 @@ const conversationOf = (
   return { count, lastActor: last?.login, lastEventAt: last?.at }
 }
 
+// `threadsTotal` reads the connection's own `totalCount`, never the length of
+// what came back. The inbox query windows `reviewThreads` at `first: 10` — five
+// times the deepest PR measured on a live account, and a third of the cost of
+// the `first: 50` it replaced — so counting the returned nodes would report a
+// windowed sample as the whole, and report it as complete. `nodes.length` stays
+// the fallback for a caller whose query omits the scalar; where both are
+// present the scalar is the only one that can exceed the window.
 const detailOf = (node: any, lastEventAt?: string): GHDetail => {
   const active = latestChecks(node.statusCheckRollup?.contexts?.nodes ?? [])
   return {
@@ -153,7 +160,10 @@ const detailOf = (node: any, lastEventAt?: string): GHDetail => {
     checksPass: active.filter(isPassCheck).length,
     checksFail: active.filter(isFailCheck).length,
     checksPending: active.filter(isPendingCheck).length,
-    threadsTotal: (node.reviewThreads?.nodes ?? []).length,
+    threadsTotal:
+      typeof node.reviewThreads?.totalCount === "number"
+        ? node.reviewThreads.totalCount
+        : (node.reviewThreads?.nodes ?? []).length,
     lastCommitAt: node.commits?.nodes?.[0]?.commit?.committedDate,
     lastEventAt,
   }

@@ -100,11 +100,27 @@ describe("buildInboxQuery", () => {
     expect(buildInboxQuery()).not.toContain("users { totalCount }")
   })
 
+  // The window is the dominant cost on every PR-bearing source, because it
+  // multiplies beneath five searches at once. Measured 2026-09-09 on a live
+  // account: the whole document costs 34 points at `first: 10` against 114 at
+  // the `first: 50` it replaced, and the deepest of 13 PR rows carried two
+  // threads. `totalCount` is what stops the narrower window lying — a consumer
+  // comparing it against `nodes.length` can see the sample as a sample, which
+  // is what `@kud/gh-workflow`'s `threadsTotal` now reads.
+  it("windows review threads narrowly and says how many there really are", () => {
+    const query = buildInboxQuery()
+    expect(query).not.toContain("reviewThreads(first: 50)")
+    for (const alias of OPEN_PR_SOURCES)
+      expect(blockFor(query, alias)).toContain(
+        "reviewThreads(first: 10) { totalCount",
+      )
+  })
+
   /*
    * The shape axis exists for cost, so these pin cost-bearing selections by
    * name. `statusCheckRollup.contexts` appears on five PR sources and
-   * `reviewThreads(first: 50)` multiplies beneath each — together they are why
-   * the full query measures 73 points against a 5000/hour budget.
+   * `reviewThreads` multiplies beneath each — together they are why the full
+   * query measures tens of points against a 5000/hour budget.
    */
   describe("shape", () => {
     it("defaults to full, so an existing caller keeps what it had", () => {

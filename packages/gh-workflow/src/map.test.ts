@@ -81,6 +81,25 @@ describe("toGHItem", () => {
     expect(toGHItem(pr()).unresolved).toBe(1)
   })
 
+  // @kud/gh windows `reviewThreads` at `first: 10`, so on any PR carrying more
+  // the nodes are a sample. Counting them reports fourteen threads as ten and
+  // reports that as the whole number — the count has to come off the connection.
+  it("takes the thread total from the connection, not from the window", () => {
+    const deep = pr({
+      reviewThreads: {
+        totalCount: 14,
+        nodes: Array.from({ length: 10 }, () => ({ isResolved: true })),
+      },
+    })
+    expect(toGHItem(deep).detail?.threadsTotal).toBe(14)
+  })
+
+  // A caller whose own query omits the scalar still gets a number rather than
+  // zero — the fixture above is exactly that query.
+  it("falls back to the returned nodes when no total was selected", () => {
+    expect(toGHItem(pr()).detail?.threadsTotal).toBe(2)
+  })
+
   it("maps an issue node", () => {
     const issue = {
       __typename: "Issue",
