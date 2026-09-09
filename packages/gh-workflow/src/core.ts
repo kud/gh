@@ -427,11 +427,33 @@ const STANDING: Record<string, Standing> = {
 }
 
 // What is YOURS from each position. Read down a column and the flips are the
-// point: the mechanical blockers (ci-fail, conflict, changes-req) are yours only
-// on your own PR, and the queue states (waiting, pending) only while a review is
+// point: a verdict against the branch (ci-fail, changes-req) is yours only on
+// your own PR, and the queue states (waiting, pending) only while a review is
 // still wanted from you. `threads` alone is yours from all three — it is
 // literally "your reply is owed", and it is the only thing left on a PR you have
 // already reviewed.
+//
+// `conflict` sat with the verdicts until 2026-09-09 and does not any more. The
+// line it moved across is the one `isFailCheck` already draws in `@kud/gh`'s
+// health.ts: whether a judgement was ever reached about the code. A failing
+// check is a verdict — something was examined and found wanting, and the diff
+// you were asked to read is about to change. CONFLICTING is not a verdict:
+// nothing was examined, nobody decided anything, and the usual cause is a third
+// party merging something else while this PR sat still. The diff survives the
+// rebase, so reviewing it is not wasted work — and "reviewing it is wasted" is
+// the entire claim the `queued` column makes when it declines a row.
+//
+// It costs more than one token, because `computeHealth` ranks `conflict` SECOND,
+// above changes-req and threads. A conflicted PR carrying an open thread
+// addressed to you never surfaces as `threads` at all — the ladder collapses it
+// on the way past — so the row you were owed a reply on was filed under Their
+// move for a reason that had nothing to do with the reply.
+//
+// `ci-fail` deliberately did not move with it. On 2026-08-26 the Review tab held
+// 20 rows of which 18 were red builds, conflicts and drafts, and reading a red
+// build as the author's is what made that tab usable at all. That is an
+// observation rather than a principle, and it is the half of the original
+// reading nothing has since contradicted.
 //
 // `draft` is yours ONLY when you authored it, and that asymmetry is the whole
 // point of listing it here. The band asks whose move it is, and on your own
@@ -459,7 +481,7 @@ const YOURS: Record<Standing, Health[]> = {
     "approved",
     "draft",
   ],
-  queued: ["waiting", "pending", "threads", "approved"],
+  queued: ["waiting", "pending", "threads", "approved", "conflict"],
   spoken: ["threads"],
 }
 
@@ -518,8 +540,8 @@ export const whoseMove = (
   // reply is owed", and the band filed it under Their move.
   //
   // ON YOUR OWN PR ONLY, though. Read unconditionally it destroys the very
-  // distinction the table below is built on — the mechanical blockers (ci-fail,
-  // conflict, changes-req) are yours on your PR and theirs on theirs — so a
+  // distinction the table below is built on — a verdict against the branch
+  // (ci-fail, changes-req) is yours on your PR and theirs on theirs — so a
   // stranger's failing build became your move the moment they commented on it.
   // Shipped that way for one release on 2026-08-27; eleven rows of somebody
   // else's work turned up under Your move, which is exactly the noise the bands

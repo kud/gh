@@ -5,9 +5,13 @@ import { layoutGHItems, whoseMove, type GHItem } from "./inbox.js"
 /*
  * The 2026-08-26 case: the Review tab held 20 rows across five repos, of which
  * exactly two could be reviewed. The other eighteen were red CI, merge
- * conflicts and drafts — all of them the author's problem, none of them
- * yours, and all of them interleaved with the two that were. (Where YOU are
- * the author, that same draft is yours: see the draft case below.)
+ * conflicts and drafts — read at the time as all of them the author's problem,
+ * and all of them interleaved with the two that were. (Where YOU are the
+ * author, that same draft is yours: see the draft case below.)
+ *
+ * The merge conflicts came back out on 2026-09-09, on a distinction that day
+ * did not draw: a red build is a verdict on the code and a conflict is not. The
+ * noise the banding removed was real; a third of what it swept up was not noise.
  *
  * Repo grouping cannot express that, because it is the wrong axis: the tab
  * already says which relationship you are looking at, and nothing said whether
@@ -39,15 +43,27 @@ const numbers = (rows: ReturnType<typeof layoutGHItems>) =>
   rows.flatMap((r) => (r.kind === "pr" || r.kind === "issue" ? [r.number] : []))
 
 describe("whoseMove", () => {
-  it("flips the mechanical blockers with the side you stand on", () => {
+  it("flips a verdict against the branch with the side you stand on", () => {
     // Red CI on a PR you wrote is an afternoon's work. The same red CI on one
     // you were asked to review is the author's, and reviewing it is wasted.
     expect(whoseMove("ci-fail", "open")).toBe("you")
     expect(whoseMove("ci-fail", "review")).toBe("them")
-    expect(whoseMove("conflict", "open")).toBe("you")
-    expect(whoseMove("conflict", "review")).toBe("them")
     expect(whoseMove("changes-req", "open")).toBe("you")
     expect(whoseMove("changes-req", "review")).toBe("them")
+  })
+
+  it("keeps a conflict yours from a queue that asked for your review", () => {
+    // The one that does NOT flip, and the reason is the fail/inconclusive line
+    // health.ts already draws: CONFLICTING is not a verdict on the code. Nobody
+    // examined anything and nobody decided anything — somebody else merged, and
+    // the diff you were asked to read survives the rebase unchanged. `review` is
+    // `review-requested:@me`, so GitHub is stating outright that the next move
+    // is yours; a base branch moving underneath it does not retract that.
+    expect(whoseMove("conflict", "open")).toBe("you")
+    expect(whoseMove("conflict", "review")).toBe("you")
+    // Still not yours from `spoken`: you have already reviewed, the request is
+    // gone, and the rebase is the author's.
+    expect(whoseMove("conflict", "reviewed")).toBe("them")
   })
 
   it("flips the review-queue states the other way", () => {
@@ -148,17 +164,24 @@ describe("whoseMove", () => {
 
   it("does NOT claim a stranger's PR because they spoke on it", () => {
     // Read from every position this destroys the distinction the whole table is
-    // built on: the mechanical blockers are yours on your PR and theirs on
+    // built on: a verdict against the branch is yours on your PR and theirs on
     // theirs. Shipped unconditionally for one release and eleven rows of other
     // people's work appeared under Your move — a merge conflict and a red build
     // on PRs authored by two colleagues, promoted purely because they had
     // commented on their own work.
-    for (const h of ["ci-fail", "conflict", "changes-req"] as const) {
+    //
+    // `conflict` is deliberately absent from this loop and that is not a hole in
+    // the guard. It is yours from `queued` on its own merits now, so it can no
+    // longer distinguish the last-word rule leaking from the table doing its
+    // job; `spoken` below still carries it, where the two answers do differ.
+    for (const h of ["ci-fail", "changes-req"] as const) {
       expect(whoseMove(h, "review", "queued", true)).toBe("them")
       expect(whoseMove(h, "reviewed", "spoken", true)).toBe("them")
       // Same health, your PR: yours, exactly as before.
       expect(whoseMove(h, "mine", "authored", true)).toBe("you")
     }
+    expect(whoseMove("conflict", "reviewed", "spoken", true)).toBe("them")
+    expect(whoseMove("conflict", "mine", "authored", true)).toBe("you")
   })
 
   it("still claims what those positions genuinely owe you", () => {
@@ -194,7 +217,8 @@ describe("whoseMove", () => {
     // with no `isDraft` to read, and from `authored` that is the whole answer:
     // nobody else can advance it. From the other two it stays a decline, since
     // being pointed at somebody's issue is not owning it.
-    for (const tab of ["open", "mine"]) expect(whoseMove("none", tab)).toBe("you")
+    for (const tab of ["open", "mine"])
+      expect(whoseMove("none", tab)).toBe("you")
     for (const tab of ["review", "reviewed"])
       expect(whoseMove("none", tab)).toBe("unknown")
     for (const tab of ["open", "mine", "review", "reviewed"])
@@ -251,8 +275,11 @@ describe("layoutGHItems bands", () => {
 
     const laid = layoutGHItems(rows, "review")
 
-    expect(labels(laid)).toEqual(["Your move (2)", "Their move (2)"])
-    expect(numbers(laid)).toEqual([1495, 290, 1496, 1449])
+    // 1449 is the conflict, and it bands with the reviewable ones: a base branch
+    // that moved is not a reason the review was not wanted. Only 1496, the red
+    // build, is genuinely the author's before anyone reads it.
+    expect(labels(laid)).toEqual(["Your move (3)", "Their move (1)"])
+    expect(numbers(laid)).toEqual([1495, 1449, 290, 1496])
   })
 
   it("puts the same rows in the opposite bands on an authored tab", () => {
