@@ -1,5 +1,13 @@
 # @kud/gh-ink
 
+## 0.46.3
+
+### Patch Changes
+
+- Updated dependencies [aa5cded]
+  - @kud/gh@0.15.0
+  - @kud/gh-workflow@0.5.1
+
 ## 0.46.2
 
 ### Patch Changes
