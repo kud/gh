@@ -5,7 +5,7 @@ import {
   INBOX_SOURCES,
   SOURCE_LIMITS,
   sourceCoverage,
-  truncatedSources,
+  cappedSources,
   buildHealthQueries,
   buildHealthQuery,
   buildInboxQueries,
@@ -392,30 +392,101 @@ describe("source coverage", () => {
       )
   })
 
-  it("calls a source truncated when it matched more than it returned", () => {
+  it("calls a source capped when it returned everything it asked for", () => {
+    // `authoredIssues` caps at 100, so a fetch that came back with 100 has told
+    // us only that there may be more. The count is along for the ride.
     const coverage = sourceCoverage({
-      authoredIssues: { issueCount: 95, nodes: new Array(30).fill({}) },
+      authoredIssues: { issueCount: 195, nodes: new Array(100).fill({}) },
     })
     expect(coverage.authoredIssues).toEqual({
-      total: 95,
-      shown: 30,
-      truncated: true,
+      total: 195,
+      shown: 100,
+      cap: 100,
+      capped: true,
+      partial: false,
     })
   })
 
-  it("calls a source whole when it returned everything it matched", () => {
+  it("calls a source whole when it came back under its cap and matched no more", () => {
+    expect(sourceCoverage({ myPRs: { issueCount: 8, nodes: new Array(8).fill({}) } }).myPRs)
+      .toEqual({ total: 8, shown: 8, cap: 30, capped: false, partial: false })
+  })
+
+  /*
+   * The regression this whole shape exists for. `repoIssues` matched 111 and
+   * returned 83 against a cap of 100 — nothing was capped, and the old rule
+   * (`total > shown`) called it truncated anyway, so a host explained 83 rows
+   * with a sentence about caps that was true of some other situation entirely.
+   */
+  it("calls a source partial when rows went missing without the cap biting", () => {
+    expect(
+      sourceCoverage({
+        repoIssues: { issueCount: 111, nodes: new Array(83).fill({}) },
+      }).repoIssues,
+    ).toEqual({
+      total: 111,
+      shown: 83,
+      cap: 100,
+      capped: false,
+      partial: true,
+    })
+  })
+
+  it("reports a source that answered with nothing as partial, not as capped", () => {
+    // `Incoming 0 of 5` on a live board, and the extreme case of the same
+    // fault: an empty node list beside a non-zero count. Nothing was capped and
+    // the source did not fail either — it answered, with nothing in it.
+    expect(sourceCoverage({ repoPRs: { issueCount: 5, nodes: [] } }).repoPRs).toEqual({
+      total: 5,
+      shown: 0,
+      cap: 30,
+      capped: false,
+      partial: true,
+    })
+  })
+
+  /*
+   * THE EVIDENCE, and this test is the only place it now lives.
+   *
+   * Measured 2026-09-09 against a live account: `myPRs` answered `issueCount: 8`
+   * with sixteen nodes in the same response, and `repoPRs` answered `4` with
+   * five. A count exceeded by its own sample is not a total, which is what
+   * disqualifies `issueCount` from deciding anything here.
+   *
+   * Neither reading may produce a capped or a partial claim: sixteen rows under
+   * a cap of thirty is a whole answer whatever the count says about itself.
+   */
+  it("survives a count smaller than the sample drawn from it", () => {
     const coverage = sourceCoverage({
-      myPRs: { issueCount: 8, nodes: new Array(8).fill({}) },
+      myPRs: { issueCount: 8, nodes: new Array(16).fill({}) },
+      repoPRs: { issueCount: 4, nodes: new Array(5).fill({}) },
     })
-    expect(coverage.myPRs?.truncated).toBe(false)
+    expect(coverage.myPRs).toMatchObject({ capped: false, partial: false })
+    expect(coverage.repoPRs).toMatchObject({ capped: false, partial: false })
   })
 
-  it("treats a missing issueCount as whole, never as truncated", () => {
+  it("measures against the cap the fetch actually asked for", () => {
+    // The two-tier path raises `reviewRequests` to 100. Measured against the
+    // default 20 it would read as capped forever, and the host would keep
+    // firing an overflow fetch that had already succeeded.
+    const data = { reviewRequests: { issueCount: 90, nodes: new Array(90).fill({}) } }
+    expect(sourceCoverage(data).reviewRequests?.capped).toBe(true)
+    expect(
+      sourceCoverage(data, { reviewRequests: 100 }).reviewRequests?.capped,
+    ).toBe(false)
+  })
+
+  it("treats a missing issueCount as whole, never as partial", () => {
     // The direction to fail in. A source that answered without a count must not
     // invent a truncation, because a consumer reads truncation as "presence
     // changes here mean nothing" — inventing one would silence real news.
-    const coverage = sourceCoverage({ repoPRs: { nodes: [{}, {}] } })
-    expect(coverage.repoPRs).toEqual({ total: 2, shown: 2, truncated: false })
+    expect(sourceCoverage({ repoPRs: { nodes: [{}, {}] } }).repoPRs).toEqual({
+      total: 2,
+      shown: 2,
+      cap: 30,
+      capped: false,
+      partial: false,
+    })
   })
 
   it("says nothing about a source that did not answer", () => {
@@ -426,18 +497,19 @@ describe("source coverage", () => {
     ).toBeUndefined()
   })
 
-  it("lists only the truncated sources", () => {
+  it("lists only the sources that hit their cap", () => {
     const data = {
       myPRs: { issueCount: 8, nodes: new Array(8).fill({}) },
-      assigned: { issueCount: 37, nodes: new Array(30).fill({}) },
+      assigned: { issueCount: 137, nodes: new Array(100).fill({}) },
+      // Short of its cap: missing rows, but nothing an overflow fetch can buy.
       repoIssues: { issueCount: 94, nodes: new Array(30).fill({}) },
     }
-    expect(truncatedSources(data)).toEqual(["assigned", "repoIssues"])
+    expect(cappedSources(data)).toEqual(["assigned"])
   })
 
   it("survives no data at all", () => {
     expect(sourceCoverage(undefined)).toEqual({})
-    expect(truncatedSources(undefined)).toEqual([])
+    expect(cappedSources(undefined)).toEqual([])
   })
 })
 

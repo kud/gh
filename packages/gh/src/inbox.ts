@@ -621,14 +621,44 @@ export const mergeInboxData = (parts: any[]): any => {
   }
 }
 
-/** What a source matched, against what it was allowed to return. */
+/**
+ * What a source matched, against what it was allowed to return.
+ *
+ * TWO FACTS AND AN ESTIMATE, and keeping them apart is the whole of this type.
+ * `shown` and `cap` are ours — what we asked for and what came back. `total` is
+ * GitHub's, and it has been caught wrong.
+ */
 export type SourceCoverage = {
-  /** Everything the search matched, from GitHub's own `issueCount`. */
+  /**
+   * What GitHub's `issueCount` said the search matched.
+   *
+   * AN ESTIMATE. It may be shown to a reader as an approximation and it may
+   * never decide whether anything is reported — see the note on `capped`.
+   */
   total: number
-  /** What actually came back — at most this source's cap. */
+  /** How many rows actually came back. */
   shown: number
-  /** `total > shown`: the rows are a sample of the set, not the set. */
-  truncated: boolean
+  /** The `first:` this source asked for on this fetch. */
+  cap: number
+  /**
+   * We asked for N and got N, so the rows are a sample of the set.
+   *
+   * Derived from our own request rather than from `total`, which is the entire
+   * point: a cap is a fact we hold, and it cannot be wrong about itself.
+   */
+  capped: boolean
+  /**
+   * Under its cap, and the count still claims more matched.
+   *
+   * Nothing was capped and rows are missing anyway, so this is an incomplete
+   * ANSWER rather than a truncation, and it belongs with whatever vocabulary a
+   * host uses for a source that failed. Reporting it as a cap names a mechanism
+   * that was not operating, which is worse than saying nothing.
+   *
+   * It rests on `total` and therefore inherits its unreliability: read it as a
+   * suspicion, never as a count of what is missing.
+   */
+  partial: boolean
 }
 
 /**
@@ -642,21 +672,53 @@ export type SourceCoverage = {
  * 30-row window reorders it, evicts something, and the eviction is reported as
  * news about the row that left — which never moved at all.
  *
- * So a consumer should treat presence changes on a truncated source as carrying
- * no information, and say what it is not showing instead. Both halves need this
- * number, and until 2026-09-07 it was fetched for exactly one source out of
- * eight and read by nobody — the guarantee lived in a comment and not in the
- * code.
+ * So a consumer should treat presence changes on a capped source as carrying no
+ * information, and say what it is not showing instead.
+ *
+ * `issueCount` USED TO DECIDE THAT, AND IT CANNOT. Until 2026-09-09 this
+ * returned `truncated: total > shown`, which reads as a cap and is not one:
+ * `issueCount` is an index aggregate computed on a different path from the node
+ * materialisation, and the two are not a consistent snapshot. Measured that day
+ * against a live account, one sweep, immediately after an eight-source document
+ * had returned HTTP 502:
+ *
+ *   myPRs         issueCount   8   nodes 16   cap  30
+ *   reviewed      issueCount  13   nodes 10   cap  20
+ *   repoIssues    issueCount 111   nodes 83   cap 100
+ *   repoPRs       issueCount   4   nodes  5   cap  30
+ *   recentlyDone  issueCount  19   nodes 14   cap  30
+ *
+ * The first and fourth rows are the proof, and they are the reason this is a
+ * rule rather than a hunch: THE COUNT CAME BACK SMALLER THAN THE SAMPLE DRAWN
+ * FROM IT. A total that is exceeded by its own subset is not a total. Re-run
+ * seconds later, every pair agreed, and 24 subsequent runs of the real query
+ * agreed too — so the number is not merely stale, it is untrustworthy at
+ * unpredictable moments, which is worse. What made it go wrong was never
+ * established and does not need to be: the replacement does not consult it.
+ *
+ * What that cost downstream is a host reporting five capped sources of which
+ * not one was near its cap, explaining each with a sentence about caps. A true
+ * sentence about a false situation is the hardest kind of wrong to read, and
+ * the reader correctly could not parse it.
  *
  * A source that answered with no `issueCount` reports `total: shown`, which
- * reads as "not truncated". That is the deliberate direction to fail in: a
- * missing count must never invent a truncation and silence real news.
+ * reads as neither capped nor partial unless the cap says otherwise. That is
+ * the deliberate direction to fail in: a missing count must never invent a
+ * truncation and silence real news.
+ *
+ * `limits` must be the ones the fetch ACTUALLY asked for, not the defaults, or
+ * the cap this compares against is a different number from the one GitHub
+ * honoured — a two-tier host raising `reviewRequests` to 100 and then measuring
+ * against 20 would call every fetch capped forever.
  */
 export const sourceCoverage = (
   data: any,
+  limits: Partial<Record<InboxSource, number>> = {},
 ): Partial<Record<InboxSource, SourceCoverage>> => {
   const out: Partial<Record<InboxSource, SourceCoverage>> = {}
   if (!data) return out
+
+  const caps = limitsFor({ limits })
 
   for (const source of INBOX_SOURCES) {
     const answered = data[source]
@@ -664,15 +726,36 @@ export const sourceCoverage = (
     const shown = answered.nodes?.length ?? 0
     const total =
       typeof answered.issueCount === "number" ? answered.issueCount : shown
-    out[source] = { total, shown, truncated: total > shown }
+    const cap = caps[source]
+    out[source] = {
+      total,
+      shown,
+      cap,
+      capped: shown >= cap,
+      partial: shown < cap && total > shown,
+    }
   }
 
   return out
 }
 
-/** The sources whose rows are a sample rather than the set. */
-export const truncatedSources = (data: any): InboxSource[] =>
-  INBOX_SOURCES.filter((source) => sourceCoverage(data)[source]?.truncated)
+/**
+ * The sources whose rows are a sample rather than the set.
+ *
+ * This is what a two-tier host asks before spending a second round trip, so it
+ * has to be the CAP question and not the count one — an overflow fetch fired on
+ * a bad `issueCount` buys nothing and costs a request.
+ *
+ * Coverage is computed once rather than per source. It was once rebuilt inside
+ * the filter, which walked all eight sources eight times to answer about eight.
+ */
+export const cappedSources = (
+  data: any,
+  limits: Partial<Record<InboxSource, number>> = {},
+): InboxSource[] => {
+  const coverage = sourceCoverage(data, limits)
+  return INBOX_SOURCES.filter((source) => coverage[source]?.capped)
+}
 
 /**
  * How many PR ids one health request may carry.
