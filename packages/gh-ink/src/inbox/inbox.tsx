@@ -2469,7 +2469,12 @@ const ItemRow = ({
         {item.pill && !backdropped ? (
           <>
             <Text> </Text>
-            <Pill variant={item.pillVariant ?? "muted"}>{item.pill}</Pill>
+            <Pill
+              variant={item.pillVariant ?? "muted"}
+              {...(item.pillColor ? { color: item.pillColor } : {})}
+            >
+              {item.pill}
+            </Pill>
           </>
         ) : null}
         {note ? <Text dimColor>{` ${note}`}</Text> : null}

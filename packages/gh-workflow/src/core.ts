@@ -187,6 +187,21 @@ export type TaskRow = {
   /** Which fill the pill takes. See `@kud/ink-ui`'s `PillVariant`. */
   pillVariant?: PillVariant
   /**
+   * An explicit fill for the pill, overriding `pillVariant` — the same escape
+   * hatch `@kud/ink-ui`'s `Pill` exposes, carried up to the row so a host can
+   * use it without reaching past this type.
+   *
+   * For a caller whose pill vocabulary comes from an external system that has
+   * already assigned the hues: Jira's issue types, a CI provider's results. The
+   * six semantic variants are the default because a fill invented here would be
+   * decoration; a fill quoted from the system being mirrored is a fact about the
+   * thing labelled, and the reader may already know it.
+   *
+   * The word stays the primary channel either way — `Pill` draws the label
+   * whatever the fill, so a reader who cannot separate the hues loses nothing.
+   */
+  pillColor?: string
+  /**
    * The Jira issue key behind this row, when one exists. Its PRESENCE is what
    * turns on the ticket affordances — ↵ opens a menu led by `jira issue view`,
    * and `t` transitions the issue. A row without it is just a task: ↵ opens its
