@@ -166,18 +166,26 @@ export type InboxQueryOptions = {
    *   full     first: 100      —     ~11s   502, twice
    *   minimal  first: 100    1 pt    2.1s   200
    *
-   * The 502 is the search timing out at GitHub's proxy rather than a node-count
-   * refusal — cutting the review-thread window by 65% still 502s at ~11s — so
-   * `first: 50` is the ceiling with a foot over the line, and a full fragment
-   * cannot reach 99 at any window. A two-tier fetch can: the full shape at the
-   * default cap for the rows that get a verdict, then `{ shape: "minimal",
-   * limits: { reviewRequests: 100 } }` for the rest.
+   * The 502 is a wall-clock refusal rather than a node-count one — cutting the
+   * review-thread window by 65% still 502s at ~11s — so `first: 50` is the
+   * ceiling with a foot over the line, and a full fragment cannot reach 99 at
+   * any window. A two-tier fetch can: the full shape at the default cap for the
+   * rows that get a verdict, then `{ shape: "minimal", limits: {
+   * reviewRequests: 100 } }` for the rest.
+   *
+   * This note used to name the SEARCH as what was timing out, and that was
+   * wrong in a way worth keeping visible: it made the fix look like "address
+   * the rows directly and the problem goes away". It does not. A `nodes(ids:)`
+   * lookup with the same selections dies at the same size and the same eleven
+   * seconds — see `HEALTH_BATCH_SIZE`, where it is measured. What the request
+   * came through was never the variable; how many nodes it had to expand was.
    *
    * A caller doing that owes the overflow rows an honest verdict. A minimal row
    * carries no health, and health absent is not health `waiting` — see
    * `computeHealth`'s note on why this set is all-or-nothing, and
    * `@kud/gh-workflow`'s `whoseMove`, which answers `unknown` rather than
-   * guessing.
+   * guessing. `healthIdsFrom` / `buildHealthQueries` / `mergeHealth` are the
+   * third tier that pays that debt where the caller wants the verdicts.
    */
   limits?: Partial<Record<InboxSource, number>>
 }
@@ -303,7 +311,7 @@ const SOURCES: Record<InboxSource, (s: Selections, first: number) => string> = {
   ) => `  myPRs: search(query: "${scope}is:pr is:open author:@me", type: ISSUE, first: ${first}) {
     issueCount
     nodes { __typename ... on PullRequest {
-      number title createdAt url headRefName isDraft
+      id number title createdAt url headRefName isDraft
       repository { nameWithOwner }
       author { login }
       ${health}
@@ -317,7 +325,7 @@ const SOURCES: Record<InboxSource, (s: Selections, first: number) => string> = {
   ) => `  reviewRequests: search(query: "${scope}is:pr is:open review-requested:@me", type: ISSUE, first: ${first}) {
     issueCount
     nodes { __typename ... on PullRequest {
-      number title createdAt url headRefName isDraft
+      id number title createdAt url headRefName isDraft
       repository { nameWithOwner }
       author { login }
       ${health}
@@ -331,7 +339,7 @@ const SOURCES: Record<InboxSource, (s: Selections, first: number) => string> = {
   ) => `  reviewed: search(query: "${scope}is:pr is:open reviewed-by:@me -author:@me -review-requested:@me", type: ISSUE, first: ${first}) {
     issueCount
     nodes { __typename ... on PullRequest {
-      number title createdAt url headRefName isDraft
+      id number title createdAt url headRefName isDraft
       repository { nameWithOwner }
       author { login }
       ${health}
@@ -352,7 +360,7 @@ const SOURCES: Record<InboxSource, (s: Selections, first: number) => string> = {
         ${issueLabels}
       }
       ... on PullRequest {
-        number title createdAt url headRefName isDraft repository { nameWithOwner } author { login }
+        id number title createdAt url headRefName isDraft repository { nameWithOwner } author { login }
         ${health}
         ${conversation}
       }
@@ -421,7 +429,7 @@ const SOURCES: Record<InboxSource, (s: Selections, first: number) => string> = {
   ) => `  repoPRs: search(query: "${scope}${owned}is:pr is:open -author:@me archived:false", type: ISSUE, first: ${first}) {
     issueCount
     nodes { __typename ... on PullRequest {
-      number title createdAt url headRefName isDraft
+      id number title createdAt url headRefName isDraft
       repository { nameWithOwner }
       author { login }
       ${health}
@@ -435,7 +443,7 @@ const SOURCES: Record<InboxSource, (s: Selections, first: number) => string> = {
   ) => `  recentlyDone: search(query: "${scope}is:pr author:@me -is:open closed:>=${doneSince}", type: ISSUE, first: ${first}) {
     issueCount
     nodes { __typename ... on PullRequest {
-      number title state isDraft createdAt mergedAt closedAt url
+      id number title state isDraft createdAt mergedAt closedAt url
       repository { nameWithOwner }
     }}
   }`,
@@ -665,3 +673,194 @@ export const sourceCoverage = (
 /** The sources whose rows are a sample rather than the set. */
 export const truncatedSources = (data: any): InboxSource[] =>
   INBOX_SOURCES.filter((source) => sourceCoverage(data)[source]?.truncated)
+
+/**
+ * How many PR ids one health request may carry.
+ *
+ * The third tier's whole reason for existing, so it is a measurement rather than
+ * a taste. Measured 2026-09-09 on a live account with 102 matching review
+ * requests, asking for the real `PR_HEALTH` + `PR_CONVERSATION` selections by
+ * node id:
+ *
+ *   nodes(ids:)  100    —        ~11s   502, twice
+ *   nodes(ids:)   50   28 pts     8.7s  200   (6,200 nodes)
+ *   nodes(ids:)   25   14 pts     4.0s  200   (3,100 nodes)
+ *   4 × 25 in parallel   56 pts   6.0s wall   200 ×4
+ *
+ * WHICH CORRECTS THE NOTE ON `limits` ABOVE, and the correction is the useful
+ * half: the 502 at `first: 100` was read there as the SEARCH timing out at
+ * GitHub's proxy. It is not. A direct node lookup — no search index involved at
+ * all — fails identically, at the same size and the same eleven seconds. What
+ * dies is the resolver's wall clock expanding ~12,000 nodes of check rollups and
+ * review threads, whichever door the request came through. The search endpoint
+ * was innocent.
+ *
+ * So batching is the MECHANISM here, not an optimisation of it: a tier three
+ * that fired one 100-id request would reproduce the exact failure it exists to
+ * fix. Cost per PR is 0.56 points either way — GraphQL prices nodes, not
+ * requests — so splitting buys reliability at no extra budget, exactly as
+ * `INBOX_SOURCES_PER_QUERY` does one level up.
+ */
+export const HEALTH_BATCH_SIZE = 25
+
+/*
+ * A node the health fragment was never asked for.
+ *
+ * Tested on `reviewDecision` alone, and that is sound rather than sloppy: the
+ * selection is dropped WHOLE (see `PR_HEALTH`), so one key's absence is the
+ * whole set's absence. `@kud/gh-workflow`'s `hasHealthSelection` tests all three
+ * with `||` for a different job — it guards against a caller who built the node
+ * by hand — and importing it here is not available anyway, since the flow runs
+ * this way and not back.
+ */
+const lacksHealth = (node: any): boolean =>
+  Boolean(node) && !("reviewDecision" in node)
+
+/*
+ * Rows whose verdict is already settled without the selection, and which
+ * therefore buy nothing by being enriched: `computeHealth` short-circuits on
+ * `state` and `isDraft` before it reads a single check.
+ *
+ * A COST filter, not a correctness one — merging health onto a merged PR changes
+ * no answer, it just spends 0.56 points to learn something already known.
+ */
+const settledWithoutHealth = (node: any): boolean =>
+  node?.state === "MERGED" || node?.state === "CLOSED" || node?.isDraft === true
+
+/**
+ * PR node ids on this data that arrived WITHOUT the health selection.
+ *
+ * The filter is load-bearing rather than tidiness. A two-tier fetch merges the
+ * cheap overflow after the full rows precisely so a URL collision keeps the
+ * full one, which means a naive "every id here" would re-fetch the rows that
+ * already carry a verdict — on a 102-row account that is ~11 points bought to
+ * learn what tier one already answered.
+ *
+ * `sources` narrows it further, and a caller should use it: only the PR sources
+ * can be enriched at all, and the issue sources that truncate carry no health to
+ * begin with.
+ */
+export const healthIdsFrom = (
+  data: any,
+  sources?: readonly InboxSource[],
+): string[] => {
+  const ids: string[] = []
+  if (!data) return ids
+
+  for (const source of sources ?? INBOX_SOURCES)
+    for (const node of data[source]?.nodes ?? []) {
+      if (node?.__typename !== "PullRequest") continue
+      if (typeof node.id !== "string") continue
+      if (!lacksHealth(node) || settledWithoutHealth(node)) continue
+      ids.push(node.id)
+    }
+
+  return [...new Set(ids)]
+}
+
+/**
+ * One `nodes(ids:)` document carrying the health and conversation selections for
+ * PRs already identified elsewhere.
+ *
+ * BOTH fragments, and health alone would be a bug. `computeHealth`'s precedence
+ * reads `unresolvedThreads` out of `reviewThreads`, which lives in
+ * `PR_CONVERSATION` — so a health-only enrichment would report `waiting` on a PR
+ * with open threads, which is the silent wrong token this whole set is
+ * all-or-nothing to prevent, one layer down.
+ *
+ * It also costs almost nothing to include: `reviewThreads` is ~100 of the ~124
+ * nodes a PR drags, so the rest of the conversation rides along nearly free —
+ * and an enriched overflow row comes out FULLY equal to a tier-one row, with its
+ * last actor and activity age intact, rather than a second-class one carrying a
+ * token and no story behind it.
+ */
+export const buildHealthQuery = (ids: readonly string[]) => `
+{
+  rateLimit { cost nodeCount remaining resetAt }
+  nodes(ids: [${ids.map((id) => JSON.stringify(id)).join(", ")}]) {
+    __typename
+    ... on PullRequest {
+      id
+      ${PR_HEALTH}
+      ${PR_CONVERSATION}
+    }
+  }
+}
+`
+
+/**
+ * The same, split into documents small enough to answer — to be issued in
+ * parallel and handed to `mergeHealth`.
+ *
+ * Prefer this to `buildHealthQuery` for anything but a handful of ids. See
+ * `HEALTH_BATCH_SIZE` for why the split is the mechanism.
+ */
+export const buildHealthQueries = (
+  ids: readonly string[],
+  batchSize: number = HEALTH_BATCH_SIZE,
+): string[] => {
+  const size = Math.max(1, Math.trunc(batchSize))
+  const queries: string[] = []
+  for (let i = 0; i < ids.length; i += size)
+    queries.push(buildHealthQuery(ids.slice(i, i + size)))
+  return queries
+}
+
+/*
+ * Every health key, and the rollup non-null.
+ *
+ * GraphQL can answer 200 with `errors` and null fields, and a node arriving with
+ * `reviewDecision` present but `statusCheckRollup: null` is the one shape that
+ * defeats the guard downstream: `hasHealthSelection` would read true on the
+ * first key while `computeHealth` saw zero checks and returned `waiting`. A
+ * confident wrong answer, through the only door left open.
+ *
+ * So the test is per NODE rather than per response. A partial answer should
+ * degrade to fewer verdicts, never to a wrong one.
+ */
+const carriesHealth = (node: any): boolean =>
+  Boolean(node) &&
+  "reviewDecision" in node &&
+  "mergeable" in node &&
+  node.statusCheckRollup != null
+
+/**
+ * Merge tier-three health onto the rows that were fetched without it.
+ *
+ * By node id, and all-or-nothing per node — a batch that failed merges nothing,
+ * a node that merges nothing keeps no health keys, `healthOf` reads the absence
+ * and `whoseMove` answers `unknown`. The invariant holds by CONSTRUCTION rather
+ * than by a flag anyone has to remember to pass, which is the same reason
+ * `@kud/gh-workflow` tests presence instead of trusting its caller.
+ *
+ * Returns a new object; the input is not mutated, because a caller merging the
+ * enriched copy alongside the original relies on the original still being what
+ * it was.
+ */
+export const mergeHealth = (data: any, parts: readonly any[]): any => {
+  if (!data) return data
+
+  const byId = new Map<string, any>()
+  for (const part of parts)
+    for (const node of part?.nodes ?? [])
+      if (typeof node?.id === "string" && carriesHealth(node))
+        byId.set(node.id, node)
+
+  if (byId.size === 0) return data
+
+  const out: any = { ...data }
+  for (const source of INBOX_SOURCES) {
+    const answered = data[source]
+    if (!answered?.nodes) continue
+    out[source] = {
+      ...answered,
+      nodes: answered.nodes.map((node: any) => {
+        const found =
+          typeof node?.id === "string" ? byId.get(node.id) : undefined
+        return found ? { ...node, ...found } : node
+      }),
+    }
+  }
+
+  return out
+}

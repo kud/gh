@@ -1,13 +1,18 @@
 import { describe, expect, it } from "vitest"
 
 import {
+  HEALTH_BATCH_SIZE,
   INBOX_SOURCES,
   SOURCE_LIMITS,
   sourceCoverage,
   truncatedSources,
+  buildHealthQueries,
+  buildHealthQuery,
   buildInboxQueries,
   buildInboxQuery,
+  healthIdsFrom,
   limitsFor,
+  mergeHealth,
   mergeInboxData,
 } from "./index.js"
 
@@ -496,5 +501,200 @@ describe("per-source limits", () => {
     expect(blockFor(joined, "reviewed")).toContain(
       `first: ${SOURCE_LIMITS.reviewed}`,
     )
+  })
+})
+
+/* A row as the minimal shape returns it: identity, no health selection. */
+const overflowPr = (id: string, extra: Record<string, unknown> = {}) => ({
+  __typename: "PullRequest",
+  id,
+  number: 1,
+  title: "a pull request",
+  isDraft: false,
+  ...extra,
+})
+
+/* The same row as tier three answers for it. */
+const enriched = (id: string, extra: Record<string, unknown> = {}) => ({
+  __typename: "PullRequest",
+  id,
+  reviewDecision: "REVIEW_REQUIRED",
+  mergeable: "MERGEABLE",
+  statusCheckRollup: { contexts: { nodes: [] } },
+  ...extra,
+})
+
+const withRows = (source: string, nodes: unknown[]) => ({
+  [source]: { issueCount: nodes.length, nodes },
+})
+
+describe("addressable PR rows", () => {
+  it("selects an id on every source that can be enriched", () => {
+    const query = buildInboxQuery()
+    for (const alias of OPEN_PR_SOURCES)
+      expect(blockFor(query, alias)).toMatch(/\bid number title\b/)
+  })
+
+  it("keeps the id in the minimal shape, where tier three needs it", () => {
+    const query = buildInboxQuery({ shape: "minimal" })
+    expect(blockFor(query, "reviewRequests")).toMatch(/\bid number title\b/)
+    expect(blockFor(query, "reviewRequests")).not.toContain("reviewDecision")
+  })
+})
+
+describe("healthIdsFrom", () => {
+  it("names the rows that arrived without a health selection", () => {
+    const data = withRows("reviewRequests", [
+      overflowPr("PR_one"),
+      overflowPr("PR_two"),
+    ])
+    expect(healthIdsFrom(data)).toEqual(["PR_one", "PR_two"])
+  })
+
+  it("leaves out a row that already carries a verdict", () => {
+    const data = withRows("reviewRequests", [
+      overflowPr("PR_cheap"),
+      enriched("PR_full", { number: 2, title: "t", isDraft: false }),
+    ])
+    expect(healthIdsFrom(data)).toEqual(["PR_cheap"])
+  })
+
+  it("leaves out rows whose health needs no selection", () => {
+    const data = withRows("recentlyDone", [
+      overflowPr("PR_merged", { state: "MERGED" }),
+      overflowPr("PR_closed", { state: "CLOSED" }),
+      overflowPr("PR_draft", { isDraft: true }),
+    ])
+    expect(healthIdsFrom(data)).toEqual([])
+  })
+
+  it("ignores issues, which have no health to fetch", () => {
+    const data = withRows("repoIssues", [
+      { __typename: "Issue", id: "I_one", number: 3, title: "an issue" },
+    ])
+    expect(healthIdsFrom(data)).toEqual([])
+  })
+
+  it("ignores a row with no id, rather than addressing nothing", () => {
+    const data = withRows("reviewRequests", [
+      { __typename: "PullRequest", number: 4, title: "no id" },
+    ])
+    expect(healthIdsFrom(data)).toEqual([])
+  })
+
+  it("names one row once, however many sources hold it", () => {
+    const data = {
+      ...withRows("reviewRequests", [overflowPr("PR_same")]),
+      ...withRows("repoPRs", [overflowPr("PR_same")]),
+    }
+    expect(healthIdsFrom(data)).toEqual(["PR_same"])
+  })
+
+  it("looks only at the sources it was asked about", () => {
+    const data = {
+      ...withRows("reviewRequests", [overflowPr("PR_wanted")]),
+      ...withRows("repoPRs", [overflowPr("PR_other")]),
+    }
+    expect(healthIdsFrom(data, ["reviewRequests"])).toEqual(["PR_wanted"])
+  })
+
+  it("survives no data at all", () => {
+    expect(healthIdsFrom(undefined)).toEqual([])
+  })
+})
+
+describe("buildHealthQuery", () => {
+  it("addresses the ids it was given", () => {
+    const query = buildHealthQuery(["PR_one", "PR_two"])
+    expect(query).toContain('nodes(ids: ["PR_one", "PR_two"])')
+  })
+
+  it("asks for health AND conversation, never health alone", () => {
+    const query = buildHealthQuery(["PR_one"])
+    expect(query).toContain("reviewDecision")
+    expect(query).toContain("statusCheckRollup")
+    /* computeHealth reads unresolvedThreads out of this one. */
+    expect(query).toContain("reviewThreads")
+  })
+
+  it("reports what it cost, like every other query here", () => {
+    expect(buildHealthQuery(["PR_one"])).toContain("rateLimit")
+  })
+})
+
+describe("buildHealthQueries", () => {
+  it("splits at the measured batch size", () => {
+    const ids = Array.from({ length: 80 }, (_, i) => `PR_${i}`)
+    expect(buildHealthQueries(ids)).toHaveLength(
+      Math.ceil(80 / HEALTH_BATCH_SIZE),
+    )
+  })
+
+  it("carries every id exactly once across the batches", () => {
+    const ids = Array.from({ length: 60 }, (_, i) => `PR_${i}`)
+    const joined = buildHealthQueries(ids).join("\n")
+    for (const id of ids)
+      expect(joined.match(new RegExp(`"${id}"`, "g"))).toHaveLength(1)
+  })
+
+  it("has nothing to ask when nothing lacks health", () => {
+    expect(buildHealthQueries([])).toEqual([])
+  })
+
+  it("refuses to split into nothing", () => {
+    expect(buildHealthQueries(["PR_one", "PR_two"], 0)).toHaveLength(2)
+  })
+})
+
+describe("mergeHealth", () => {
+  it("gives an overflow row the verdict it was fetched without", () => {
+    const data = withRows("reviewRequests", [overflowPr("PR_one")])
+    const merged = mergeHealth(data, [{ nodes: [enriched("PR_one")] }])
+    expect(merged.reviewRequests.nodes[0].reviewDecision).toBe(
+      "REVIEW_REQUIRED",
+    )
+    expect(merged.reviewRequests.nodes[0].title).toBe("a pull request")
+  })
+
+  it("leaves a row alone when its batch answered nothing", () => {
+    const data = withRows("reviewRequests", [overflowPr("PR_one")])
+    const merged = mergeHealth(data, [undefined, { nodes: [null] }])
+    expect(merged.reviewRequests.nodes[0]).not.toHaveProperty("reviewDecision")
+  })
+
+  it("refuses a node missing one of the health keys", () => {
+    const partial = enriched("PR_one")
+    delete (partial as Record<string, unknown>).mergeable
+    const data = withRows("reviewRequests", [overflowPr("PR_one")])
+    const merged = mergeHealth(data, [{ nodes: [partial] }])
+    expect(merged.reviewRequests.nodes[0]).not.toHaveProperty("reviewDecision")
+  })
+
+  it("refuses a null rollup, which would read as no checks rather than none asked", () => {
+    const data = withRows("reviewRequests", [overflowPr("PR_one")])
+    const merged = mergeHealth(data, [
+      { nodes: [enriched("PR_one", { statusCheckRollup: null })] },
+    ])
+    expect(merged.reviewRequests.nodes[0]).not.toHaveProperty("reviewDecision")
+  })
+
+  it("merges the batches that answered and skips the ones that did not", () => {
+    const data = withRows("reviewRequests", [
+      overflowPr("PR_one"),
+      overflowPr("PR_two"),
+    ])
+    const merged = mergeHealth(data, [undefined, { nodes: [enriched("PR_two")] }])
+    expect(merged.reviewRequests.nodes[0]).not.toHaveProperty("reviewDecision")
+    expect(merged.reviewRequests.nodes[1]).toHaveProperty("reviewDecision")
+  })
+
+  it("does not touch what it was given", () => {
+    const data = withRows("reviewRequests", [overflowPr("PR_one")])
+    mergeHealth(data, [{ nodes: [enriched("PR_one")] }])
+    expect(data.reviewRequests.nodes[0]).not.toHaveProperty("reviewDecision")
+  })
+
+  it("survives no data at all", () => {
+    expect(mergeHealth(undefined, [{ nodes: [enriched("PR_one")] }])).toBeUndefined()
   })
 })
