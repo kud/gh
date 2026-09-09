@@ -444,8 +444,12 @@ const STANDING: Record<string, Standing> = {
 // not the same as yours to finish now, and a fresh draft must not outrank a PR
 // somebody has genuinely been waiting on. Visible as yours, ranked last.
 //
-// `none` remains unlisted from every position — an issue has no review state to
-// read, so claiming it would be a guess rather than a reading.
+// `none` stays unlisted here, and that is not the same as unclaimed. This table
+// maps a review state onto a standing, and an issue has no review state to map;
+// `whoseMove` claims it for `authored` one branch earlier, off the fact that
+// `none` identifies an issue rather than merely failing to identify anything.
+// Listing it here instead would have claimed it from `queued` and `spoken` too,
+// where somebody else's issue is not yours for having been pointed at it.
 const YOURS: Record<Standing, Health[]> = {
   authored: [
     "ci-fail",
@@ -539,11 +543,34 @@ export const whoseMove = (
   // on your own issue; declining a verdict there would throw away a fact we
   // hold in order to report one we do not.
   //
-  // `none` joins the absent case rather than falling through to `them`, which
-  // is what the old comment under YOURS already said and the code did not do:
-  // an issue has no review state to read, so claiming one would be a guess
-  // rather than a reading. `unknown` is that sentence, expressed where a caller
-  // can act on it.
+  // `none` used to join that absent case wholesale, which was right about never
+  // reaching `them` and too broad about everything else — the narrowing is the
+  // claim immediately below.
+  //
+  // `none` is not an absent verdict. It is a POSITIVE identification: an open
+  // row that never had an `isDraft` to read, which is to say an issue. From
+  // `authored` — your own tab, your assignment — that is a reading rather than
+  // a guess, and it is the only reading available: an open issue you filed or
+  // were assigned is nobody else's to advance. No review is outstanding, no
+  // check can go red, and there is no third party in the room to hand it to.
+  //
+  // Declining here was the honest answer only while `unknown` covered two
+  // different absences with one token. It cost a whole tab: a repo-scoped
+  // Assigned tab is issues end to end, so every row landed in a band whose own
+  // justification is that its label carries information, above a header that
+  // could only ever read `Unclassified (n)`.
+  //
+  // `undefined` must NOT join this, and that is the entire reason the two are
+  // separated rather than tested together as they were before. `undefined` is a
+  // `minimal` fetch with the health selection omitted, where the row may well
+  // be a PR — claiming it from `authored` would be precisely the confident
+  // wrong answer `healthOf` refuses to give.
+  //
+  // The other two standings keep declining, for the reason the band exists. An
+  // issue reached from `queued` or `spoken` is somebody else's thread you were
+  // pointed at or replied to once, and having commented is not ownership.
+  if (health === "none" && position === "authored") return "you"
+
   if (health === undefined || health === "none") return "unknown"
 
   return YOURS[position].includes(health) ? "you" : "them"

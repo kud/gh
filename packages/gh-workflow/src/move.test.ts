@@ -115,7 +115,7 @@ describe("a row with no health never resolves to them", () => {
   })
 })
 
-describe("an issue's absent review state is the same absence", () => {
+describe("an issue is identified by `none`, not merely unexplained by it", () => {
   it("never resolves `none` to them, from any position", () => {
     // All 44 rows matching `assignee:@me` are issues, an issue has no review
     // state to read, and every one of them resolved to `them` — which is why
@@ -124,6 +124,36 @@ describe("an issue's absent review state is the same absence", () => {
       expect(whoseMove("none", sectionId)).not.toBe("them")
       for (const standing of STANDINGS)
         expect(whoseMove("none", sectionId, standing)).not.toBe("them")
+    }
+  })
+
+  it("claims an authored issue as yours rather than declining", () => {
+    // A repo-scoped Assigned tab is issues end to end, so declining every one
+    // of them put twelve rows under a header that could only ever read
+    // `Unclassified (12)` — a band whose stated justification is that its label
+    // carries information.
+    for (const sectionId of ["mine", "open", "draft", "assigned", "issues"])
+      expect(whoseMove("none", sectionId)).toBe("you")
+    for (const sectionId of SECTION_IDS)
+      expect(whoseMove("none", sectionId, "authored")).toBe("you")
+  })
+
+  it("keeps declining an issue reached from the other two standings", () => {
+    // Somebody else's issue you were pointed at, or replied to once. Having
+    // commented is not ownership, and the tab it arrived in cannot make it so.
+    for (const sectionId of SECTION_IDS)
+      for (const standing of ["queued", "spoken"] as Standing[])
+        expect(whoseMove("none", sectionId, standing)).toBe("unknown")
+  })
+
+  it("does not extend the claim to an unpaid-for health", () => {
+    // The whole reason the two absences are now tested separately. `undefined`
+    // is a `minimal` fetch with the health selection omitted, where the row may
+    // well be a PR — claiming it from `authored` would be the confident wrong
+    // answer `healthOf` exists to refuse.
+    for (const sectionId of SECTION_IDS) {
+      expect(whoseMove(undefined, sectionId, "authored")).toBe("unknown")
+      expect(whoseMove(undefined, sectionId)).toBe("unknown")
     }
   })
 })

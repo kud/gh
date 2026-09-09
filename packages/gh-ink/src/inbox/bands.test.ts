@@ -184,18 +184,21 @@ describe("whoseMove", () => {
     expect(whoseMove("ci-fail", "mine")).toBe("you")
   })
 
-  it("never claims an unknown, from any position", () => {
-    // An issue has no review state to read, so claiming it would be a guess
-    // rather than a reading — including on a tab of your own work.
+  it("never files an issue under them, and claims it only where it is yours", () => {
+    // It used to answer `them` everywhere, which was a guess pointing the wrong
+    // way and read as a reading: all 44 rows matching `assignee:@me` are issues,
+    // so 44 rows filed under Their move while the column counting them showed 0.
     //
-    // It used to answer `them`, which was the same guess pointing the other way
-    // and read as a reading: all 44 rows matching `assignee:@me` are issues, so
-    // 44 rows filed under Their move while the column counting them showed 0.
-    // `unknown` is what "no review state to read" was always describing.
-    for (const tab of ["open", "mine", "review", "reviewed"]) {
+    // `unknown` fixed the direction and over-corrected the scope. `none` does
+    // not merely fail to identify a row — it identifies an ISSUE, an open thing
+    // with no `isDraft` to read, and from `authored` that is the whole answer:
+    // nobody else can advance it. From the other two it stays a decline, since
+    // being pointed at somebody's issue is not owning it.
+    for (const tab of ["open", "mine"]) expect(whoseMove("none", tab)).toBe("you")
+    for (const tab of ["review", "reviewed"])
       expect(whoseMove("none", tab)).toBe("unknown")
+    for (const tab of ["open", "mine", "review", "reviewed"])
       expect(whoseMove("none", tab)).not.toBe("them")
-    }
   })
 
   it("reads a folded `mine` tab exactly like `open` and `draft`", () => {
