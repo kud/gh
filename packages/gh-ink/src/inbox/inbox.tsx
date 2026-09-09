@@ -3621,8 +3621,8 @@ const BrowseScreen = ({
   // left behind saying the opposite of what the code did — which is how the
   // unbounded pulse survived review. The ticker is gated on the marks as a whole
   // and bounded by PULSE_SETTLE_MS instead; see it for what that cost.
-  // Closed by default, even where a host supplies one. The rail costs forty
-  // columns out of the list, and the list is what the cockpit is opened for —
+  // Closed by default, even where a host supplies one. The rail costs
+  // SIDEBAR_COLS out of the list, and the list is what the cockpit is opened for —
   // a roadmap consulted now and then does not get to narrow every row all day.
   // `i` brings it in, and the footer advertises that key while it is away.
   const [railOpen, setRailOpen] = useState(false)
@@ -4472,7 +4472,18 @@ const BrowseScreen = ({
           width={listCols}
           flexShrink={0}
         >
-          <Backdrop dimmed={!!overlay} absolute={!!overlay} height={listHeight}>
+          {/* Dimmed by the rail as well as by an overlay, and for the same
+              reason: the arrows are somewhere else. The keymap already shuts the
+              list out while the rail holds focus (see the railActive branch in
+              useInput), but nothing on screen said so — two lit cursors, one of
+              them inert, and no way to tell which ↵ would act on. Recessing the
+              list answers that without taking the row you will come back to off
+              the screen: its ❯ is still there, in the backdrop's tone. */}
+          <Backdrop
+            dimmed={!!overlay || railActive}
+            absolute={!!overlay}
+            height={listHeight}
+          >
             <Box flexDirection="column" flexGrow={1}>
               {visibleItems.map((item, i) => (
                 <ItemRow

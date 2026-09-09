@@ -75,9 +75,9 @@ const pr = (n: number, depth: number): GHItem => ({
   kind: "pr",
   number: n,
   title:
-    "ACC-11125: Wire the Segment write key into the qa/uat/prod build pipeline",
-  repo: "theorchard/frontend-royalties",
-  url: `https://github.com/theorchard/frontend-royalties/pull/${n}`,
+    "PROJ-1125: Wire the analytics write key into the qa/uat/prod build pipeline",
+  repo: "example-co/frontend-royalties",
+  url: `https://github.com/example-co/frontend-royalties/pull/${n}`,
   health: "waiting",
   age: "1w",
   activityAge: "6d",
@@ -93,7 +93,7 @@ const sections: Section[] = [
     id: "in-progress",
     label: "In progress",
     items: [
-      task("ACC-11125", "Provision Segment as Terraform-managed infra", 0),
+      task("PROJ-1125", "Provision analytics as Terraform-managed infra", 0),
       pr(2843, 1),
       pr(38328, 1),
     ],
@@ -104,8 +104,8 @@ const sidebar: Sidebar = {
   title: "Initiatives",
   rows: [
     {
-      key: "ACC-11089",
-      label: "New branding — abacus.sonymusic.com subdomain setup",
+      key: "PROJ-1089",
+      label: "New branding — docs.example.com subdomain setup",
       live: 1,
       done: 4,
       total: 9,
@@ -153,7 +153,7 @@ const frameAt = async (columns: number, withSidebar: boolean) => {
 // Ink into a stack of fragments, which is what the reader actually sees — so
 // counting lines is a truer assertion than measuring the widest one.
 const bodyLines = (frame: string) =>
-  frame.split("\n").filter((l) => /#\d|ACC-/.test(l)).length
+  frame.split("\n").filter((l) => /#\d|PROJ-/.test(l)).length
 
 describe("a row given less width than it wants", () => {
   it("still draws each row on a single line, with the rail open", async () => {
@@ -180,21 +180,23 @@ describe("a row given less width than it wants", () => {
     const roomy = await frameAt(COLS + 4, false)
     const tight = await frameAt(COLS + 4, true)
     // Room for everything: the repo and the author are context worth having.
-    expect(roomy).toContain("theorchard/frontend-royalties")
+    expect(roomy).toContain("example-co/frontend-royalties")
     expect(roomy).toContain("by someone-else")
-    // Forty columns poorer, the same row sheds them and keeps its subject. The
+    // A rail's width poorer, the same row sheds them and keeps its subject. The
     // title is elided in the MIDDLE, so this asserts its head rather than a span
-    // that truncation would cut through.
-    expect(tight).not.toContain("theorchard/frontend-royalties")
+    // that truncation would cut through — and only as far in as the narrowest
+    // rail this suite runs against leaves standing, since the assertion is that
+    // the subject SURVIVES, not how much of it does.
+    expect(tight).not.toContain("example-co/frontend-royalties")
     expect(tight).not.toContain("by someone-else")
-    expect(tight).toContain("ACC-11125: Wire the Seg")
+    expect(tight).toContain("PROJ-1125: Wire")
   })
 
   // The news is never what yields. A row that dropped its own headline to keep a
   // repo name would have the priority exactly backwards.
   it("keeps what the refresh just said about the row", async () => {
     const tight = await frameAt(COLS + 4, true)
-    expect(tight).not.toContain("theorchard/frontend-royalties")
+    expect(tight).not.toContain("example-co/frontend-royalties")
     expect(tight).toContain("#2843")
   })
 })

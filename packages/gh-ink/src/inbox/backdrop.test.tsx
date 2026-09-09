@@ -4,6 +4,7 @@ import React from "react"
 import { render } from "ink"
 import { App, backdropStyle } from "./inbox.js"
 import type { Section, TaskRow } from "./inbox.js"
+import type { Sidebar } from "../components/side-panel.js"
 
 /*
  * What "behind" means, in two halves.
@@ -107,13 +108,13 @@ const settle = () => new Promise((resolve) => setImmediate(resolve))
 
 const task = (n: number): TaskRow => ({
   kind: "task",
-  key: `ACC-${n}`,
+  key: `PROJ-${n}`,
   summary: `ticket summary number ${n} padded out a fair way`,
-  url: `https://jira/ACC-${n}`,
+  url: `https://jira/PROJ-${n}`,
   status: "In Development",
   age: "2d",
   depth: 0,
-  ticket: `ACC-${n}`,
+  ticket: `PROJ-${n}`,
   pill: "BLOCKED",
 })
 
@@ -160,5 +161,63 @@ describe("a pill behind an overlay", () => {
     expect(frame).not.toContain("BLOCKED")
     // The backdrop is still a backdrop: the rows did not go with the pill.
     expect(frame).toContain("ticket summary number 1")
+  })
+})
+
+describe("the list while the rail holds focus", () => {
+  /*
+   * The keymap already shuts the list out the moment the rail takes the arrows —
+   * see the `railActive` branch in `useInput` — but nothing on screen said so,
+   * and a screen with two lit cursors cannot tell you which one ↵ acts on. So the
+   * list takes the same backdrop an overlay gives it: the region you are not
+   * standing in recedes, in exactly one place rather than two vocabularies.
+   *
+   * Asserted through the pill for the same reason the overlay spec is: it is the
+   * one half of the backdrop that shows without colour, so the check still fails
+   * when the suite is piped. `i` opens the rail, `⇥` hands it the arrows.
+   */
+  it("recedes, and comes back when the rail hands the arrows over", async () => {
+    const stdout = new FakeStdout(120, 44)
+    const stdin = new FakeStdin()
+    const sidebar: Sidebar = {
+      title: "Initiatives",
+      rows: [{ key: "PROJ-1", label: "Something", live: 1, done: 0, total: 3 }],
+    }
+    const instance = render(
+      <App
+        fetcher={async () => ({ sections: SECTIONS, login: "kud", sidebar })}
+      />,
+      {
+        stdout: stdout as never,
+        stdin: stdin as never,
+        debug: true,
+        exitOnCtrlC: false,
+        patchConsole: false,
+      },
+    )
+    await settle()
+    await settle()
+    // The rail is closed at mount, so it is not merely supplied — it has to be
+    // opened before it can be focused.
+    stdin.press("i")
+    await settle()
+    await settle()
+    // Open but not focused: the arrows are still the list's, so nothing recedes.
+    expect(stdout.lastFrame()).toContain("BLOCKED")
+
+    stdin.press("\t")
+    await settle()
+    await settle()
+    expect(stdout.lastFrame()).not.toContain("BLOCKED")
+    // The rail is what took the focus, and it is still there to say so.
+    expect(stdout.lastFrame()).toContain("Initiatives")
+
+    stdin.press("\t")
+    await settle()
+    await settle()
+    const back = stdout.lastFrame()
+    instance.unmount()
+    instance.cleanup()
+    expect(back).toContain("BLOCKED")
   })
 })
