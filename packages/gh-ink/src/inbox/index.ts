@@ -48,6 +48,7 @@ export {
   sameCiStatusState,
   COLS,
   type GHItem,
+  type Move,
   type Standing,
   type GHDetail,
   type Section,

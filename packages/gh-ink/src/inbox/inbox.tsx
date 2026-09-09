@@ -103,6 +103,7 @@ import type {
   CiStatus,
   Section,
   PillVariant,
+  Move,
   Standing,
   OriginSplit,
 } from "@kud/gh-workflow"
@@ -133,6 +134,7 @@ export type {
   CiStatus,
   Section,
   PillVariant,
+  Move,
   Standing,
   OriginSplit,
 }
