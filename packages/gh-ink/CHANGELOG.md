@@ -1,5 +1,25 @@
 # @kud/gh-ink
 
+## 0.48.0
+
+### Minor Changes
+
+- 61bfa03: A row's pill is now outlined; event pills stay solid.
+
+  The law: the column says where it sits, outline says what it is, solid says
+  something happened. `TaskRow.pill` is a classification — `epic`, `bug`, `spike`
+  — so the inbox draws it with `@kud/ink-ui`'s new `tone="outline"`: thin
+  Powerline caps and the label in the variant's hue, no fill. `merged`, `NEW` and
+  `GONE` are events and keep their solid fill, which is now the only thing on a
+  row that reads as news.
+
+  `@kud/ink-ui` moves to 0.24.0 across every package, which is where `tone` lands.
+
+### Patch Changes
+
+- Updated dependencies [61bfa03]
+  - @kud/gh-workflow@0.6.1
+
 ## 0.47.0
 
 ### Minor Changes
