@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest"
 import { EventEmitter } from "node:events"
 import React from "react"
 import { render } from "ink"
-import { glyphs } from "@kud/glyphs"
+import { glyph } from "@kud/glyphs"
 import { App, MERGED_HOLD_MS, MERGED_FRAME_MS } from "./inbox.js"
 import type { DetailContext, GHItem, Section } from "./inbox.js"
 
@@ -138,7 +138,7 @@ describe("a merged row", () => {
     // the marker shares the end of the row with the dim age and author cells and
     // as plain text read as one more of them.
     expect(frame).toContain(
-      `${glyphs.plCapLeft}merged${glyphs.plCapRight}`,
+      `${glyph("plCapLeft")}merged${glyph("plCapRight")}`,
     )
     expect(frame).toContain("the pull request being merged")
     stop()
@@ -155,7 +155,7 @@ describe("a merged row", () => {
     // The PILL, not the bare word: lower case reads better beside `epic` but
     // costs the uniqueness the capitals had, and this fixture's own title ends
     // in "merged".
-    expect(frame).not.toContain(`${glyphs.plCapLeft}merged`)
+    expect(frame).not.toContain(`${glyph("plCapLeft")}merged`)
     // The guard: without it this would pass just as well if the merge had blanked
     // the whole list, which is the failure mode a "not.toContain" cannot see.
     expect(frame).toContain("a bystander that must not sparkle")
@@ -170,7 +170,7 @@ describe("a merged row", () => {
     // The PILL, not the bare word: lower case reads better beside `epic` but
     // costs the uniqueness the capitals had, and this fixture's own title ends
     // in "merged".
-    expect(frame).not.toContain(`${glyphs.plCapLeft}merged`)
+    expect(frame).not.toContain(`${glyph("plCapLeft")}merged`)
     expect(frame).toContain("the pull request being merged")
     stop()
   })

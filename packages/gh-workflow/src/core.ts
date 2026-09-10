@@ -191,11 +191,12 @@ export type TaskRow = {
    * hatch `@kud/ink-ui`'s `Pill` exposes, carried up to the row so a host can
    * use it without reaching past this type.
    *
-   * For a caller whose pill vocabulary comes from an external system that has
-   * already assigned the hues: Jira's issue types, a CI provider's results. The
-   * six semantic variants are the default because a fill invented here would be
-   * decoration; a fill quoted from the system being mirrored is a fact about the
-   * thing labelled, and the reader may already know it.
+   * For a state the external system INVENTED and the reader already knows by
+   * its hue: GitHub's merged purple, a CI provider's result colours. Never
+   * for that system's skin — Jira paints its issue types, but a type is a
+   * classification, and a classification takes a `pillVariant` chosen by
+   * meaning. The test is whether the hue names something that HAPPENED in the
+   * source system, or merely decorates a category the tokens can already say.
    *
    * The word stays the primary channel either way — `Pill` draws the label
    * whatever the fill, so a reader who cannot separate the hues loses nothing.

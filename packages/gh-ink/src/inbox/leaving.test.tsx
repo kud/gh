@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest"
 import { EventEmitter } from "node:events"
 import React from "react"
 import { render } from "ink"
-import { glyphs } from "@kud/glyphs"
+import { glyph } from "@kud/glyphs"
 import { App, LEAVING_HOLD_MS, MERGED_FRAME_MS } from "./inbox.js"
 import type { DetailContext, GHItem, Section } from "./inbox.js"
 
@@ -140,7 +140,7 @@ describe("a closed row", () => {
     // Exactly one row wears it. Matched on the PILL rather than the bare word:
     // lower case reads better beside `epic` but costs the uniqueness the capitals
     // had, and "gone" is an ordinary word that can turn up in a title.
-    expect(frame.match(new RegExp(`${glyphs.plCapLeft}gone${glyphs.plCapRight}`, "g"))).toHaveLength(1)
+    expect(frame.match(new RegExp(`${glyph("plCapLeft")}gone${glyph("plCapRight")}`, "g"))).toHaveLength(1)
     stop()
   })
 

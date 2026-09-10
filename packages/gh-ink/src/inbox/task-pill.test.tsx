@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest"
 import { EventEmitter } from "node:events"
 import React from "react"
 import { render } from "ink"
-import { glyphs } from "@kud/glyphs"
+import { glyph } from "@kud/glyphs"
 import { App, COLS } from "./inbox.js"
 import type { TaskRow, Section } from "./inbox.js"
 
@@ -77,15 +77,19 @@ const mount = async (item: TaskRow, columns = 120) => {
 }
 
 describe("task row pill", () => {
-  it("draws the label as a filled pill", async () => {
+  // A pill on a row is a classification, and the law draws a classification
+  // outlined: thin caps, no fill. The filled caps are for events — `merged`,
+  // `GONE` — and a type pill wearing them would read as one.
+  it("draws the label as an outlined pill", async () => {
     const frame = await mount(row({ pill: "epic" }))
-    expect(frame).toContain("epic")
-    expect(frame).toContain(glyphs.plCapLeft)
-    expect(frame).toContain(glyphs.plCapRight)
+    expect(frame).toContain(
+      `${glyph("plCapLeftThin")}epic${glyph("plCapRightThin")}`,
+    )
+    expect(frame).not.toContain(glyph("plCapLeft"))
   })
 
   it("draws no caps on a row that has no pill", async () => {
-    expect(await mount(row())).not.toContain(glyphs.plCapLeft)
+    expect(await mount(row())).not.toContain(glyph("plCapLeftThin"))
   })
 
   // Both, on one row: a story under someone else's epic carries that epic's key
