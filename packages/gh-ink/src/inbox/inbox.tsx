@@ -2465,15 +2465,15 @@ const ItemRow = ({
             Suppressed entirely behind an overlay rather than recoloured: `Pill`
             is `@kud/ink-ui`'s and renders that package's `Text`, so the shadow
             above cannot reach its fill. A pill is an announcement, and behind a
-            The law: the column says where it sits, outline says what it is,
+            The law: the column says where it sits, soft says what it is,
             solid says something happened. This pill is a classification, so it
-            is outlined; `mergedLabel` and `farewellLabel` below are events, so
-            they stay solid. */}
+            takes the quiet fill; `mergedLabel` and `farewellLabel` below are
+            events, so they stay solid. */}
         {item.pill && !backdropped ? (
           <>
             <Text> </Text>
             <Pill
-              tone="outline"
+              tone="soft"
               variant={item.pillVariant ?? "muted"}
               {...(item.pillColor ? { color: item.pillColor } : {})}
             >

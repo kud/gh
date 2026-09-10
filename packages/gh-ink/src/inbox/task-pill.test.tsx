@@ -78,18 +78,19 @@ const mount = async (item: TaskRow, columns = 120) => {
 
 describe("task row pill", () => {
   // A pill on a row is a classification, and the law draws a classification
-  // outlined: thin caps, no fill. The filled caps are for events — `merged`,
-  // `GONE` — and a type pill wearing them would read as one.
-  it("draws the label as an outlined pill", async () => {
+  // soft: filled caps on the quiet fill, never the thin outline. The frame
+  // carries no escape codes under the runner, so the tone is observable only
+  // through which caps it drew.
+  it("draws the label as a soft pill", async () => {
     const frame = await mount(row({ pill: "epic" }))
     expect(frame).toContain(
-      `${glyph("plCapLeftThin")}epic${glyph("plCapRightThin")}`,
+      `${glyph("plCapLeft")}epic${glyph("plCapRight")}`,
     )
-    expect(frame).not.toContain(glyph("plCapLeft"))
+    expect(frame).not.toContain(glyph("plCapLeftThin"))
   })
 
   it("draws no caps on a row that has no pill", async () => {
-    expect(await mount(row())).not.toContain(glyph("plCapLeftThin"))
+    expect(await mount(row())).not.toContain(glyph("plCapLeft"))
   })
 
   // Both, on one row: a story under someone else's epic carries that epic's key
