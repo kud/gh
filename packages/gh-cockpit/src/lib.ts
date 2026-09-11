@@ -60,6 +60,7 @@ export {
   itermRun,
   jumpToRepo,
   jumpToRepoPane,
+  impliedLabels,
   labelPriority,
   layoutGHItems,
   matchesFilter,

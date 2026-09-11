@@ -82,6 +82,7 @@ import {
   relativeTime,
   repoPriority,
   labelPriority,
+  impliedLabels,
   sortItems,
   sortByRecency,
   insertRepoHeaders,
@@ -115,6 +116,7 @@ export {
   relativeTime,
   repoPriority,
   labelPriority,
+  impliedLabels,
   sortItems,
   sortByRecency,
   insertRepoHeaders,
@@ -2553,7 +2555,7 @@ const ItemRow = ({
     : !login || !item.lastActor
       ? [" ", "white"]
       : spokeLast
-        ? ["→", "#888888"]
+        ? ["→", colors.secondary]
         : ["←", "#FF8700"]
   const numStr = `#${item.number}`.padEnd(7)
   // Hide "by me" — the author suffix is only signal when it's someone else.
@@ -2601,8 +2603,16 @@ const ItemRow = ({
    *
    * Sorted on a copy — `item.labels` is the caller's array and sorting in place
    * would reorder it under them.
+   *
+   * The repo's implied labels go first, before the rank and the slice: a label
+   * every issue in the repo carries is the group header repeated, and a row
+   * whose only label was implied draws no cell at all — a bare glyph would say
+   * "classified" with no classification behind it. Filtered after the slice it
+   * would take a slot and then vanish.
    */
-  const labelNames = [...(item.labels ?? [])]
+  const implied = impliedLabels(item.repo)
+  const labelNames = (item.labels ?? [])
+    .filter((l) => !implied.includes(l))
     .sort((a, b) => labelPriority(a) - labelPriority(b) || a.localeCompare(b))
     .slice(0, 2)
 
@@ -2765,14 +2775,21 @@ const ItemRow = ({
       {/* Straight after the title and before the repo, not out in the trailing
           furniture: a label says what the row IS, so it is read as part of the
           subject rather than scanned down a column — which is why `age` is
-          pinned right and this is not. Dim and hueless on purpose. GitHub's own
+          pinned right and this is not. Hueless on purpose, and one tier above the
+          furniture: `dimColor` is what the age renders in, and a middle tier
+          drawn in the bottom one is not quiet, it is absent — the labels were
+          measured at the same L* as the age and read as noise. `secondary` is
+          the same tone the turn arrow and the answered thread count wear, so
+          the row has three neutrals and no more. GitHub's own
           per-label colour is authored in a repo with no knowledge of this
           palette, and it would be the one place on the row where hue alone did
           the discriminating, which is the failure health-display.ts exists to
           prevent. Casing is verbatim: the string is what you would type back
           into `gh --label`, and uppercase is already claimed here by the pills,
           which are announcements rather than standing classifications. */}
-      {labelLabel ? <Text dimColor>{labelLabel + "  "}</Text> : null}
+      {labelLabel ? (
+        <Text color={colors.secondary}>{labelLabel + "  "}</Text>
+      ) : null}
       {repoLabel && !givingUp.repo ? <Text dimColor>{repoLabel}</Text> : null}
       {/* Head of the trailing group: after the title the eye asks how big,
           then how contested, then who, then when. Additions in `colors.success`,
@@ -2812,7 +2829,7 @@ const ItemRow = ({
           unknown turn (no login, no lastActor): a count we cannot attribute is
           still worth seeing. */}
       {unresolvedLabel && !givingUp.threads ? (
-        <Text bold={!spokeLast} color={spokeLast ? "#888888" : "#FF8700"}>
+        <Text bold={!spokeLast} color={spokeLast ? colors.secondary : "#FF8700"}>
           {"  " + unresolvedLabel}
         </Text>
       ) : null}
@@ -2937,7 +2954,7 @@ export const ActionMenu = ({
 // one system in the modal.
 const TURN_LEGEND: [string, string, string][] = [
   ["←", "#FF8700", "They spoke last · your turn"],
-  ["→", "#888888", "You spoke last · waiting on them"],
+  ["→", colors.secondary, "You spoke last · waiting on them"],
 ]
 
 // Tab meanings are supplied by the caller rather than hardcoded: home's tabs are

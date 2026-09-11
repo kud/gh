@@ -434,6 +434,16 @@ export const labelPriority = (name: string): number => {
   return i === -1 ? Infinity : i
 }
 
+/**
+ * The labels a row should not draw because its repo's convention puts them on
+ * every issue there — see `InboxConfig.impliedLabels`. Applied BEFORE the row
+ * ranks and slices its labels, never after: filtered after the slice, an
+ * implied label would take one of the two slots and then vanish, leaving a
+ * one-label cell on a row that carries three.
+ */
+export const impliedLabels = (repo: string): readonly string[] =>
+  inboxConfig().impliedLabels[repo] ?? []
+
 // Repo grouping is the OUTER key and is deliberately unchanged — priority tier,
 // then repo name — because insertRepoHeaders below depends on same-repo items
 // staying adjacent, and a strict recency sort scatters a repo down the list.

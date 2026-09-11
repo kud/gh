@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from "vitest"
 import { EventEmitter } from "node:events"
 import React from "react"
 import { render } from "ink"
-import { App, COLS, labelPriority } from "./inbox.js"
+import { App, COLS, labelPriority, impliedLabels } from "./inbox.js"
 import type { GHItem, Section } from "./inbox.js"
 import { configureInbox, resetInboxConfig } from "./config.js"
 import type { Sidebar } from "../components/side-panel.js"
@@ -56,6 +56,22 @@ describe("labelPriority", () => {
 
   it("ranks nothing when the host configured nothing", () => {
     expect(labelPriority("plan")).toBe(Infinity)
+  })
+})
+
+describe("impliedLabels", () => {
+  it("names the labels a repo's convention puts on every issue there", () => {
+    configureInbox({ impliedLabels: { "kud/plans": ["plan"] } })
+    expect(impliedLabels("kud/plans")).toEqual(["plan"])
+  })
+
+  it("implies nothing for a repo the host did not name", () => {
+    configureInbox({ impliedLabels: { "kud/plans": ["plan"] } })
+    expect(impliedLabels("kud/gh")).toEqual([])
+  })
+
+  it("implies nothing when the host configured nothing", () => {
+    expect(impliedLabels("kud/plans")).toEqual([])
   })
 })
 
@@ -201,6 +217,30 @@ describe("a row carrying labels", () => {
     expect(frame).toContain(`${TAG} plan, spike`)
     expect(frame).not.toContain("chore")
     expect(frame).not.toContain("bug")
+  })
+
+  it("omits a label the repo's convention implies, before the two-slot cut", async () => {
+    // Filtered after the slice, `plan` would take a slot and then vanish,
+    // leaving `app:cockpit` alone on a row that also carries `spike`.
+    configureInbox({
+      labelPriority: ["app:*", "plan", "spike"],
+      impliedLabels: { "kud/gh": ["plan"] },
+    })
+    const frame = await frameFor(["spike", "plan", "app:cockpit"])
+    expect(frame).toContain(`${TAG} app:cockpit, spike`)
+    expect(frame).not.toContain("plan")
+  })
+
+  it("draws no cell at all when every label the row carries is implied", async () => {
+    // A bare glyph would say "classified" with nothing behind it; the row
+    // should look exactly like an unlabelled one.
+    configureInbox({ impliedLabels: { "kud/gh": ["plan"] } })
+    expect(await frameFor(["plan"])).not.toContain(TAG)
+  })
+
+  it("still shows the same label on a repo whose convention does not imply it", async () => {
+    configureInbox({ impliedLabels: { "kud/plans": ["plan"] } })
+    expect(await frameFor(["plan"])).toContain(`${TAG} plan`)
   })
 
   it("falls back to name order when the host ranked nothing", async () => {

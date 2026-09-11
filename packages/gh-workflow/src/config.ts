@@ -56,6 +56,19 @@ export type InboxConfig = {
    * which is honest about knowing nothing.
    */
   labelPriority: readonly string[]
+  /**
+   * Labels a repo's own convention puts on every issue, keyed by `owner/name`,
+   * so drawing them on a row says nothing the group header has not already
+   * said. A worklist repo whose every issue carries `plan` is the case: the
+   * header reads `kud/plans`, and `plan` under it is the header repeated in a
+   * smaller font. Rows omit these; everything that varies still shows.
+   *
+   * Per repo rather than per label, because the same label is real information
+   * on a project repo — there `plan` is exactly what separates a plan from a
+   * bug report. And keyed by the reader's own convention rather than by a repo
+   * name the library knows about, for the reason everything else here is empty.
+   */
+  impliedLabels: Readonly<Record<string, readonly string[]>>
   profiles: readonly RepoProfile[]
   /**
    * Fallback directory holding checkouts, for repos in no profile that names one
@@ -88,6 +101,7 @@ export type InboxConfig = {
 const EMPTY: InboxConfig = {
   repoPriority: [],
   labelPriority: [],
+  impliedLabels: {},
   profiles: [],
   cacheNamespace: "gh-ink",
   cacheTtlMs: 600_000,

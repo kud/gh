@@ -44,6 +44,12 @@ export type CockpitConfig = {
    * takes the second. On a worklist of plan issues that is the wrong way round.
    */
   labelPriority?: readonly string[]
+  /**
+   * Labels a repo's convention puts on every issue, keyed by `owner/name` —
+   * `{ "acme/plans": ["plan"] }`. Rows in that repo omit them: the group header
+   * already says it, and a row whose only label was implied draws no cell.
+   */
+  impliedLabels?: Readonly<Record<string, readonly string[]>>
   /** Default filter, which `--include` / `--exclude` override. */
   filter?: RepoFilter
   /** Named filters, invoked as `gh-cockpit <name>`. */

@@ -13,6 +13,7 @@ export {
   sortItems,
   sortByRecency,
   labelPriority,
+  impliedLabels,
   repoPriority,
   relativeTime,
   explainItem,
