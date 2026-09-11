@@ -6,10 +6,25 @@
 import type { Health } from "@kud/gh/health"
 import { inboxConfig } from "./config.js"
 
-/** Mirrors `@kud/ink-ui`'s `PillVariant`, structurally, so this package needs
- * no renderer dependency to say which fill a row's pill takes. */
+/**
+ * Mirrors `@kud/ink-ui`'s `PillVariant`, structurally, so this package needs
+ * no renderer dependency to say which fill a row's pill takes.
+ *
+ * A mirror drifts in exactly one direction: ink-ui grows a variant and this
+ * list does not, and the failure lands on a HOST, not here — a board typing its
+ * pill from ink-ui cannot assign the row, though every package in this repo
+ * still typechecks. `group` arrived in ink-ui 0.25.0 for an epic holding the
+ * rows beneath it, and the changeset that adopted it said this list had
+ * followed. It had not. Extend this the same commit ink-ui's pin moves.
+ */
 export type PillVariant =
-  "success" | "error" | "warning" | "info" | "accent" | "muted"
+  | "success"
+  | "error"
+  | "warning"
+  | "info"
+  | "accent"
+  | "muted"
+  | "group"
 
 export type GHDetail = {
   reviewDecision?: string
