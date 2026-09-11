@@ -90,6 +90,7 @@ import {
   filterByOrigin,
   filterBySearch,
   filterByRepos,
+  sizeOf,
 } from "@kud/gh-workflow"
 import type {
   GHDetail,
@@ -2551,6 +2552,12 @@ const ItemRow = ({
   const numStr = `#${item.number}`.padEnd(7)
   // Hide "by me" — the author suffix is only signal when it's someone else.
   const showAuthor = !!item.author && item.author !== login
+  // `+18 -4`, on somebody else's PR only, and gated on the same predicate as
+  // the author for the same reason: you know the size of your own. Not on
+  // standing — a row tied to `queued` would lose its size the moment it moved
+  // bands, and authorship is a property of the row where standing is one of
+  // the frame. Absent, not `+0 -0`, when the node never carried it.
+  const sizeLabel = showAuthor ? sizeOf(item) : null
   // Unresolved review threads — a comment glyph (nf-fa-comments) + count, keeping
   // to the single-glyph health vocabulary instead of spelling out "unresolved".
   const unresolvedLabel =
@@ -2617,6 +2624,7 @@ const ItemRow = ({
   // none rather than vanishing whole.
   const givingUp = {
     author: false,
+    size: false,
     threads: false,
     age: false,
     repo: false,
@@ -2661,6 +2669,8 @@ const ItemRow = ({
   const widthOf = () => {
     const suffix = [
       givingUp.age ? "" : ageLabel || "",
+      // ASCII only, so no PUA double-width correction — see the label cell.
+      givingUp.size ? "" : sizeLabel || "",
       givingUp.threads ? "" : unresolvedLabel,
       showAuthor && !givingUp.author ? `by ${item.author}` : "",
       mergedLabel,
@@ -2703,9 +2713,15 @@ const ItemRow = ({
   //
   // Assignment rather than `+= 1`, so each rung states the resulting count
   // outright and reordering this array cannot silently produce the wrong one.
+  //
+  // Size outlives the author — on a review queue "by X" is the least
+  // discriminating thing on the row — and the speculative second label, and
+  // dies before the thread count: a thread is a claim on you NOW, a size is an
+  // aid to deciding WHETHER to engage, and the PR header still holds it.
   for (const give of [
     () => (givingUp.author = true),
     () => (givingUp.labels = 1),
+    () => (givingUp.size = true),
     () => (givingUp.threads = true),
     () => (givingUp.labels = 2),
     () => (givingUp.repo = true),
@@ -2750,6 +2766,21 @@ const ItemRow = ({
           which are announcements rather than standing classifications. */}
       {labelLabel ? <Text dimColor>{labelLabel + "  "}</Text> : null}
       {repoLabel && !givingUp.repo ? <Text dimColor>{repoLabel}</Text> : null}
+      {/* Head of the trailing group: after the title the eye asks how big,
+          then how contested, then who, then when. Plain — no colour, no dim,
+          no bold, no banding by magnitude. Orange is spent on the number, the
+          arrow and the live thread count; bold is the cursor; a hue per sign
+          hands a colourblind reader two near-identical hues; and a colour that
+          flips at 400 lines is a traffic light needing a legend. What sets it
+          apart from `by author · age` is luminance — the one undimmed cell in
+          the trailing group — and what carries magnitude is width: `+2140 -388`
+          is longer than `+6 -1` before anyone reads a digit. Same ruling as
+          the PR header's, one register down. One caveat, for the reader rather
+          than the UI: GitHub counts lockfiles and generated files, so a six-line
+          change that bumps `package-lock.json` reads as large. The number is
+          honest about what the diff view will show; it is not a proxy for
+          thought required. */}
+      {sizeLabel && !givingUp.size ? <Text>{"  " + sizeLabel}</Text> : null}
       {/* Follows the turn arrow, because an unresolved thread is not by itself
           a claim on you: GitHub keeps a thread open until someone clicks
           Resolve conversation, so replying leaves the count exactly where it

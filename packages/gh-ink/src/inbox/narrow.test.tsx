@@ -85,6 +85,9 @@ const pr = (n: number, depth: number): GHItem => ({
   unresolved: 2,
   conversation: 0,
   author: "someone-else",
+  additions: 412,
+  deletions: 38,
+  changedFiles: 7,
   depth,
 })
 
@@ -189,6 +192,17 @@ describe("a row given less width than it wants", () => {
     // the subject SURVIVES, not how much of it does.
     expect(tight).not.toContain("acme/web-app")
     expect(tight).not.toContain("by someone-else")
+    expect(tight).toContain("PROJ-1125: Wire")
+  })
+
+  // Size sits between the author and the thread count on the ladder: it is an
+  // aid to deciding whether to open the PR, so it outlives "by X" and dies before
+  // a thread that is a claim on you now. The tight frame here is past both.
+  it("shows the diff size while there is room and sheds it before the title", async () => {
+    const roomy = await frameAt(COLS + 4, false)
+    const tight = await frameAt(COLS + 4, true)
+    expect(roomy).toContain("+412 -38")
+    expect(tight).not.toContain("+412 -38")
     expect(tight).toContain("PROJ-1125: Wire")
   })
 

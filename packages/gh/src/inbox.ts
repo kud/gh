@@ -234,6 +234,28 @@ const PR_HEALTH = `
         ... on StatusContext { context state }
       } } }`
 
+// How big the diff is, on every OPEN PR row, so a list can say `+18 -4`
+// beside a title and the reader can decide whether to open it at all.
+//
+// In the base identity list and NOT in PR_HEALTH, for the same reason
+// `isDraft` is not: the health set is all-or-nothing, and `lacksHealth` /
+// `carriesHealth` reason about it as one unit. Three scalars that have nothing
+// to do with a verdict do not belong inside the guard that stops a confident
+// wrong one. It also means the two-tier fetch delivers size on the `minimal`
+// overflow rows — the review queue past the first page, where "is this 900
+// lines" matters most — without waiting for tier three to enrich them.
+//
+// Unconditional, whatever the `shape`, because it costs nothing to carry.
+// Measured 2026-09-11 on `reviewRequests` at `first: 20` with the full health
+// and conversation fragments: cost 11, nodeCount 2440, with and without these
+// three fields. Scalars on a node already fetched are not nodes — the same
+// arithmetic the `issueCount` note above rests on.
+//
+// Absent from `recentlyDone` on purpose: a merged row never asks "should I
+// open this".
+const PR_SIZE = `
+      additions deletions changedFiles`
+
 // Whose turn it is cannot be read off a count, so every comment-bearing edge
 // carries its latest author and timestamp: the conversation, the review bodies,
 // and each thread's last reply. The last commit rides along so a consumer can
@@ -293,6 +315,7 @@ type Selections = {
   owned: string
   doneSince: string
   health: string
+  size: string
   conversation: string
   issueConversation: string
   issueLabels: string
@@ -306,7 +329,7 @@ type Selections = {
  */
 const SOURCES: Record<InboxSource, (s: Selections, first: number) => string> = {
   myPRs: (
-    { scope, health, conversation },
+    { scope, health, size, conversation },
     first,
   ) => `  myPRs: search(query: "${scope}is:pr is:open author:@me", type: ISSUE, first: ${first}) {
     issueCount
@@ -314,13 +337,14 @@ const SOURCES: Record<InboxSource, (s: Selections, first: number) => string> = {
       id number title createdAt url headRefName isDraft
       repository { nameWithOwner }
       author { login }
+      ${size}
       ${health}
       ${conversation}
     }}
   }`,
 
   reviewRequests: (
-    { scope, health, conversation },
+    { scope, health, size, conversation },
     first,
   ) => `  reviewRequests: search(query: "${scope}is:pr is:open review-requested:@me", type: ISSUE, first: ${first}) {
     issueCount
@@ -328,13 +352,14 @@ const SOURCES: Record<InboxSource, (s: Selections, first: number) => string> = {
       id number title createdAt url headRefName isDraft
       repository { nameWithOwner }
       author { login }
+      ${size}
       ${health}
       ${conversation}
     }}
   }`,
 
   reviewed: (
-    { scope, health, conversation },
+    { scope, health, size, conversation },
     first,
   ) => `  reviewed: search(query: "${scope}is:pr is:open reviewed-by:@me -author:@me -review-requested:@me", type: ISSUE, first: ${first}) {
     issueCount
@@ -342,13 +367,14 @@ const SOURCES: Record<InboxSource, (s: Selections, first: number) => string> = {
       id number title createdAt url headRefName isDraft
       repository { nameWithOwner }
       author { login }
+      ${size}
       ${health}
       ${conversation}
     }}
   }`,
 
   assigned: (
-    { scope, health, conversation, issueConversation, issueLabels },
+    { scope, health, size, conversation, issueConversation, issueLabels },
     first,
   ) => `  assigned: search(query: "${scope}is:open assignee:@me", type: ISSUE, first: ${first}) {
     issueCount
@@ -361,6 +387,7 @@ const SOURCES: Record<InboxSource, (s: Selections, first: number) => string> = {
       }
       ... on PullRequest {
         id number title createdAt url headRefName isDraft repository { nameWithOwner } author { login }
+        ${size}
         ${health}
         ${conversation}
       }
@@ -424,7 +451,7 @@ const SOURCES: Record<InboxSource, (s: Selections, first: number) => string> = {
   }`,
 
   repoPRs: (
-    { scope, owned, health, conversation },
+    { scope, owned, health, size, conversation },
     first,
   ) => `  repoPRs: search(query: "${scope}${owned}is:pr is:open -author:@me archived:false", type: ISSUE, first: ${first}) {
     issueCount
@@ -432,6 +459,7 @@ const SOURCES: Record<InboxSource, (s: Selections, first: number) => string> = {
       id number title createdAt url headRefName isDraft
       repository { nameWithOwner }
       author { login }
+      ${size}
       ${health}
       ${conversation}
     }}
@@ -462,6 +490,7 @@ const selectionsFor = ({
     owned: repo ? "" : "user:@me ",
     doneSince: sinceDay(doneWithinDays),
     health: full ? PR_HEALTH : "",
+    size: PR_SIZE,
     conversation: full ? PR_CONVERSATION : "",
     issueConversation: full ? ISSUE_CONVERSATION : "",
     issueLabels: full ? ISSUE_LABELS : "",

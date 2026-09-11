@@ -162,6 +162,20 @@ describe("buildInboxQuery", () => {
           )
     })
 
+    // Size rides in the base list, not the health set, so a minimal caller —
+    // the overflow tier of a review queue — still gets it. Absent from
+    // recentlyDone: a merged row is never triaged by size.
+    it("carries the diff size on every open-PR source in both shapes", () => {
+      for (const shape of ["full", "minimal"] as const) {
+        const query = buildInboxQuery({ shape })
+        for (const alias of OPEN_PR_SOURCES)
+          expect(blockFor(query, alias)).toContain(
+            "additions deletions changedFiles",
+          )
+        expect(blockFor(query, "recentlyDone")).not.toContain("additions")
+      }
+    })
+
     it("still asks every source, so sections cannot silently empty", () => {
       const query = buildInboxQuery({ shape: "minimal" })
       for (const alias of [...OPEN_PR_SOURCES, "repoIssues", "recentlyDone"])

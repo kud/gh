@@ -217,6 +217,14 @@ export const toGHItem = (
     branch: node.headRefName,
     health: healthOf(node),
     author: node.author?.login,
+    // Only when the node carries them: a section cached before the query
+    // selected size, or a node built by hand, has none, and the row draws no
+    // cell for an absent number rather than `+0 -0`.
+    ...(typeof node.additions === "number" ? { additions: node.additions } : {}),
+    ...(typeof node.deletions === "number" ? { deletions: node.deletions } : {}),
+    ...(typeof node.changedFiles === "number"
+      ? { changedFiles: node.changedFiles }
+      : {}),
     age: completedAt ? relativeTime(completedAt) : "",
     activityAge: !isDone && activityAt ? relativeTime(activityAt) : undefined,
     ts: sortAt ? new Date(sortAt).getTime() : 0,

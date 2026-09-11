@@ -77,6 +77,25 @@ describe("toGHItem", () => {
     expect(item.url).toBe("https://github.com/kud/thing/pull/42")
   })
 
+  it("carries the diff size when the node has one", () => {
+    const item = toGHItem(
+      pr({ additions: 412, deletions: 38, changedFiles: 7 }),
+      "pr",
+    )
+    expect(item.additions).toBe(412)
+    expect(item.deletions).toBe(38)
+    expect(item.changedFiles).toBe(7)
+  })
+
+  it("leaves size undefined rather than zero when the node lacks it", () => {
+    // A section cached before the query selected size, or a node built by
+    // hand: the row must draw no cell, not claim `+0 -0`.
+    const item = toGHItem(pr(), "pr")
+    expect(item.additions).toBeUndefined()
+    expect(item.deletions).toBeUndefined()
+    expect(item.changedFiles).toBeUndefined()
+  })
+
   it("counts only unresolved threads", () => {
     expect(toGHItem(pr()).unresolved).toBe(1)
   })

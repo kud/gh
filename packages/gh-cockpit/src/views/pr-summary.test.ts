@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import type { PrHealthData } from "@kud/gh"
 
-import { sizeOf, summaryOf } from "./pr-summary.js"
+import { summaryOf } from "./pr-summary.js"
 
 /*
  * The one-line answer to "what IS this pull request", under the title and above
@@ -32,34 +32,6 @@ const item = {
 }
 
 const WIDE = 200
-
-describe("sizeOf", () => {
-  it("puts additions before deletions, always", () => {
-    expect(sizeOf({ additions: 412, deletions: 38 })).toBe("+412 -38")
-  })
-
-  /*
-   * Order is a channel, and it is the one that survives when hue does not.
-   * Reordering by magnitude would make the position meaningless and leave a
-   * colourblind reader with nothing but the signs.
-   */
-  it("does not reorder when deletions are the larger number", () => {
-    expect(sizeOf({ additions: 3, deletions: 900 })).toBe("+3 -900")
-  })
-
-  it("uses an ASCII hyphen, not a typographic minus", () => {
-    // U+2212 is ambiguous-width in some fonts, this codebase holds a
-    // single-column invariant on glyphs, and `git diff --stat` uses the hyphen.
-    const size = sizeOf({ additions: 1, deletions: 1 }) ?? ""
-    expect(size).toContain("-")
-    expect(size).not.toContain("−")
-  })
-
-  it("is absent rather than zero when the fetch has not answered", () => {
-    // A PR of "+0 -0" and a PR we have not measured are different claims.
-    expect(sizeOf({})).toBeNull()
-  })
-})
 
 describe("summaryOf", () => {
   it("reads as size, files, branches, author and age", () => {

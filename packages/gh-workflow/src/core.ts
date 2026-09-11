@@ -51,6 +51,23 @@ export type GHItem = {
    */
   health?: Health
   author?: string
+  /**
+   * How big the diff is — lines added, lines removed, files touched — so a list
+   * can say `+18 -4` beside a title and the reader can decide whether to open
+   * it at all. Read them through `sizeOf` / `filesOf`, which are the only
+   * places that decide how they read.
+   *
+   * Three flat fields rather than a `size` object, and the same names as
+   * `PrHealthData` carries: a `Pick<…, "additions" | "deletions">` then accepts
+   * a row and a health payload structurally, which is what lets one formatter
+   * serve the list and the detail view. Optional because they are absent from
+   * any section cached before the query selected them, and from any node built
+   * by hand; the row draws no cell when they are missing rather than claiming
+   * zero.
+   */
+  additions?: number
+  deletions?: number
+  changedFiles?: number
   // Time since the item was opened — or, on the Done tab, since it was closed.
   age: string
   // Time since anything actually happened on it: a comment, a review, a thread
@@ -325,6 +342,45 @@ export const relativeTime = (iso: string): string => {
   if (diff < 604800) return `${Math.floor(diff / 86400)}d`
   return `${Math.floor(diff / 604800)}w`
 }
+
+/**
+ * A line count as the row prints it. Whole past four digits: a 12,345-line PR
+ * has stopped being a number anyone weighs, and `12k` says "not this
+ * afternoon" in three columns where `12345` spends five saying the same. No
+ * decimal, for the same reason — `12.3k` is precision nobody triages on.
+ * Below that the digits are kept exact, because `+412` and `+4120` are the
+ * difference between a review and a day.
+ */
+const compactLines = (n: number): string =>
+  n >= 10_000 ? `${Math.round(n / 1000)}k` : String(n)
+
+/**
+ * The size string, `+412 -38`, identical on every surface that draws one.
+ *
+ * `+` always before `-`, never reordered by magnitude, so position is a second
+ * channel beside the sign: a colourblind reader who cannot tell the two numbers
+ * apart by hue still knows which is which by where it sits. ASCII hyphen rather
+ * than U+2212 — this codebase holds a single-column invariant on glyphs, `−`
+ * is ambiguous-width in some fonts, and `git diff --stat` uses the hyphen
+ * anyway. `null`, not `+0 -0`, when the fetch has not answered: a PR of no
+ * lines and a PR nobody measured are different claims.
+ *
+ * Here, beside `relativeTime`, because it is a surface-agnostic formatter over
+ * a row's facts, and the list and the PR header both draw it. A second copy in
+ * either would drift the first time one grew a rule the other lacked.
+ */
+export const sizeOf = (
+  data: Pick<GHItem, "additions" | "deletions">,
+): string | null =>
+  data.additions === undefined || data.deletions === undefined
+    ? null
+    : `+${compactLines(data.additions)} -${compactLines(data.deletions)}`
+
+/** `3 files`, `1 file`, or `null` while unmeasured — same rule as `sizeOf`. */
+export const filesOf = (data: Pick<GHItem, "changedFiles">): string | null =>
+  data.changedFiles === undefined
+    ? null
+    : `${data.changedFiles} ${data.changedFiles === 1 ? "file" : "files"}`
 
 // Rank from the host's ordered list rather than a compiled-in one. An entry
 // ending in `/` matches an owner; anything else must equal `owner/name`, so a

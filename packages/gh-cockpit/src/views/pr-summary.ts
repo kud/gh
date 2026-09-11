@@ -1,4 +1,5 @@
 import type { PrHealthData } from "@kud/gh"
+import { filesOf, sizeOf } from "@kud/gh-workflow"
 
 /**
  * The one-line answer to "what IS this pull request", drawn under the title and
@@ -34,7 +35,14 @@ const DIVIDER = " · "
 /**
  * Size, in ONE colour — never one per sign.
  *
- * The original ruling here was "deliberately uncoloured", and the trap it named
+ * The string itself is `sizeOf` in `@kud/gh-workflow`, shared with the inbox
+ * row so the two surfaces cannot drift; the invariants on its shape (`+` first,
+ * ASCII hyphen, `null` while unmeasured) are documented there. Re-exported here
+ * so the view's own test and any host still importing it from this module keep
+ * resolving. What stays HERE is the colour ruling, because this is where the
+ * colour is applied.
+ *
+ * The original ruling was "deliberately uncoloured", and the trap it named
  * is still real and still avoided: colour `+412` and `-38` differently and a
  * colourblind reader gets a near-identical pair of hues, leaving the signs as
  * the only channel carrying anything — colour that adds noise and takes nothing
@@ -54,16 +62,8 @@ const DIVIDER = " · "
  * banding: a hue that changes at 400 lines is a traffic light needing a legend,
  * and it puts a boundary between 399 and 401 while the digits already say the
  * size exactly. What they lacked was pre-attentive weight, not precision.
- *
- * `+` always before `-`, never reordered by magnitude, so position is a second
- * channel. ASCII hyphen rather than U+2212: this codebase holds a single-column
- * invariant on glyphs, `−` is ambiguous-width in some fonts, and `git diff
- * --stat` uses the hyphen anyway.
  */
-export const sizeOf = (data: Pick<PrHealthData, "additions" | "deletions">) =>
-  data.additions === undefined || data.deletions === undefined
-    ? null
-    : `+${data.additions} -${data.deletions}`
+export { sizeOf }
 
 /**
  * The line, in three tiers: the size, the file count, and the dim remainder.
@@ -103,10 +103,7 @@ export const summaryOf = (
   cols: number,
 ): { size: string | null; files: string | null; rest: string } => {
   const size = data ? sizeOf(data) : null
-  const files =
-    data?.changedFiles === undefined
-      ? null
-      : `${data.changedFiles} ${data.changedFiles === 1 ? "file" : "files"}`
+  const files = data ? filesOf(data) : null
   const base = data?.baseRefName
   const author = item.author ? item.author : null
   const opened = item.age ? `opened ${item.age} ago` : null
