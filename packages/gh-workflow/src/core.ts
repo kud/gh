@@ -18,13 +18,7 @@ import { inboxConfig } from "./config.js"
  * followed. It had not. Extend this the same commit ink-ui's pin moves.
  */
 export type PillVariant =
-  | "success"
-  | "error"
-  | "warning"
-  | "info"
-  | "accent"
-  | "muted"
-  | "group"
+  "success" | "error" | "warning" | "info" | "accent" | "muted" | "group"
 
 export type GHDetail = {
   reviewDecision?: string
@@ -374,7 +368,10 @@ const compactLines = (n: number): string =>
  *
  * `+` always before `-`, never reordered by magnitude, so position is a second
  * channel beside the sign: a colourblind reader who cannot tell the two numbers
- * apart by hue still knows which is which by where it sits. ASCII hyphen rather
+ * apart by hue still knows which is which by where it sits. Surfaces that colour
+ * the pair take it through `sizePartsOf` and paint each half sign-and-digits
+ * together, so the coloured form is this string split at the space and can
+ * never say anything the plain one does not. ASCII hyphen rather
  * than U+2212 — this codebase holds a single-column invariant on glyphs, `−`
  * is ambiguous-width in some fonts, and `git diff --stat` uses the hyphen
  * anyway. `null`, not `+0 -0`, when the fetch has not answered: a PR of no
@@ -384,12 +381,22 @@ const compactLines = (n: number): string =>
  * a row's facts, and the list and the PR header both draw it. A second copy in
  * either would drift the first time one grew a rule the other lacked.
  */
-export const sizeOf = (
+export const sizePartsOf = (
   data: Pick<GHItem, "additions" | "deletions">,
-): string | null =>
+): { added: string; removed: string } | null =>
   data.additions === undefined || data.deletions === undefined
     ? null
-    : `+${compactLines(data.additions)} -${compactLines(data.deletions)}`
+    : {
+        added: `+${compactLines(data.additions)}`,
+        removed: `-${compactLines(data.deletions)}`,
+      }
+
+export const sizeOf = (
+  data: Pick<GHItem, "additions" | "deletions">,
+): string | null => {
+  const parts = sizePartsOf(data)
+  return parts ? `${parts.added} ${parts.removed}` : null
+}
 
 /** `3 files`, `1 file`, or `null` while unmeasured — same rule as `sizeOf`. */
 export const filesOf = (data: Pick<GHItem, "changedFiles">): string | null =>

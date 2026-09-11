@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { filesOf, sizeOf } from "./core.js"
+import { filesOf, sizeOf, sizePartsOf } from "./core.js"
 
 describe("sizeOf", () => {
   it("puts additions before deletions, always", () => {
@@ -36,6 +36,23 @@ describe("sizeOf", () => {
     expect(sizeOf({ additions: 9999, deletions: 1000 })).toBe("+9999 -1000")
     expect(sizeOf({ additions: 12345, deletions: 3456 })).toBe("+12k -3456")
     expect(sizeOf({ additions: 10000, deletions: 250000 })).toBe("+10k -250k")
+  })
+
+  /*
+   * The coloured form is the plain string split at its one space, so a surface
+   * painting each half can never disagree with one printing the whole: same
+   * sign, same compaction, same absence while unmeasured.
+   */
+  it("splits into the two halves the string is made of", () => {
+    expect(sizePartsOf({ additions: 412, deletions: 38 })).toEqual({
+      added: "+412",
+      removed: "-38",
+    })
+    expect(sizePartsOf({ additions: 12345, deletions: 0 })).toEqual({
+      added: "+12k",
+      removed: "-0",
+    })
+    expect(sizePartsOf({ additions: 4 })).toBeNull()
   })
 })
 

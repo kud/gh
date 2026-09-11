@@ -1,5 +1,5 @@
 import type { PrHealthData } from "@kud/gh"
-import { filesOf, sizeOf } from "@kud/gh-workflow"
+import { filesOf, sizeOf, sizePartsOf } from "@kud/gh-workflow"
 
 /**
  * The one-line answer to "what IS this pull request", drawn under the title and
@@ -33,37 +33,38 @@ export type SummaryItem = {
 const DIVIDER = " · "
 
 /**
- * Size, in ONE colour — never one per sign.
+ * Size, additions green and deletions red — one colour per sign, on sign and
+ * digits together.
  *
  * The string itself is `sizeOf` in `@kud/gh-workflow`, shared with the inbox
  * row so the two surfaces cannot drift; the invariants on its shape (`+` first,
- * ASCII hyphen, `null` while unmeasured) are documented there. Re-exported here
- * so the view's own test and any host still importing it from this module keep
- * resolving. What stays HERE is the colour ruling, because this is where the
- * colour is applied.
+ * ASCII hyphen, `null` while unmeasured) are documented there, and `sizePartsOf`
+ * is the same string split for painting. Re-exported here so the view's own
+ * test and any host still importing it from this module keep resolving. What
+ * stays HERE is the colour ruling, because this is where the colour is applied.
  *
- * The original ruling was "deliberately uncoloured", and the trap it named
- * is still real and still avoided: colour `+412` and `-38` differently and a
- * colourblind reader gets a near-identical pair of hues, leaving the signs as
- * the only channel carrying anything — colour that adds noise and takes nothing
- * away, which is worse than plain text rather than merely no better.
+ * This has been ruled twice before, and the history is what stops it being
+ * ruled a third time by accident. First "deliberately uncoloured"; then ONE
+ * colour for the pair, the header's orange, on the argument that a hue per sign
+ * hands a colourblind reader a near-identical pair and leaves the signs as the
+ * only channel carrying anything. Both readings assumed colour was being asked
+ * to tell `+412` from `-38`. It is not, and never was: the sign and the fixed
+ * `+`-first order are the channels, and colour on top of them is reinforcement —
+ * the precise contract `health-display.ts` applies to every health glyph, in
+ * these same two tokens (`colors.success` for `✓`, `colors.error` for `✗`), so
+ * red and green were on the row's hue budget throughout. Ruled 2026-09-11 with
+ * the Designer, on Erwann's ask, and the cost she named still stands: two
+ * coloured cells in a column that is not the decision. Small, because diffstat
+ * colour is the most rehearsed convention in the tooling world and the eye reads
+ * it as texture; not zero.
  *
- * What changed is what the colour is FOR. It is not separating the two numbers
- * from each other — they share one colour, so that failure is structurally
- * impossible rather than merely avoided. It separates the pair from the
- * provenance beside it, which is a job hue is good at. The line was five facts
- * of two different kinds rendered in one flat run, and flatness was the actual
- * fault: an undimmed size against a dim remainder is a single small step across
- * five characters with nothing framing it.
- *
- * Rendered bold in the header's own orange (see `pr-view`), so it separates
- * from the dim run on LUMINANCE — which survives every deficiency type — with
- * weight and leftmost position as two further non-colour channels. No magnitude
- * banding: a hue that changes at 400 lines is a traffic light needing a legend,
- * and it puts a boundary between 399 and 401 while the digits already say the
- * size exactly. What they lacked was pre-attentive weight, not precision.
+ * Still bold and still leftmost (see `pr-view`), so the pair separates from the
+ * dim provenance run on LUMINANCE and position as well as hue. Still no
+ * magnitude banding: a colour that changes at 400 lines is a traffic light
+ * needing a legend, and it puts a boundary between 399 and 401 while the digits
+ * already say the size exactly.
  */
-export { sizeOf }
+export { sizeOf, sizePartsOf }
 
 /**
  * The line, in three tiers: the size, the file count, and the dim remainder.

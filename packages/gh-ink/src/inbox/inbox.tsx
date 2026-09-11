@@ -38,6 +38,7 @@ import {
   type Sidebar,
 } from "../components/side-panel.js"
 import {
+  colors,
   FooterHints,
   LoadingScreen,
   Pill,
@@ -91,6 +92,7 @@ import {
   filterBySearch,
   filterByRepos,
   sizeOf,
+  sizePartsOf,
 } from "@kud/gh-workflow"
 import type {
   GHDetail,
@@ -2558,6 +2560,7 @@ const ItemRow = ({
   // bands, and authorship is a property of the row where standing is one of
   // the frame. Absent, not `+0 -0`, when the node never carried it.
   const sizeLabel = showAuthor ? sizeOf(item) : null
+  const sizeParts = showAuthor ? sizePartsOf(item) : null
   // Unresolved review threads — a comment glyph (nf-fa-comments) + count, keeping
   // to the single-glyph health vocabulary instead of spelling out "unresolved".
   const unresolvedLabel =
@@ -2767,20 +2770,34 @@ const ItemRow = ({
       {labelLabel ? <Text dimColor>{labelLabel + "  "}</Text> : null}
       {repoLabel && !givingUp.repo ? <Text dimColor>{repoLabel}</Text> : null}
       {/* Head of the trailing group: after the title the eye asks how big,
-          then how contested, then who, then when. Plain — no colour, no dim,
-          no bold, no banding by magnitude. Orange is spent on the number, the
-          arrow and the live thread count; bold is the cursor; a hue per sign
-          hands a colourblind reader two near-identical hues; and a colour that
-          flips at 400 lines is a traffic light needing a legend. What sets it
-          apart from `by author · age` is luminance — the one undimmed cell in
-          the trailing group — and what carries magnitude is width: `+2140 -388`
-          is longer than `+6 -1` before anyone reads a digit. Same ruling as
-          the PR header's, one register down. One caveat, for the reader rather
-          than the UI: GitHub counts lockfiles and generated files, so a six-line
-          change that bumps `package-lock.json` reads as large. The number is
-          honest about what the diff view will show; it is not a proxy for
-          thought required. */}
-      {sizeLabel && !givingUp.size ? <Text>{"  " + sizeLabel}</Text> : null}
+          then how contested, then who, then when. Additions in `colors.success`,
+          deletions in `colors.error` — the same two tokens health-display.ts
+          spends on `✓` and `✗`, so no hue is new to the row — each painted on
+          sign and digits together, the shape git and GitHub already taught.
+          No bold (the cursor's), no dim, no banding by magnitude: a colour
+          that flips at 400 lines is a traffic light needing a legend, and width
+          already carries size — `+2140 -388` is longer than `+6 -1` before
+          anyone reads a digit.
+
+          This cell was plain until 2026-09-11, on the argument that a hue per
+          sign hands a colourblind reader two near-identical hues. That argument
+          assumed colour was doing the discriminating. It is not: the `+`/`-`
+          sign and the fixed `+`-first order are the channels, and colour only
+          echoes them — the exact contract health-display.ts is built on, and
+          the one it had been applying to every health glyph on the same row all
+          along. Keep the signs; the colour is not licensed to replace them.
+          Same treatment as the PR header's, one register down. One caveat, for
+          the reader rather than the UI: GitHub counts lockfiles and generated
+          files, so a six-line change that bumps `package-lock.json` reads as
+          large. The number is honest about what the diff view will show; it is
+          not a proxy for thought required. */}
+      {sizeParts && !givingUp.size ? (
+        <Text>
+          {"  "}
+          <Text color={colors.success}>{sizeParts.added}</Text>{" "}
+          <Text color={colors.error}>{sizeParts.removed}</Text>
+        </Text>
+      ) : null}
       {/* Follows the turn arrow, because an unresolved thread is not by itself
           a claim on you: GitHub keeps a thread open until someone clicks
           Resolve conversation, so replying leaves the count exactly where it

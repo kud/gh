@@ -1,13 +1,13 @@
 import { $ } from "zx"
 import React, { useState } from "react"
 import { Box, Text, useInput } from "ink"
-import { Tabs, useTabs, type TabItem } from "@kud/ink-ui"
+import { colors, Tabs, useTabs, type TabItem } from "@kud/ink-ui"
 import { DrillView } from "./drill-view.js"
 import { ActionMenu, buildActions, useActionMenu, type GHItem } from "../lib.js"
 import { HealthPanel } from "@kud/gh-ink"
 import { fetchHealth, type PrCheck } from "@kud/gh"
 import { CommentsPanel, fetchComments } from "./comments-panel.js"
-import { summaryOf } from "./pr-summary.js"
+import { sizePartsOf, summaryOf } from "./pr-summary.js"
 import { CheckLogView, jobIdOf } from "./check-log-view.js"
 import { checkDrillFor } from "./check-drill.js"
 import { AiLauncher, CopyPromptNotice } from "./ai-panel.js"
@@ -107,6 +107,7 @@ export const PrView = ({
   // so the four extra field names ride along for nothing rather than costing a
   // second call. Absent while it loads, and the line simply is not drawn.
   const summary = summaryOf(item, health.data, process.stdout.columns ?? 80)
+  const sizeParts = health.data ? sizePartsOf(health.data) : null
 
   const checkLabel = (c: PrCheck) =>
     c.workflowName
@@ -273,19 +274,20 @@ export const PrView = ({
           active panel, which is exactly the claim not being made.
 
           Three tiers, because two were not enough for five facts of two kinds.
-          The size takes the header's own orange and bold — the same orange as
-          the `#number` a line above, so the two read as one identity block:
-          this PR, this big. The file count is the other half of "how big" and
-          steps down to plain; everything after it is provenance and stays dim.
-
-          ONE colour across both numbers, never one per sign: hue here separates
-          the pair from the run beside it, and is not asked to separate `+` from
-          `-`. The dividers stay dim throughout so the cells read as cells. */}
+          The size is bold, additions in `colors.success` and deletions in
+          `colors.error` — sign and digits painted together, the shape every
+          diffstat since `git` has drawn, in the two tokens the health glyphs
+          already spend on this screen. The file count is the other half of
+          "how big" and steps down to plain; everything after it is provenance
+          and stays dim. Why one colour per sign is now fine, and what it used
+          to be, is in `pr-summary` beside `sizeOf`. The dividers stay dim
+          throughout so the cells read as cells. */}
       {summary.size || summary.files || summary.rest ? (
         <Box>
-          {summary.size ? (
-            <Text color="#FF8700" bold>
-              {summary.size}
+          {sizeParts ? (
+            <Text bold>
+              <Text color={colors.success}>{sizeParts.added}</Text>{" "}
+              <Text color={colors.error}>{sizeParts.removed}</Text>
             </Text>
           ) : null}
           {summary.size && (summary.files || summary.rest) ? (

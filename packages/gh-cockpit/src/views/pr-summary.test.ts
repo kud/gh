@@ -42,7 +42,7 @@ describe("summaryOf", () => {
   })
 
   /*
-   * Three cells, not one string: the renderer draws the size bold and orange,
+   * Three cells, not one string: the renderer draws the size bold, green and red,
    * the file count plain, the rest dim. A tier cannot be expressed inside a
    * joined line, so the split has to happen here.
    */
