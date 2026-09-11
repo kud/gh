@@ -3496,7 +3496,7 @@ const BrowseScreen = ({
   // the time the inbox is on screen that is settled: a toggle could only ever
   // disagree with the scope you actually chose.
   const applyWork = (secs: Section[]): Section[] =>
-    origin ? filterByOrigin(secs, origin.show, origin.match) : secs
+    origin ? filterByOrigin(secs, origin.show, origin.match, login) : secs
   const initialSections = applyWork(sections)
 
   const [localSections, setLocalSections] = useState(initialSections)
@@ -3639,9 +3639,11 @@ const BrowseScreen = ({
     items: [],
   }
   const searched =
-    search != null ? filterBySearch([rawSection], search) : [rawSection]
+    search != null
+      ? filterBySearch([rawSection], search, login)
+      : [rawSection]
   const filtered =
-    repoFilter.size > 0 ? filterByRepos(searched, repoFilter) : searched
+    repoFilter.size > 0 ? filterByRepos(searched, repoFilter, login) : searched
   const section = filterActive
     ? { ...rawSection, items: filtered[0]?.items ?? [] }
     : rawSection

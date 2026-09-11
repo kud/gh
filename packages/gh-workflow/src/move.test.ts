@@ -191,7 +191,7 @@ describe("every other verdict is exactly what it was", () => {
     expect(whoseMove("ci-fail", "review")).toBe("them")
     expect(whoseMove("waiting", "review")).toBe("you")
     expect(whoseMove("waiting", "open")).toBe("them")
-    expect(whoseMove("threads", "reviewed")).toBe("you")
+    expect(whoseMove("threads", "reviewed", "spoken", true)).toBe("you")
     expect(whoseMove("draft", "mine")).toBe("you")
     expect(whoseMove("draft", "review")).toBe("them")
   })
@@ -286,5 +286,35 @@ describe("Move", () => {
     // fourth member without a deliberate edit here.
     const every: Record<Move, true> = { you: true, them: true, unknown: true }
     expect(Object.keys(every).sort()).toEqual(["them", "unknown", "you"])
+  })
+})
+
+describe("a thread on a PR you reviewed is yours only while they have the last word", () => {
+  // `threads` is PR-wide and author-blind: it fires on any unresolved thread,
+  // including the one YOU opened and nobody answered. From `spoken` the table
+  // used to claim it unconditionally, so a question you asked sat under Your
+  // move while the turn arrow on the same row said you spoke last.
+  it("claims it when they spoke last", () => {
+    expect(whoseMove("threads", "reviewed", "spoken", true)).toBe("you")
+  })
+
+  it("hands it back when you did, or when nobody knows", () => {
+    expect(whoseMove("threads", "reviewed", "spoken", false)).toBe("them")
+    expect(whoseMove("threads", "reviewed", "spoken", undefined)).toBe("them")
+    expect(whoseMove("threads", "reviewed")).toBe("them")
+  })
+
+  it("does not widen to a plain reply on a PR you reviewed", () => {
+    // "rebased", said to nobody in particular, is real and not yours.
+    expect(whoseMove("waiting", "reviewed", "spoken", true)).toBe("them")
+    expect(whoseMove("approved", "reviewed", "spoken", true)).toBe("them")
+  })
+
+  it("leaves a requested review yours whoever spoke last", () => {
+    // The claim from `queued` is the review, not the thread, and computeHealth
+    // ranks `threads` above `waiting` — so a re-requested review with your own
+    // unanswered thread must still be yours.
+    expect(whoseMove("threads", "review", "queued", false)).toBe("you")
+    expect(whoseMove("threads", "review", "queued", true)).toBe("you")
   })
 })

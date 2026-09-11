@@ -129,12 +129,14 @@ describe("whoseMove", () => {
     }
   })
 
-  it("claims nothing but threads on a PR you have already reviewed", () => {
+  it("claims nothing but an answered thread on a PR you have already reviewed", () => {
     // `reviewed` is `reviewed-by:@me -author:@me -review-requested:@me`, so
     // GitHub is provably not waiting on you there and a re-request moves the
-    // row to `review`. Only an open thread is still yours; an approval is the
+    // row to `review`. Only an open thread THEY spoke last in is still yours —
+    // one you opened and nobody answered is theirs — an approval is the
     // author's to merge and "awaiting review" is somebody else's queue.
-    expect(whoseMove("threads", "reviewed")).toBe("you")
+    expect(whoseMove("threads", "reviewed", "spoken", true)).toBe("you")
+    expect(whoseMove("threads", "reviewed")).toBe("them")
     for (const h of ["waiting", "pending", "approved", "ci-fail"] as const)
       expect(whoseMove(h, "reviewed")).toBe("them")
   })
@@ -234,10 +236,12 @@ describe("whoseMove", () => {
 
   it("lets a row's own standing beat the tab's", () => {
     // One tab, two searches. `review-requested:@me` rows still want your review;
-    // `reviewed-by:@me` rows do not, and only an owed reply is left on them.
+    // `reviewed-by:@me` rows do not, and only an owed reply is left on them —
+    // owed, which takes their last word to establish.
     expect(whoseMove("waiting", "review", "queued")).toBe("you")
     expect(whoseMove("waiting", "review", "spoken")).toBe("them")
-    expect(whoseMove("threads", "review", "spoken")).toBe("you")
+    expect(whoseMove("threads", "review", "spoken", true)).toBe("you")
+    expect(whoseMove("threads", "review", "spoken")).toBe("them")
   })
 
   it("treats an unrecognised tab as a review queue", () => {

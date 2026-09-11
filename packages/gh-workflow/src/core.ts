@@ -523,9 +523,20 @@ const STANDING: Record<string, Standing> = {
 // What is YOURS from each position. Read down a column and the flips are the
 // point: a verdict against the branch (ci-fail, changes-req) is yours only on
 // your own PR, and the queue states (waiting, pending) only while a review is
-// still wanted from you. `threads` alone is yours from all three — it is
-// literally "your reply is owed", and it is the only thing left on a PR you have
-// already reviewed.
+// still wanted from you.
+//
+// `threads` is NOT in `spoken`, and until 2026-09-11 it was, on the reading
+// that an unresolved thread is literally "your reply is owed". It is not:
+// `computeHealth` fires `threads` on `unresolvedThreads > 0`, PR-wide and
+// author-blind, so from a PR you have already reviewed it only ever meant "a
+// thread exists somewhere here" — including the one YOU opened and nobody has
+// answered, which sat under Your move with the turn arrow on the same row
+// reading `→`, you spoke last. The only thing that tells you-asked-and-
+// they-went-quiet apart from they-answered-and-you-owe is `lastActor`, so the
+// claim is a conjunction and lives with the conditional arms in `whoseMove`,
+// beside the `authored` one it mirrors. From `queued` it stays: the review is
+// the claim there, and `computeHealth` ranks `threads` above `waiting`, so a
+// re-requested review with your own unanswered thread must still be yours.
 //
 // `conflict` sat with the verdicts until 2026-09-09 and does not any more. The
 // line it moved across is the one `isFailCheck` already draws in `@kud/gh`'s
@@ -576,7 +587,7 @@ const YOURS: Record<Standing, Health[]> = {
     "draft",
   ],
   queued: ["waiting", "pending", "threads", "approved", "conflict"],
-  spoken: ["threads"],
+  spoken: [],
 }
 
 /**
@@ -652,7 +663,20 @@ export const whoseMove = (
   // after it.
   if (theySpokeLast && position === "authored") return "you"
 
-  // BELOW the two claims above, deliberately. Both of them read something the
+  // The `spoken` half of the same claim, gated on `threads` where the arm
+  // above is not. On your own PR any last word is a claim; on a PR you have
+  // reviewed, only a thread makes it one — the author saying "rebased" to
+  // nobody in particular is real and not yours. This is what `threads` in the
+  // YOURS table used to say from `spoken`, minus the half it got wrong: a
+  // thread YOU opened and nobody answered is theirs to answer or resolve, and
+  // `theySpokeLast` is the only signal that can tell the two apart. When the
+  // login is unknown this reads `them`, which is the file's own bias — the
+  // `reviewed` search is provably not waiting on you, and over-claiming a
+  // stranger's PR is the worse wrong guess.
+  if (theySpokeLast && position === "spoken" && health === "threads")
+    return "you"
+
+  // BELOW the claims above, deliberately. Both of them read something the
   // row actually carries — a reaction the viewer left, a login that is not
   // theirs — and neither needs the health selection to be true. A row with no
   // health can still have been pinned, and somebody can still have spoken last
@@ -807,10 +831,16 @@ export type OriginSplit = {
  * is one reader's life compiled into a published library: no other host has
  * those two categories, and several have none at all.
  */
+// Every filter re-lays the kept rows out, so every filter has to carry the
+// login through to layoutGHItems: the bands read `lastActor` against it, and
+// without it a row claimed by somebody's last word fell from Your move to
+// Their move the moment a search was typed. Optional, so a host that never
+// passed one keeps exactly what it had.
 export const filterByOrigin = (
   sections: Section[],
   keep: "matched" | "rest",
   match: (repo: string) => boolean,
+  login?: string,
 ): Section[] =>
   sections
     .map((s) => {
@@ -830,7 +860,7 @@ export const filterByOrigin = (
         (i): i is GHItem => i.kind === "pr" || i.kind === "issue",
       )
       const other = kept.filter((i) => i.kind !== "pr" && i.kind !== "issue")
-      return { ...s, items: [...layoutGHItems(gh, s.id), ...other] }
+      return { ...s, items: [...layoutGHItems(gh, s.id, login), ...other] }
     })
     .filter((s) =>
       s.items.some(
@@ -848,6 +878,7 @@ const searchText = (i: AnyItem): string =>
 export const filterBySearch = (
   sections: Section[],
   query: string,
+  login?: string,
 ): Section[] => {
   const q = query.trim().toLowerCase()
   if (!q) return sections
@@ -865,7 +896,7 @@ export const filterBySearch = (
         (i): i is GHItem => i.kind === "pr" || i.kind === "issue",
       )
       const other = kept.filter((i) => i.kind !== "pr" && i.kind !== "issue")
-      return { ...s, items: [...layoutGHItems(gh, s.id), ...other] }
+      return { ...s, items: [...layoutGHItems(gh, s.id, login), ...other] }
     })
     .filter((s) =>
       s.items.some(
@@ -877,6 +908,7 @@ export const filterBySearch = (
 export const filterByRepos = (
   sections: Section[],
   repos: Set<string>,
+  login?: string,
 ): Section[] => {
   if (repos.size === 0) return sections
   return sections
@@ -893,7 +925,7 @@ export const filterByRepos = (
         (i): i is GHItem => i.kind === "pr" || i.kind === "issue",
       )
       const other = kept.filter((i) => i.kind !== "pr" && i.kind !== "issue")
-      return { ...s, items: [...layoutGHItems(gh, s.id), ...other] }
+      return { ...s, items: [...layoutGHItems(gh, s.id, login), ...other] }
     })
     .filter((s) =>
       s.items.some(
