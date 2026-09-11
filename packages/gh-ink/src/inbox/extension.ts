@@ -66,6 +66,17 @@ export interface InboxExtension {
   // would read as if it were. Both kinds appear in the footer and the legend,
   // because both are things you can press.
   scope?: "item" | "global"
+  // Row kinds this extension is THE in-tree view for. Declaring `["task"]` makes
+  // ↵ (and `d`, and the menu's drill action) on a ticket row mount this body the
+  // way ↵ on a PR mounts PrView — instead of opening the action menu or spawning
+  // a pane. A kind gets one such extension; the first declared wins.
+  //
+  // A declaration rather than a new `onOpenTask` seam beside `onOpenPr`, because
+  // the shell already knows more about Jira than it should and a third
+  // hard-wired notion would be one more arm to keep in step. The extension seam
+  // is the generic door; this field says which rows walk through it on ↵. Hosts
+  // that declare nothing keep exactly the old behaviour, pane fallback included.
+  drills?: AnyItem["kind"][]
   // `target` is the optional context the opener passes — the body decides what to
   // do with it, and ignores the parts it has no use for.
   body: (onExit: () => void, target?: ExtensionTarget) => ReactNode

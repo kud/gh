@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest"
 import {
+  drillExtensionFor,
   extensionFor,
   extensionHints,
   extensionLegend,
   itemExtensions,
 } from "./inbox.js"
 import type { InboxExtension } from "./extension.js"
+import type { TaskRow } from "./inbox.js"
 
 // `body` is irrelevant to every helper here, so a stub keeps the fixtures readable.
 const ext = (
@@ -108,5 +110,40 @@ describe("extension discoverability", () => {
     expect(extensionHints()).toEqual([])
     expect(extensionLegend()).toEqual([])
     expect(itemExtensions()).toEqual([])
+  })
+})
+
+describe("drillExtensionFor", () => {
+  const ticket = (): TaskRow => ({
+    kind: "task",
+    key: "in progress",
+    summary: "bring auth0 client config under terraform",
+    url: "https://example.atlassian.net/browse/SHOP-1234",
+    status: "in progress",
+    age: "2d",
+    indent: false,
+    ticket: "SHOP-1234",
+  })
+  const TICKET = ext("ticket", "T", { scope: "item", drills: ["task"] })
+
+  it("names the item-scoped extension that claimed the row's kind", () => {
+    expect(drillExtensionFor(ticket(), [JENKINS, TICKET])).toBe(TICKET)
+  })
+
+  it("is nothing when no extension claims the kind — the pane fallback stays", () => {
+    expect(drillExtensionFor(ticket(), [JENKINS, DELEGATE])).toBeUndefined()
+    expect(drillExtensionFor(ticket(), undefined)).toBeUndefined()
+  })
+
+  it("ignores a global extension whatever it declares", () => {
+    // A global extension is by its own account not something you do TO a row,
+    // so it cannot be what ↵ on one opens.
+    const global = ext("everything", "E", { scope: "global", drills: ["task"] })
+    expect(drillExtensionFor(ticket(), [global])).toBeUndefined()
+  })
+
+  it("takes the first declared when two claim the same kind", () => {
+    const second = ext("ticket-2", "U", { scope: "item", drills: ["task"] })
+    expect(drillExtensionFor(ticket(), [TICKET, second])).toBe(TICKET)
   })
 })

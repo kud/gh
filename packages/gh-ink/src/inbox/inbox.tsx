@@ -1174,7 +1174,9 @@ export const workCount = (s: Section): number => {
 export const drillCmd = (item: AnyItem): string | null => {
   if (item.kind === "task")
     return item.ticket ? `jira issue view ${item.ticket}` : null
-  // pr / issue drill in-tree via mounted views (openDrillView)
+  // pr / issue drill in-tree via mounted views (openDrillView), and so does a
+  // task when the host claims it through an extension's `drills`; the pane
+  // command is the fallback for a host that has not.
   return null
 }
 
@@ -1309,9 +1311,11 @@ export const buildActions = (
     },
   }
 
-  // pr / issue mount an in-tree view (openDrillView via onOpenView); a ticket-backed task still
-  // spawns a pane (drillCmd). Show the drill action whenever either path exists,
-  // so "d" is always in the ↵ menu — not only when there's a pane command.
+  // pr / issue mount an in-tree view (openDrillView via onOpenView), and a
+  // ticket-backed task does too once the host declares a `drills: ["task"]`
+  // extension; otherwise it spawns a pane (drillCmd). Show the drill action
+  // whenever either path exists, so "d" is always in the ↵ menu — not only
+  // when there is a pane command.
   const drill = drillCmd(item)
   const mountable = item.kind === "pr" || item.kind === "issue"
   const drillAction: Action | null =
@@ -3342,6 +3346,18 @@ export const extensionFor = (
 ): InboxExtension | undefined =>
   input ? extensions?.find((e) => e.key === input) : undefined
 
+// Which extension is the in-tree view for a row, if any — the `drills`
+// declaration answered. Item-scoped only: a global extension is by its own
+// account not something you do TO a row, so it cannot be what ↵ on one opens,
+// whatever it declares.
+export const drillExtensionFor = (
+  item: AnyItem,
+  extensions?: InboxExtension[],
+): InboxExtension | undefined =>
+  extensions?.find(
+    (e) => e.scope === "item" && (e.drills?.includes(item.kind) ?? false),
+  )
+
 // The `?` legend, derived rather than hand-written. It used to hardcode
 // `["J", "jenkins"]` behind a `ciStatus`/`hasCi` flag, so honouring `key` in the
 // dispatch left `a` working and undiscoverable — the mechanism was generic and
@@ -3778,6 +3794,20 @@ const BrowseScreen = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshError])
 
+  // What an extension body is handed, built in one place so the key dispatch
+  // and the ↵ drill cannot disagree about it. ExtensionTarget.item has always
+  // been documented as absent on a header row, and until the fence became
+  // selectable that was true for free. Now it has to be said: every extension
+  // body narrows on `kind` for a pr / issue / task and none of them expect a
+  // repo-header.
+  const extensionTargetFor = (item: AnyItem | undefined): ExtensionTarget => ({
+    item: item && !isHeader(item) ? item : undefined,
+    ciJob: ciStatus?.job,
+    login,
+    onRemove: (row) => dismissItem(row as GHItem),
+    showFlash,
+  })
+
   const openDrillView = (item: AnyItem): boolean => {
     const open = (fn: (i: GHItem) => void, i: GHItem): boolean => {
       menu.close()
@@ -3786,6 +3816,15 @@ const BrowseScreen = ({
     }
     if (item.kind === "pr" && onOpenPr) return open(onOpenPr, item)
     if (item.kind === "issue" && onOpenIssue) return open(onOpenIssue, item)
+    // The generic arm: a row kind the host has claimed through an extension's
+    // `drills` mounts that extension, through the same door its key would.
+    // Below the two built-ins so a host cannot accidentally shadow PrView.
+    const ext = drillExtensionFor(item, extensions)
+    if (ext && onOpenExt) {
+      menu.close()
+      onOpenExt(ext.id, extensionTargetFor(item))
+      return true
+    }
     return false
   }
 
@@ -4009,17 +4048,7 @@ const BrowseScreen = ({
     // Jenkins reads ciJob, a row-scoped extension reads item.
     const ext = extensionFor(input, extensions)
     if (ext) {
-      onOpenExt?.(ext.id, {
-        // ExtensionTarget.item has always been documented as absent on a header
-        // row, and until the fence became selectable that was true for free.
-        // Now it has to be said: every extension body narrows on `kind` for a
-        // pr / issue / task and none of them expect a repo-header.
-        item: activeItem && !isHeader(activeItem) ? activeItem : undefined,
-        ciJob: ciStatus?.job,
-        login,
-        onRemove: (row) => dismissItem(row as GHItem),
-        showFlash,
-      })
+      onOpenExt?.(ext.id, extensionTargetFor(activeItem))
       return
     }
     // The fence is a row now, so it answers for itself here — above the guard
@@ -4132,8 +4161,9 @@ const BrowseScreen = ({
       return
 
     if (key.return) {
-      // ↵ goes straight into the item's screen (PR / issue mount);
-      // only items without a mounted view (task) fall back to the action menu.
+      // ↵ goes straight into the item's screen (PR / issue mount, or the
+      // extension a host declared for the row kind); only a row with no mounted
+      // view falls back to the action menu.
       if (openDrillView(activeItem)) return
       // A row with no ticket behind it has nothing to drill into, so the menu
       // would hold open and copy and nothing else — one keystroke in front of
