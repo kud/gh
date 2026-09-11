@@ -2558,13 +2558,14 @@ const ItemRow = ({
   const numStr = `#${item.number}`.padEnd(7)
   // Hide "by me" — the author suffix is only signal when it's someone else.
   const showAuthor = !!item.author && item.author !== login
-  // `+18 -4`, on somebody else's PR only, and gated on the same predicate as
-  // the author for the same reason: you know the size of your own. Not on
-  // standing — a row tied to `queued` would lose its size the moment it moved
-  // bands, and authorship is a property of the row where standing is one of
-  // the frame. Absent, not `+0 -0`, when the node never carried it.
-  const sizeLabel = showAuthor ? sizeOf(item) : null
-  const sizeParts = showAuthor ? sizePartsOf(item) : null
+  // `+18 -4`, on every PR row that carries it. It was gated on `showAuthor`
+  // for one morning (2026-09-11) on the argument that you know the size of
+  // your own — and Erwann overruled it the same afternoon: the number is how
+  // a list of your own PRs is triaged too, and a cell that appears on the row
+  // above and not on yours reads as a column that failed to fill. Absent, not
+  // `+0 -0`, when the node never carried it.
+  const sizeLabel = sizeOf(item)
+  const sizeParts = sizePartsOf(item)
   // Unresolved review threads — a comment glyph (nf-fa-comments) + count, keeping
   // to the single-glyph health vocabulary instead of spelling out "unresolved".
   const unresolvedLabel =
