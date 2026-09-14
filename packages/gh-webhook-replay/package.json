@@ -1,6 +1,6 @@
 {
   "name": "@kud/gh-webhook-replay",
-  "version": "0.1.24",
+  "version": "0.1.23",
   "description": "Replay the latest pull_request webhook delivery on a GitHub repo hook.",
   "type": "module",
   "bin": {
@@ -37,7 +37,7 @@
   },
   "dependencies": {
     "@kud/gh": "0.16.0",
-    "@kud/ink-ui": "0.26.0",
+    "@kud/ink-ui": "0.28.2",
     "ink": "7.1.0",
     "react": "19.2.7"
   },

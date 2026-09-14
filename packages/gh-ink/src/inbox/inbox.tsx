@@ -11,7 +11,7 @@ import React, {
   useContext,
   type ReactNode,
 } from "react"
-import { Text as InkText, Box, useInput, useWindowSize } from "ink"
+import { Text as InkText, Box, useApp, useInput, useWindowSize } from "ink"
 import type { InboxExtension, ExtensionTarget } from "./extension.js"
 import {
   invalidateCache,
@@ -3504,6 +3504,7 @@ const BrowseScreen = ({
   ciJob?: string
 }) => {
   const { rows } = useWindowSize()
+  const { exit } = useApp()
   // Both directions are the same filter with `keep` flipped, so the host supplies
   // one predicate rather than two filters. No predicate — or no side asked for —
   // and there is no split: every section stands.
@@ -4052,7 +4053,9 @@ const BrowseScreen = ({
           (i + (key.shift ? -1 : 1) + localSections.length) %
           localSections.length,
       )
-    if (input === "q") process.exit(0)
+    // Ink's exit, not process.exit: it unmounts and hands the terminal back
+    // (alternate screen included) instead of leaving whatever was on it.
+    if (input === "q") exit()
     if (input === "r") {
       onRefresh?.()
       return
@@ -4691,8 +4694,9 @@ const NoRowsScreen = ({
   detail?: string
   onRetry: () => void
 }) => {
+  const { exit } = useApp()
   useInput((input) => {
-    if (input === "q") process.exit(0)
+    if (input === "q") exit()
     if (input === "r") onRetry()
   })
   return (
