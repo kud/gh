@@ -24,7 +24,7 @@ const item = (over: Partial<GHItem> = {}): GHItem => ({
 })
 
 const sections = (over: Partial<GHItem> = {}): Section[] => [
-  { id: "mine", label: "Mine", items: layoutGHItems([item(over)], "mine") },
+  { id: "mine", label: "Mine", items: layoutGHItems([item(over)], "mine", "viewer") },
 ]
 
 describe("signatureOf", () => {

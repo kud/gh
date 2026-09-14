@@ -637,6 +637,7 @@ export const whoseMove = (
   standing?: Standing,
   theySpokeLast?: boolean,
   pinned?: boolean,
+  ownsRepo?: boolean,
 ): Move => {
   const position = standing ?? STANDING[sectionId] ?? "queued"
 
@@ -685,6 +686,24 @@ export const whoseMove = (
   // stranger's PR is the worse wrong guess.
   if (theySpokeLast && position === "spoken" && health === "threads")
     return "you"
+
+  // "Awaiting review" on your own PR is theirs — a reviewer has not looked yet
+  // — and that is right everywhere a reviewer exists. On a repo YOU own with
+  // nobody asked, nobody is coming: no review is outstanding because none was
+  // requested, the only action that advances the row is you merging it, and
+  // `waiting` filed it under Their move for as long as it stayed open. Found on
+  // kud/smart-tv-for-browser#10, 2026-09-14, which had read as yours only
+  // because a deploy bot commented after the last push and claimed a turn.
+  //
+  // `waiting` only. `pending` means a check is still running, and that is the
+  // machine's turn on any repo. Ownership is the `login/` prefix of the repo
+  // and nothing looser: `viewerPermission` was considered and refused, since
+  // WRITE and ADMIN are ordinary on an employer's org where a review IS
+  // expected, and the band would have claimed every one of those PRs. If a real
+  // case ever appears of a review explicitly requested on a repo you own, the
+  // fix is a second conjunct on `reviewRequests.totalCount`, which the PR
+  // fragment does not select today — not a wider notion of ownership.
+  if (health === "waiting" && position === "authored" && ownsRepo) return "you"
 
   // BELOW the claims above, deliberately. Both of them read something the
   // row actually carries — a reaction the viewer left, a login that is not
@@ -761,10 +780,18 @@ const BAND_LABEL: Record<Move, string> = {
 export const layoutGHItems = (
   items: GHItem[],
   sectionId: string,
-  // Needed to read `lastActor`, which is only meaningful against somebody. Left
-  // out, the bands fall back to health and standing alone — the behaviour every
-  // caller had before, so an un-updated host degrades rather than breaks.
-  login?: string,
+  // Required, and it used to be optional on the argument that an un-updated
+  // host should degrade rather than break. It did degrade — silently, and in
+  // the one direction the bands exist to prevent. Two claims here read the row
+  // against the viewer: `lastActor` is only "somebody else" against a login,
+  // and a repo is only "yours" against one. Without it both collapse to false,
+  // every row falls back to the health table, and a PR you are owed a reply on
+  // files under Their move while the turn arrow beside it (which reads
+  // `lastActor` alone) still points at you. The three filters below re-run this
+  // layout, and ambre's host called one of them without the login for weeks;
+  // nothing failed, one band was simply wrong. A host with no viewer yet shows
+  // its loading state, not bands laid out against nobody.
+  login: string,
 ): AnyItem[] => {
   if (sectionId === "done") return insertRepoHeaders(sortByRecency(items))
 
@@ -791,8 +818,9 @@ export const layoutGHItems = (
           i.health,
           sectionId,
           i.standing,
-          !!login && !!i.lastActor && i.lastActor !== login,
+          !!i.lastActor && i.lastActor !== login,
           i.pinned,
+          i.repo.startsWith(`${login}/`),
         ) === side,
     ),
   }))
@@ -844,13 +872,16 @@ export type OriginSplit = {
 // Every filter re-lays the kept rows out, so every filter has to carry the
 // login through to layoutGHItems: the bands read `lastActor` against it, and
 // without it a row claimed by somebody's last word fell from Your move to
-// Their move the moment a search was typed. Optional, so a host that never
-// passed one keeps exactly what it had.
+// Their move the moment a search was typed. It was optional so a host that
+// never passed one would keep what it had — and that is exactly what one did:
+// ambre's work/home split called this without a login and every row it
+// touched was re-banded against nobody. Required now, for the reason on
+// layoutGHItems.
 export const filterByOrigin = (
   sections: Section[],
   keep: "matched" | "rest",
   match: (repo: string) => boolean,
-  login?: string,
+  login: string,
 ): Section[] =>
   sections
     .map((s) => {
@@ -888,7 +919,7 @@ const searchText = (i: AnyItem): string =>
 export const filterBySearch = (
   sections: Section[],
   query: string,
-  login?: string,
+  login: string,
 ): Section[] => {
   const q = query.trim().toLowerCase()
   if (!q) return sections
@@ -918,7 +949,7 @@ export const filterBySearch = (
 export const filterByRepos = (
   sections: Section[],
   repos: Set<string>,
-  login?: string,
+  login: string,
 ): Section[] => {
   if (repos.size === 0) return sections
   return sections

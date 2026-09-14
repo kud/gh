@@ -27,6 +27,7 @@ const section = () => [
     items: layoutGHItems(
       [item("acme/api", 1), item("me/tool", 2), item("acme/web", 3)],
       "mine",
+      "viewer",
     ),
   },
 ]
@@ -42,29 +43,50 @@ const numbersIn = (sections: ReturnType<typeof section>) =>
 
 describe("filterByOrigin", () => {
   it("keeps the side the predicate matched", () => {
-    expect(numbersIn(filterByOrigin(section(), "matched", isAcme))).toEqual([
+    expect(numbersIn(filterByOrigin(section(), "matched", isAcme, "viewer"))).toEqual([
       1, 3,
     ])
   })
 
   it("keeps everything else on the other side", () => {
-    expect(numbersIn(filterByOrigin(section(), "rest", isAcme))).toEqual([2])
+    expect(numbersIn(filterByOrigin(section(), "rest", isAcme, "viewer"))).toEqual([2])
   })
 
   // Guard the guard: both assertions above pass just as well against an empty
   // result, which is what a predicate wired backwards would produce on one side.
   it("splits the rows rather than dropping them", () => {
-    const matched = numbersIn(filterByOrigin(section(), "matched", isAcme))
-    const rest = numbersIn(filterByOrigin(section(), "rest", isAcme))
+    const matched = numbersIn(filterByOrigin(section(), "matched", isAcme, "viewer"))
+    const rest = numbersIn(filterByOrigin(section(), "rest", isAcme, "viewer"))
     expect([...matched, ...rest].sort()).toEqual([1, 2, 3])
+  })
+
+  // The filter lays the kept rows out AGAIN, and the second layout is only as
+  // good as what it is handed. ambre's host ran this without a login for weeks:
+  // a PR somebody had replied to on your own repo entered under Your move and
+  // came out under Their move, with the turn arrow beside it still pointing at
+  // you. The parameter is required now; this pins that the re-layout reads the
+  // row against the same viewer the first one did.
+  it("keeps a row claimed by their last word in Your move through the split", () => {
+    const claimed = { ...item("me/tool", 2), lastActor: "somebody" }
+    const before = [
+      { id: "mine", label: "Mine", items: layoutGHItems([claimed], "mine", "viewer") },
+    ]
+    const bandOf = (sections: ReturnType<typeof section>) =>
+      sections
+        .flatMap((s) => s.items)
+        .flatMap((i) => (i.kind === "subgroup-header" ? [i.label] : []))
+    expect(bandOf(before)).toEqual(["Your move (1)"])
+    expect(bandOf(filterByOrigin(before, "rest", isAcme, "viewer"))).toEqual([
+      "Your move (1)",
+    ])
   })
 
   // A section that empties out is dropped, not left as a headed blank — which is
   // why the host must not be able to land on a side its scope has nothing on.
   it("drops a section with nothing left on this side", () => {
     const onlyAcme = [
-      { id: "mine", label: "Mine", items: layoutGHItems([item("acme/api", 1)], "mine") },
+      { id: "mine", label: "Mine", items: layoutGHItems([item("acme/api", 1)], "mine", "viewer") },
     ]
-    expect(filterByOrigin(onlyAcme, "rest", isAcme)).toEqual([])
+    expect(filterByOrigin(onlyAcme, "rest", isAcme, "viewer")).toEqual([])
   })
 })

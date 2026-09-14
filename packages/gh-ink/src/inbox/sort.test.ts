@@ -67,7 +67,7 @@ describe("sortItems", () => {
       item({ repo: "kud/ambre", number: 3, ts: 5 }),
     ]
 
-    const headers = layoutGHItems(rows, "open").filter(
+    const headers = layoutGHItems(rows, "open", "viewer").filter(
       (i) => i.kind === "repo-header",
     )
     expect(headers).toHaveLength(2)

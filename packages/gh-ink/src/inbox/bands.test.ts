@@ -122,6 +122,43 @@ describe("whoseMove", () => {
     expect(numbers(rows)).toEqual([2, 1])
   })
 
+  it("claims an unreviewed PR on a repo you own, and only there", () => {
+    // "Awaiting review" assumes a reviewer exists. On your own repo with nobody
+    // asked, none does: the row sat under Their move for as long as it stayed
+    // open, and the only thing that ever moved it was a deploy bot commenting
+    // after the push — a turn claimed by accident, not a reading.
+    expect(whoseMove("waiting", "open", undefined, false, false, true)).toBe(
+      "you",
+    )
+    // Somebody else's repo: a maintainer will look, and the wait is real.
+    expect(whoseMove("waiting", "open", undefined, false, false, false)).toBe(
+      "them",
+    )
+    // Ownership says nothing from the other two standings — a PR on your repo
+    // that somebody else wrote and asked you to review is still theirs to
+    // finish, and `waiting` from `queued` was already yours for its own reason.
+    expect(whoseMove("waiting", "reviewed", undefined, false, false, true)).toBe(
+      "them",
+    )
+    // `pending` is a check still running, and that is the machine's turn on
+    // any repo.
+    expect(whoseMove("pending", "open", undefined, false, false, true)).toBe(
+      "them",
+    )
+  })
+
+  it("reads ownership off the repo prefix against the login", () => {
+    const rows = [
+      item({ repo: "viewer/tool", number: 1, health: "waiting" }),
+      item({ repo: "acme/api-gateway", number: 2, health: "waiting" }),
+      // A login that merely PREFIXES the owner is not the owner.
+      item({ repo: "viewer-org/tool", number: 3, health: "waiting" }),
+    ]
+    const laid = layoutGHItems(rows, "open", "viewer")
+    expect(labels(laid)).toEqual(["Your move (1)", "Their move (2)"])
+    expect(numbers(laid)).toEqual([1, 2, 3])
+  })
+
   it("keeps threads and approval yours while a review is still wanted", () => {
     for (const tab of ["open", "review", "incoming", "assigned"]) {
       expect(whoseMove("threads", tab)).toBe("you")
@@ -277,7 +314,7 @@ describe("layoutGHItems bands", () => {
       }),
     ]
 
-    const laid = layoutGHItems(rows, "review")
+    const laid = layoutGHItems(rows, "review", "viewer")
 
     // 1449 is the conflict, and it bands with the reviewable ones: a base branch
     // that moved is not a reason the review was not wanted. Only 1496, the red
@@ -292,8 +329,8 @@ describe("layoutGHItems bands", () => {
       item({ repo: "kud/ambre", number: 2, health: "waiting" }),
     ]
 
-    expect(numbers(layoutGHItems(rows, "review"))).toEqual([2, 1])
-    expect(numbers(layoutGHItems(rows, "open"))).toEqual([1, 2])
+    expect(numbers(layoutGHItems(rows, "review", "viewer"))).toEqual([2, 1])
+    expect(numbers(layoutGHItems(rows, "open", "viewer"))).toEqual([1, 2])
   })
 
   it("still names the one band on a single-sided tab", () => {
@@ -305,7 +342,7 @@ describe("layoutGHItems bands", () => {
       item({ repo: "kud/shui", number: 2, health: "draft" }),
     ]
 
-    const laid = layoutGHItems(rows, "draft")
+    const laid = layoutGHItems(rows, "draft", "viewer")
     expect(labels(laid)).toEqual(["Your move (2)"])
     expect(numbers(laid)).toEqual([1, 2])
   })
@@ -313,11 +350,11 @@ describe("layoutGHItems bands", () => {
   it("omits the empty side rather than printing a (0) header", () => {
     const rows = [item({ repo: "kud/ambre", number: 1, health: "waiting" })]
 
-    expect(labels(layoutGHItems(rows, "open"))).toEqual(["Their move (1)"])
+    expect(labels(layoutGHItems(rows, "open", "viewer"))).toEqual(["Their move (1)"])
   })
 
   it("lays out an empty tab as nothing at all", () => {
-    expect(layoutGHItems([], "open")).toEqual([])
+    expect(layoutGHItems([], "open", "viewer")).toEqual([])
   })
 
   it("restarts repo headers inside each band", () => {
@@ -328,7 +365,7 @@ describe("layoutGHItems bands", () => {
       item({ repo: "kud/ambre", number: 2, health: "ci-fail" }),
     ]
 
-    const headers = layoutGHItems(rows, "review").filter(
+    const headers = layoutGHItems(rows, "review", "viewer").filter(
       (r) => r.kind === "repo-header",
     )
     expect(headers).toHaveLength(2)
@@ -353,7 +390,7 @@ describe("layoutGHItems bands", () => {
       }),
     ]
 
-    const laid = layoutGHItems(rows, "review")
+    const laid = layoutGHItems(rows, "review", "viewer")
     expect(labels(laid)).toEqual(["Your move (1)", "Their move (1)"])
     expect(numbers(laid)).toEqual([2, 1])
   })
@@ -365,6 +402,6 @@ describe("layoutGHItems bands", () => {
       item({ repo: "kud/shui", number: 2, health: "approved", ts: 9 }),
     ]
 
-    expect(labels(layoutGHItems(rows, "done"))).toEqual([])
+    expect(labels(layoutGHItems(rows, "done", "viewer"))).toEqual([])
   })
 })
