@@ -26,7 +26,7 @@ reasoning lives — there is no design doc behind them. Two consequences:
   bug without the comment. Where the answer is yes, the history stays — past
   tense included.
 
-`whoseMove` in `packages/gh-ink/src/inbox/inbox.tsx` is the worked example.
+`whoseMove` in `packages/gh-workflow/src/core.ts` is the worked example.
 
 ## A change to the health classifiers ripples
 
@@ -37,7 +37,7 @@ GitHub's `CheckConclusionState`, so moving a conclusion between them is never
 local:
 
 - `computeHealth`'s precedence ladder turns it into a different token, and
-- `YOURS` in `gh-ink`'s inbox turns that token into **Your move** or **Their
+- `YOURS` in `gh-workflow`'s `core.ts` turns that token into **Your move** or **Their
   move**, differently depending on which of three standings the row arrived
   from.
 
@@ -140,3 +140,20 @@ commit it describes:
 
 The body is prose, not a bullet — what was wrong, what it cost, and what now
 happens instead. Read `.changeset/*.md` for the register before writing one.
+
+**Versions belong to changesets. Never hand-edit a `version` field or an
+internal `@kud/gh-*` pin — not to "sync", not to match what you think npm
+holds.** The bot reads the workspace versions as truth and bumps from there, so
+a hand-set number does not get corrected, it gets built on. On 2026-09-14 a
+session rolled five packages backwards (`gh-cockpit` 0.5.0 → 0.4.31, `gh-ink`
+0.52.0 → 0.51.1, the three CLIs likewise) while bumping a dependency; the next
+Version Packages PR "released" numbers already on npm, `changeset publish`
+skipped every one with a warning inside a green run, an ink-ui bump and a quit
+fix silently never shipped, and each CHANGELOG gained an entry under a heading
+that had already been published. The PR after that would have moved `latest`
+below the versions every host pins. A dependency bump is a changeset like any
+other change: pin the dependency, write the changeset, and let the bot do the
+rest. If the workspace and npm ever disagree, `npm view @kud/<pkg> version`
+against `packages/<pkg>/package.json` is the check, and restoring the
+workspace to what npm holds is the fix — before the next Version Packages PR
+merges, never after.
