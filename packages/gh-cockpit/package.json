@@ -57,7 +57,7 @@
     "@kud/gh-ink": "0.51.1",
     "@kud/ink-ui": "0.28.2",
     "zx": "8.8.5",
-    "@kud/gh-workflow": "0.8.0"
+    "@kud/gh-workflow": "0.10.0"
   },
   "devDependencies": {
     "@types/node": "22.20.1",
