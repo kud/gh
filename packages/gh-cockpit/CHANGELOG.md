@@ -1,5 +1,19 @@
 # @kud/gh-cockpit
 
+## 0.5.2
+
+### Patch Changes
+
+- fa57f75: ←→ on a tab bar wrap, and belong to the hook.
+
+  `@kud/ink-ui` 0.29.0's `useTabs` binds ←→ itself, so the PR drill's own arrow binding comes out — left in, every press would have switched tabs twice. The inbox does not mount the hook (its tab is a position over sections that come and go), but its arrows now wrap at the ends exactly as Tab already did four lines below: one bar, one end behaviour.
+
+  Every package pins `@kud/ink-ui` 0.29.0 together, per the one-copy rule.
+
+- Updated dependencies [fa57f75]
+- Updated dependencies [3f96740]
+  - @kud/gh-ink@0.53.0
+
 ## 0.5.1
 
 ### Patch Changes

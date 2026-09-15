@@ -1,5 +1,25 @@
 # @kud/gh-ink
 
+## 0.53.0
+
+### Minor Changes
+
+- 3f96740: The initiatives rail reads by name.
+
+  Each row was a key in orange with the initiative's title dimmed beneath it and `0/5 · 4 live` in the same grey — the reference brighter than the thing it referred to, and progress a number you did arithmetic on across rows. A row is now the label first, bright, cut at a word boundary; under it a fixed facts grid: the key in the secondary tier, a ten-column progress bar beside its `done/total` fraction, and the live count in words. The heading drops the `»` for a bold title and the title row's own dotted rule, so the rail's one accent is the `←` that says an initiative wants you.
+
+  `Sidebar` gains `liveLabel?: (live: number) => string`, so a host can say `4 on board` / `off board` in its own vocabulary; the default stays `N live`, with `nothing live` for a counted zero. `counts()` takes the same function as an optional second argument. `truncateWords` is exported.
+
+  The inbox's `#FF8700` literals become `colors.accent` in the same change: the rail moving to the token alone would have put two oranges on one screen.
+
+### Patch Changes
+
+- fa57f75: ←→ on a tab bar wrap, and belong to the hook.
+
+  `@kud/ink-ui` 0.29.0's `useTabs` binds ←→ itself, so the PR drill's own arrow binding comes out — left in, every press would have switched tabs twice. The inbox does not mount the hook (its tab is a position over sections that come and go), but its arrows now wrap at the ends exactly as Tab already did four lines below: one bar, one end behaviour.
+
+  Every package pins `@kud/ink-ui` 0.29.0 together, per the one-copy rule.
+
 ## 0.52.1
 
 ### Patch Changes
