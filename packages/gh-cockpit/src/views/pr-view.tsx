@@ -5,9 +5,14 @@ import { colors, Tabs, useTabs, type TabItem } from "@kud/ink-ui"
 import { DrillView } from "./drill-view.js"
 import { ActionMenu, buildActions, useActionMenu, type GHItem } from "../lib.js"
 import { HealthPanel } from "@kud/gh-ink"
-import { fetchHealth, type PrCheck } from "@kud/gh"
+import { fetchDefaultBranch, fetchHealth, type PrCheck } from "@kud/gh"
 import { CommentsPanel, fetchComments } from "./comments-panel.js"
-import { sizePartsOf, summaryOf } from "./pr-summary.js"
+import {
+  separatorBefore,
+  sizePartsOf,
+  summaryOf,
+  type Summary,
+} from "./pr-summary.js"
 import { CheckLogView, jobIdOf } from "./check-log-view.js"
 import { checkDrillFor } from "./check-drill.js"
 import { AiLauncher, CopyPromptNotice } from "./ai-panel.js"
@@ -101,11 +106,41 @@ export const PrView = ({
     () => fetchHealth(item.repo, item.number),
   )
 
+  // The default branch is the ONE fact on this line that cannot ride along on
+  // the health fetch: `gh pr view --json` has no field for it (checked on gh
+  // 2.100.0 — it carries `baseRefName`, `headRefName`, `headRepository`,
+  // `headRepositoryOwner`, `isCrossRepository` and nothing naming the default).
+  // So it is a second call, keyed by REPO rather than by PR — which is what
+  // makes it cheap: the cache paints the last answer instantly, the effect
+  // revalidates behind it, and a repo that renames its default heals itself on
+  // the next drill-in. Mounted beside the health fetch, so the two are
+  // concurrent and this adds no wall clock.
+  const defaultBranch = useCachedResource(
+    `repo-default-branch-${item.repo}`,
+    () => fetchDefaultBranch(item.repo),
+  )
+
   // Off the health fetch, which already goes to `gh pr view` per PR on demand —
   // so the four extra field names ride along for nothing rather than costing a
   // second call. Absent while it loads, and the line simply is not drawn.
-  const summary = summaryOf(item, health.data, process.stdout.columns ?? 80)
+  const summary = summaryOf(
+    item,
+    health.data,
+    process.stdout.columns ?? 80,
+    defaultBranch.data ?? undefined,
+  )
   const sizeParts = health.data ? sizePartsOf(health.data) : null
+
+  // The line as cells, in fixed order, with the absent ones dropped — so the
+  // renderer joins what survived instead of asking about each pair.
+  const summaryCells: { key: string; text: string }[] = [
+    { key: "size", text: summary.size },
+    { key: "files", text: summary.files },
+    { key: "draft", text: summary.draft },
+    { key: "head", text: summary.head },
+    { key: "base", text: summary.base },
+    { key: "trail", text: summary.trail },
+  ].filter((c): c is { key: string; text: string } => !!c.text)
 
   const checkLabel = (c: PrCheck) =>
     c.workflowName
@@ -269,29 +304,48 @@ export const PrView = ({
       {/* Above the tabs, never below: below, it would read as belonging to the
           active panel, which is exactly the claim not being made.
 
-          Three tiers, because two were not enough for five facts of two kinds.
-          The size is bold, additions in `colors.success` and deletions in
+          Four tiers now, not three, because the base branch earned one of its
+          own. The size is bold, additions in `colors.success` and deletions in
           `colors.error` — sign and digits painted together, the shape every
           diffstat since `git` has drawn, in the two tokens the health glyphs
           already spend on this screen. The file count is the other half of
-          "how big" and steps down to plain; everything after it is provenance
-          and stays dim. Why one colour per sign is now fine, and what it used
-          to be, is in `pr-summary` beside `sizeOf`. The dividers stay dim
-          throughout so the cells read as cells. */}
-      {summary.size || summary.files || summary.rest ? (
+          "how big" and steps down to plain. Provenance is dim. And `→ base`
+          sits back up at PLAIN, because it appears only when the base is NOT
+          the repo's default — a fact worth stopping for cannot live in the tier
+          this file defines as "look at deliberately or not at all". The head
+          branch beside it stays dim: it is not the notable half and must not
+          change appearance depending on what it targets.
+
+          Why one colour per sign is now fine, why the base gets no hue at all,
+          and why suppression beats always-drawing-it-brighter are all in
+          `pr-summary`. The dividers stay dim throughout so the cells read as
+          cells — which is also why they are derived from the kept cells here
+          rather than written out per pair: a fifth cell that can be absent
+          turns hand-written conditional dividers into a combinatorial mess. */}
+      {summaryCells.length ? (
         <Box>
-          {sizeParts ? (
-            <Text bold>
-              <Text color={colors.success}>{sizeParts.added}</Text>{" "}
-              <Text color={colors.error}>{sizeParts.removed}</Text>
-            </Text>
-          ) : null}
-          {summary.size && (summary.files || summary.rest) ? (
-            <Text dimColor> · </Text>
-          ) : null}
-          {summary.files ? <Text>{summary.files}</Text> : null}
-          {summary.files && summary.rest ? <Text dimColor> · </Text> : null}
-          {summary.rest ? <Text dimColor>{summary.rest}</Text> : null}
+          {summaryCells.map(({ key, text }, i) => (
+            <React.Fragment key={key}>
+              {i > 0 ? (
+                <Text dimColor>
+                  {separatorBefore(
+                    key as keyof Summary,
+                    summaryCells[i - 1]!.key as keyof Summary,
+                  )}
+                </Text>
+              ) : null}
+              {key === "size" && sizeParts ? (
+                <Text bold>
+                  <Text color={colors.success}>{sizeParts.added}</Text>{" "}
+                  <Text color={colors.error}>{sizeParts.removed}</Text>
+                </Text>
+              ) : key === "files" || key === "base" ? (
+                <Text>{text}</Text>
+              ) : (
+                <Text dimColor>{text}</Text>
+              )}
+            </React.Fragment>
+          ))}
         </Box>
       ) : null}
       <Box marginBottom={1} marginTop={1}>

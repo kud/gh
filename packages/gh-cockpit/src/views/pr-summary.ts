@@ -97,43 +97,162 @@ export { sizeOf, sizePartsOf }
  * way. When the line will not fit, the HEAD branch is dropped and `→ base` kept:
  * under pressure, what am I merging INTO outranks what it is called. The numbers
  * are never truncated and the line never wraps.
+ *
+ * `defaultBranch` turns the arrow itself into the signal. A base that IS the
+ * repo's default is the answer you already assumed, and drawing it spends a cell
+ * on every PR to say nothing; a base that is not — `develop`, or a stacked
+ * branch — is precisely the fact you can be wrong about and never notice,
+ * because every other cell on this line reads identically either way. So the
+ * base is drawn only when it differs, and the presence of `→` means look.
+ *
+ * It arrives as a parameter rather than on `SummaryItem` or `PrHealthData`
+ * because it is neither: `SummaryItem` is what the ROW supplies and the row does
+ * not know it, and `PrHealthData` is one `gh pr view` payload, which has no
+ * default-branch field to carry (see `fetchDefaultBranch`). The host fetches it
+ * per repo and hands it in.
+ *
+ * `undefined` means DRAW THE BASE, which is what a repo with no default branch
+ * at all reports — so today's always-drawn behaviour is the fallback rather
+ * than a special case. A lookup that FAILED does not arrive here as
+ * `undefined`; `fetchDefaultBranch` throws so the caller's cache keeps its last
+ * good answer, because a blip resolving to `undefined` would flicker a
+ * suppressed cell back on.
+ *
+ * SUPPRESSION ALONE IS NOT ENOUGH, and the half that was nearly shipped without
+ * is the half that does the work. Presence cannot fire from inside the dim tier:
+ * `→ develop` wedged between two branch-shaped tokens, in a run already littered
+ * with `·`, at identical luminance, gives the eye no reason to stop. So `base`
+ * is returned as its own cell and drawn at the PLAIN tier while the head branch
+ * stays dim — two channels, presence and luminance, both already in this
+ * screen's vocabulary.
+ *
+ * NO HUE, deliberately, and this is the third colour ruling on this line so it
+ * is written down rather than left to be rediscovered. `warning` says something
+ * is wrong, and a PR onto `develop` on a repo with a develop flow is entirely
+ * correct — merely notable. There is no "notable" token, and inventing one
+ * spends a third channel on a fact two already carry. Colour is also the thing
+ * a colourblind reader cannot use as the only signal, which presence and
+ * luminance both survive.
+ *
+ * Why suppress at all, rather than always drawing it brighter: the draft note
+ * above says a cell that is usually empty teaches you to skip past it. A cell
+ * that is usually IDENTICAL teaches the same skip, faster. `→ main` on every
+ * pull request is the most efficient way there is to train a reader out of
+ * looking at that cell, so by the time it says `develop` they stopped weeks ago.
+ * Always-shown-and-dim is not the neutral option; it manufactures the blindness.
+ *
+ * Named cells rather than a generic list of `{ text, tier }` pairs: five known
+ * facts in a fixed order do not need a layout language, and `tier` as a value
+ * would be rendering vocabulary leaking into a module that decides content. A
+ * `null` cell means dropped or absent, which is also how the width ladder below
+ * reports what it gave up.
  */
+export type Summary = {
+  size: string | null
+  files: string | null
+  /** `~ draft`, dim, leading the provenance run. */
+  draft: string | null
+  /** The head branch, dim. */
+  head: string | null
+  /** `→ base`, PLAIN — null whenever the base is the default. */
+  base: string | null
+  /** Author and age, dim. */
+  trail: string | null
+}
+
+/** The cells in the fixed order the line draws them. */
+export const SUMMARY_KEYS = [
+  "size",
+  "files",
+  "draft",
+  "head",
+  "base",
+  "trail",
+] as const
+
+/**
+ * What separates a cell from the one actually before it — ` · ` everywhere,
+ * except between the head branch and the base, which take a bare space.
+ *
+ * `fix/turn-arrow → develop` is one fact in two cells: the arrow is already the
+ * separator, and a divider as well reads as a third item — `fix/turn-arrow · →
+ * develop` — splitting a pair the eye has always read as one. Cells exist here
+ * so the two can take different TIERS; that must not change what the line looks
+ * like when both are drawn.
+ *
+ * It takes the PREVIOUS KEPT KEY rather than just its own, and that is the whole
+ * subtlety. On a PR with no head branch recorded the base follows the file
+ * count, and a bare space there glues the arrow onto the wrong fact —
+ * `12 files → main`. The space is a property of the head/base PAIR, never of the
+ * base alone.
+ *
+ * Exported because the width arithmetic here and the renderer in `pr-view` must
+ * agree exactly: a line measured with one separator and drawn with another wraps
+ * at a width nothing predicted.
+ */
+export const separatorBefore = (
+  key: keyof Summary,
+  previous: keyof Summary | null,
+): string => (key === "base" && previous === "head" ? " " : DIVIDER)
+
+/** The cells, in order, joined exactly as the renderer will draw them. */
+export const joinCells = (cells: (string | null)[]): string => {
+  let line = ""
+  let previous: keyof Summary | null = null
+  cells.forEach((cell, i) => {
+    if (!cell) return
+    const key = SUMMARY_KEYS[i]!
+    line = line ? line + separatorBefore(key, previous) + cell : cell
+    previous = key
+  })
+  return line
+}
+
 export const summaryOf = (
   item: SummaryItem,
   data: PrHealthData | null | undefined,
   cols: number,
-): { size: string | null; files: string | null; rest: string } => {
+  defaultBranch?: string,
+): Summary => {
   const size = data ? sizeOf(data) : null
   const files = data ? filesOf(data) : null
-  const base = data?.baseRefName
+  const baseRef = data?.baseRefName
   const author = item.author ? item.author : null
   const opened = item.age ? `opened ${item.age} ago` : null
 
-  const branches = base
-    ? item.branch
-      ? `${item.branch} → ${base}`
-      : `→ ${base}`
-    : (item.branch ?? null)
-
-  const parts = (branch: string | null) =>
-    [branch, author, opened].filter((p): p is string => !!p)
-
-  const full = parts(branches)
-  const line = (ps: string[]) => ps.join(DIVIDER)
-  const width = (ps: string[]) =>
-    (size ? size.length + DIVIDER.length : 0) +
-    (files ? files.length + DIVIDER.length : 0) +
-    line(ps).length
+  const showBase = baseRef !== undefined && baseRef !== defaultBranch
+  const base = showBase ? `→ ${baseRef}` : null
 
   // A draft changes the meaning of everything in Health below it — "6 passed,
   // ready to merge" on a draft is a genuine misread — so it goes first, and as a
   // prefix rather than a column because it is rare: a cell that is usually empty
   // teaches you to skip past it.
-  const draft = item.health === "draft"
-  const prefix = draft ? `~ draft${DIVIDER}` : ""
+  const draft = item.health === "draft" ? `~ draft` : null
 
-  if (width(full) + prefix.length <= cols)
-    return { size, files, rest: prefix + line(full) }
-  const shortened = parts(base ? `→ ${base}` : null)
-  return { size, files, rest: prefix + line(shortened) }
+  const trail =
+    [author, opened].filter((p): p is string => !!p).join(DIVIDER) || null
+
+  const widthOf = (cells: (string | null)[]) => joinCells(cells).length
+
+  const full: Summary = {
+    size,
+    files,
+    draft,
+    head: item.branch ?? null,
+    base,
+    trail,
+  }
+
+  if (widthOf([size, files, draft, full.head, base, trail]) <= cols) return full
+
+  // The one rung the ladder has ever had: the head branch goes and everything
+  // else stays. It is still the only elastic cell — `→ base` now appears solely
+  // when it is notable, so under pressure it outranks the name of what is being
+  // merged, exactly as it did when the base was always drawn.
+  //
+  // Note this ladder is ONE step and always has been: if the remainder still
+  // exceeds `cols`, the line wraps and the "never wraps" claim above fails.
+  // That is true on a PR with no suppression anywhere near it, so it is not this
+  // change's to fix — see the issue tracking the inverted ladder.
+  return { ...full, head: null }
 }

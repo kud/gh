@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import type { PrHealthData } from "@kud/gh"
 
-import { summaryOf } from "./pr-summary.js"
+import { joinCells, summaryOf, type Summary } from "./pr-summary.js"
 
 /*
  * The one-line answer to "what IS this pull request", under the title and above
@@ -33,23 +33,34 @@ const item = {
 
 const WIDE = 200
 
+/*
+ * What the renderer will draw, in order, with the absent cells dropped — so a
+ * spec about the LINE can stay a spec about the line even though the cells are
+ * returned separately for their tiers.
+ */
+const line = (s: Summary) =>
+  joinCells([s.size, s.files, s.draft, s.head, s.base, s.trail])
+
 describe("summaryOf", () => {
   it("reads as size, files, branches, author and age", () => {
-    const { size, files, rest } = summaryOf(item, health(), WIDE)
-    expect(size).toBe("+412 -38")
-    expect(files).toBe("12 files")
-    expect(rest).toBe("fix/turn-arrow → main · kud · opened 3d ago")
+    const s = summaryOf(item, health(), WIDE)
+    expect(s.size).toBe("+412 -38")
+    expect(s.files).toBe("12 files")
+    expect(line(s)).toBe(
+      "+412 -38 · 12 files · fix/turn-arrow → main · kud · opened 3d ago",
+    )
   })
 
   /*
-   * Three cells, not one string: the renderer draws the size bold, green and red,
-   * the file count plain, the rest dim. A tier cannot be expressed inside a
-   * joined line, so the split has to happen here.
+   * Cells, not one string: the renderer draws the size bold in green and red,
+   * the file count plain, the base plain, provenance dim. A tier cannot be
+   * expressed inside a joined line, so the split has to happen here.
    */
   it("hands the file count back on its own, out of the dim run", () => {
-    const { files, rest } = summaryOf(item, health(), WIDE)
-    expect(rest).not.toContain("files")
-    expect(files).toBe("12 files")
+    const s = summaryOf(item, health(), WIDE)
+    expect(s.files).toBe("12 files")
+    expect(s.trail).not.toContain("files")
+    expect(s.head).not.toContain("files")
   })
 
   it("says file, not files, for one", () => {
@@ -64,49 +75,107 @@ describe("summaryOf", () => {
 
   /*
    * A draft changes the meaning of everything in Health below it — "6 passed,
-   * ready to merge" on a draft is a genuine misread — so it leads. A prefix
-   * rather than a column because it is rare, and a cell that is usually empty
-   * teaches you to skip past it.
+   * ready to merge" on a draft is a genuine misread — so it leads. A cell of its
+   * own rather than a column because it is rare, and a cell that is usually
+   * empty teaches you to skip past it.
    */
   it("leads the dim run with draft, in the inbox row's own glyph", () => {
-    const { rest } = summaryOf({ ...item, health: "draft" }, health(), WIDE)
-    expect(rest.startsWith("~ draft · ")).toBe(true)
+    const s = summaryOf({ ...item, health: "draft" }, health(), WIDE)
+    expect(s.draft).toBe("~ draft")
+    expect(line(s)).toContain("12 files · ~ draft · fix/turn-arrow")
   })
 
   it("says nothing about draft on an ordinary PR", () => {
-    expect(summaryOf(item, health(), WIDE).rest).not.toContain("draft")
+    expect(summaryOf(item, health(), WIDE).draft).toBeNull()
   })
 
   /*
-   * The branch pair is the only elastic element, so it is the only one that
-   * gives way — and it gives way in a specific direction. Under pressure, what
-   * am I merging INTO outranks what the branch is called.
+   * THE BASE IS SUPPRESSED WHEN IT IS THE DEFAULT, so the arrow's presence is
+   * the signal. `→ main` on every pull request trains a reader out of looking at
+   * that cell, and by the time it says `develop` they stopped weeks ago.
+   */
+  it("says nothing about the base when it is the repo default", () => {
+    const s = summaryOf(item, health(), WIDE, "main")
+    expect(s.base).toBeNull()
+    expect(line(s)).toBe(
+      "+412 -38 · 12 files · fix/turn-arrow · kud · opened 3d ago",
+    )
+  })
+
+  it("draws the base when it is not the repo default", () => {
+    const s = summaryOf(item, health({ baseRefName: "develop" }), WIDE, "main")
+    expect(s.base).toBe("→ develop")
+    expect(s.head).toBe("fix/turn-arrow")
+  })
+
+  /*
+   * The base comes back as its own cell precisely so the renderer can lift it
+   * out of the dim tier. If it were ever folded back in with the head branch,
+   * presence would be firing from inside the run it needs to stand out from.
+   */
+  it("keeps the base apart from the head branch so they can be drawn apart", () => {
+    const s = summaryOf(item, health({ baseRefName: "develop" }), WIDE, "main")
+    expect(s.head).not.toContain("→")
+    expect(s.head).not.toContain("develop")
+  })
+
+  /*
+   * An unknown default means DRAW IT — a repo with no default branch at all
+   * reports `undefined`, and so does a caller that has not fetched yet. A failed
+   * lookup never arrives here as `undefined`: `fetchDefaultBranch` throws, so the
+   * cache keeps its last good answer rather than flickering the cell back on.
+   */
+  it("draws the base when no default branch is known", () => {
+    expect(summaryOf(item, health(), WIDE).base).toBe("→ main")
+    expect(summaryOf(item, health(), WIDE, undefined).base).toBe("→ main")
+  })
+
+  /*
+   * The head branch is the only elastic element, so it is the only one that
+   * gives way — and under pressure, what am I merging INTO outranks what the
+   * branch is called. That ordering survives suppression: the base is now drawn
+   * only when it is notable, which makes it the more worth keeping, not less.
    */
   it("drops the head branch and keeps the base when the line will not fit", () => {
     const long = {
       ...item,
       branch: "feature/an-extremely-long-branch-name-here",
     }
-    const { rest } = summaryOf(long, health(), 48)
-    expect(rest).toContain("→ main")
-    expect(rest).not.toContain("feature/an-extremely-long-branch-name-here")
+    const s = summaryOf(long, health(), 48)
+    expect(s.base).toBe("→ main")
+    expect(s.head).toBeNull()
   })
 
   it("never truncates the numbers to make room", () => {
-    const { size } = summaryOf(item, health(), 20)
-    expect(size).toBe("+412 -38")
+    expect(summaryOf(item, health(), 20).size).toBe("+412 -38")
   })
 
   it("draws nothing about size while the fetch is still in flight", () => {
     // The line is rendered from whatever is known; an unanswered fetch means no
     // size rather than a placeholder claiming zero.
-    const { size, rest } = summaryOf(item, null, WIDE)
-    expect(size).toBeNull()
-    expect(rest).toBe("fix/turn-arrow · kud · opened 3d ago")
+    const s = summaryOf(item, null, WIDE)
+    expect(s.size).toBeNull()
+    expect(line(s)).toBe("fix/turn-arrow · kud · opened 3d ago")
   })
 
   it("survives a PR with no branch recorded", () => {
-    const { rest } = summaryOf({ ...item, branch: undefined }, health(), WIDE)
-    expect(rest).toContain("→ main")
+    const s = summaryOf({ ...item, branch: undefined }, health(), WIDE)
+    expect(s.head).toBeNull()
+    expect(s.base).toBe("→ main")
+  })
+
+  /*
+   * The bare space between head and base belongs to the PAIR, not to the base.
+   * With no head branch the base follows the file count, and a space there would
+   * glue the arrow onto the wrong fact — `12 files → main`.
+   */
+  it("keeps a full divider before the base when no head branch precedes it", () => {
+    const s = summaryOf({ ...item, branch: undefined }, health(), WIDE)
+    expect(line(s)).toBe("+412 -38 · 12 files · → main · kud · opened 3d ago")
+  })
+
+  it("joins head and base with the arrow alone, not a divider", () => {
+    const s = summaryOf(item, health({ baseRefName: "develop" }), WIDE, "main")
+    expect(line(s)).toContain("fix/turn-arrow → develop · kud")
   })
 })
