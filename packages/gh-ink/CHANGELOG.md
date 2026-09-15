@@ -1,5 +1,71 @@
 # @kud/gh-ink
 
+## 0.57.0
+
+### Minor Changes
+
+- 4d5f45b: `q`, `esc` and `backspace` belong to the app now, bound once at the root through `@kud/ink-ui`'s `useAppKeys`. The browse screen publishes a _peel_ instead of claiming the keys itself.
+
+  Ink runs every active `useInput` on every key, with no order and no propagation — so "who gets `esc`" cannot be settled by layering handlers. It is settled by there being one claimant, and there were five for `q` and eight for `esc`.
+
+  **A hole this closes for free:** during the cold-fetch loading phase **nothing bound `q` at all**. `App` returns above the browse screen and the empty/failed screen only mounts once a fetch has resolved, so a slow first load could be left only with ctrl+c. The hook sits above every phase, so it now answers there too.
+
+  **Two behaviour changes you will notice.** `q` in the repo picker quits, where it previously did nothing at all — the picker's branch returned unconditionally and swallowed it. And `esc` with the repo picker open over a search now closes the picker; before, the arms were written in source order rather than priority order, so an inner layer plus a filter meant one press cleared the filter and left the inner layer standing.
+
+  The peel is a plain function per screen — a priority order over that screen's own booleans, published through a ref — and deliberately not a back stack, which `@kud/ink-ui`'s own manual is explicit about. The search field has no arm in it: the root hook is inactive while a text field has focus, so `esc` there never reaches the peel and the field's own handler stays live. That inactivity is also what keeps `q` a letter while you are typing.
+
+  `hidden` keeps both of its jobs — don't render, and don't act on keys. It looks like one boolean doing two things, but the listen half is not simply `isActive`: four lines above that guard re-arm the idle pulse deliberately, because a key pressed at a hidden tab is still evidence of a person at the keyboard. Gating the handler itself would have stopped an idle return from re-arming it.
+
+  The drill views are untouched in this release and still own their own `esc`; the root defers to them and behaviour inside a drill is unchanged.
+
+- 2e307ca: The drill views hand `q` and `esc` back to the app. `esc` goes back one level, `q` quits from any depth, and the footers say so.
+
+  This is the second half of the navigation contract. `@kud/ink-ui`'s manual puts it plainly: _a view exported from a `*-ink` package takes `onBack` and never binds `esc` or `q` itself_ — the host's peel routes to it. Five views were binding both, which is why `q` inside a drill went _back_ rather than quitting, and why leaving the app from three levels down meant three presses of a key labelled "quit".
+
+  Each drill now publishes a **peel** through `DetailContext.registerPeel` — its own layers, innermost first, reporting whether there was one to close. When a drill says no, closing the drill is the root's next layer out. `FilePicker` and `CheckLogView` publish nothing at all, because they are leaves: they push no layers, so the drill above closes them.
+
+  `AiLauncher` is the exception that proves the shape. It is not a leaf — agent → placement is two screens — so it publishes just the step it can pop itself, and backing out of the placement returns to the agent list rather than throwing the launcher away. Its `step` stays inside it, where it belongs; lifting it into both callers would have put the launcher's internal state in two places that do not own it.
+
+  **What you will notice:** `q` in a drill now quits instead of going back, and every drill footer reads `esc back` rather than `q/esc back`. A reply box is unaffected — the root stands its keys down while a text field has focus, so `q` types a `q` and backspace deletes.
+
+  The `process.exit(0)` after `runHere()` in the AI panel is deliberately untouched. It is not a quit binding: a shell command is taking the terminal over, and Ink's async unmount would race the handover.
+
+- 7f5a616: Three cells on the inbox row stop spending the middle tier on nothing: a label every row in the section carries is suppressed, the age pair reads `6d (1w)` rather than `6d · 1w`, and the repo name in a section rule steps out of the furniture tier.
+
+  The row has exactly three neutrals — default for the answer, `secondary` for context, `dimColor` for furniture — and the trailing band had stopped reading as three of anything. Each of these is the same fault: a tier spent on something that says nothing, or withheld from something that does.
+
+  **The label cell.** `impliedLabels` already suppresses a label a repo's convention puts on every issue, because a label on every row is the group header repeated. It is keyed on REPO, which is right for a repo convention and blind to uniformity that comes from the QUERY — a `label:plan` view spanning five repos draws `plan` on all sixty rows while only the one repo in the config is exempt. The section axis is now measured too, over `section.items` rather than the visible window (a cell that appears as you scroll is worse than one always there) and only where the section holds more than one row (one row makes every label trivially uniform, and suppressing there would hide the only classification on screen). What this costs when it is wrong is not a wasted cell but a wasted tier: a tone the eye meets on every single row is calibrated to and filed as background, so a uniform label teaches the reader that `secondary` means nothing — and every varied label further down the list inherits that.
+
+  **The age pair.** It was `6d · 1w`, on the argument that the left value is by construction the smaller of the two and that the invariant teaches the order without a legend, a colour or a second glyph column. That fails twice. Knowing which value is smaller is not knowing which value is _which_ — monotonicity establishes that an ordering exists and says nothing about what the two quantities are. And it only reads as ordered inside one unit: `0m · 1d` is obviously ordered, while `6d · 1w` needs weeks converted to days before the ordering is even visible, and cross-unit pairs are the common case rather than the edge, because GitHub ages cross units within a fortnight. So the one worked example that would teach the pattern is the one almost never on screen. A parenthetical is read as subordinate to the number beside it by everyone, which kills the "two peers separated by a dot" reading: the bare value is the age, the parenthetical the lifetime. It costs nothing — both forms are seven columns — and it frees the `·` to mean one thing everywhere else on the row.
+
+  The pair is also tiered now. Both halves were `dimColor`, which said "you may skip this" about the half you are actually scanning for. Last-activity takes `secondary`, the parenthetical stays furniture. The parentheses carry the meaning alone for a reader who sees no colour; the tier only reinforces them.
+
+  **The section rule.** `── kud/gh ───` drew the repo name and the dashes at the same tier, so the one word on that line that answers "what am I looking at" was painted as skippable. The name takes `secondary`; the rules stay furniture. An active header keeps its own colour and bold.
+
+  No new token and no new hue anywhere in this — every change moves a cell between the three neutrals the row already has.
+
+### Patch Changes
+
+- a59a289: The turn column draws no rightward arrow. `→` is a blank now, `←` is kept, and the row's colour literals go through the design system's tokens.
+
+  The cursor sits at column 0 and the turn cell at column 4, and both were small rightward points. The collision is not that two marks are close together — it is that they **pointed the same way while only one of them is on every row**. At scan speed the eye is asking "which row am I on", and a rightward mark four columns in, present on some rows and not others, was a second candidate answer to that question.
+
+  Substituting a different rightward glyph would patch the symptom and land on a different neighbour — `▸` beside `◆` is two filled blobs in adjacent cells. Blanking separates the pair by **direction**, which is a shape channel and therefore survives the colourblind invariant `health-display.ts` exists to enforce; a hue change would not. Nothing else on the row is a horizontal arrow — not the health map, the transit frames, the merge sparkle, the thread glyph or the tag — and the tree run `└─` is furniture two tiers down and present on every nested row, which is what makes it scenery rather than a competitor.
+
+  Nothing the cell was carrying is lost. `→` said "you spoke last, nothing is being asked of you", which is the _absence_ of a claim — and absence already draws as a blank here, exactly as `none` health does. The band header says it in words, the unresolved-thread cell is already quiet in that state, and the explain action has room for a sentence. What it buys is a sparse column whose only ink is `←`, the one state that is a claim on you.
+
+  The accepted cost, stated rather than discovered: "you spoke last" and "we never learned who spoke" now draw alike. The second is a fetch fact rather than a domain one, and neither is actionable, so it is not worth a column in the aligned zone.
+
+  Three text sites moved with it, or the interface would go on teaching a glyph it no longer draws: the two explain lines lose their `(→)`, and the `?` legend drops that row. The pin gains a legend row for the first time — it has always sat in this column while the modal documented ten health states, two arrows, and nothing about the `+` beside them. A stale reference in the pin's own explain line, still naming the `!` it was moved off when it collided with `conflict`, is corrected to `+`.
+
+  Separately, fifteen hardcoded colour literals in the row — `"cyan"`, `"red"`, `"green"` — now go through `colors.info`, `colors.error` and `colors.success`. They render identically today; the point is that a literal stops tracking the token the moment the token moves.
+
+- Updated dependencies [c1115f3]
+- Updated dependencies [4c8bc86]
+- Updated dependencies [cac544b]
+  - @kud/gh@0.17.0
+  - @kud/gh-workflow@0.12.1
+
 ## 0.56.0
 
 ### Minor Changes

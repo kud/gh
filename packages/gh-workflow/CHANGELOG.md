@@ -1,5 +1,32 @@
 # @kud/gh-workflow
 
+## 0.12.1
+
+### Patch Changes
+
+- c1115f3: The inbox windows `reviewThreads` at `last: 20` and selects `totalCount` beside it, taking the whole query from 114 points to 54.
+
+  The window was `first: 50` because fifty is a round number. It is also the dominant cost on every PR-bearing source, because it multiplies beneath five searches at once — the same multiplication the `myPRs` cap and the `minimal` shape were both introduced to fight, left untouched in the one selection that spends the most. Measured 2026-09-09 on a live account, the whole document, same selections that ship: a window of 50 cost 114 points at 27,230 nodes, 20 cost 54, and 10 cost 34. The anchor is free — `first: 20` and `last: 20` both measure 8 points on `myPRs`, so taking the window from the other end costs nothing. Against 5,000 points an hour that is 92 loads where there were 44, on a query a naive poll has previously killed the board by refreshing.
+
+  The data never justified fifty. Across 13 pull-request rows on that account the deepest carried **two** review threads and the median carried none — nothing above ten on either PR source. Twenty keeps ten times it — the step down to ten buys three more points and spends the only headroom there is against the next pull request that gets busy, and `kud/ambre#69` carried 67 threads while it was open.
+
+  `totalCount` is what makes the narrower window safe rather than merely cheap, and it is the half that has to ship with it. A window smaller than the world is the trap `sourceCoverage` already exists for one level up: count what came back, call it the total, and a truncated row reads as complete. `@kud/gh-workflow`'s `threadsTotal` now reads the scalar, falling back to `nodes.length` only for a caller whose own query omits it — so a PR carrying twenty-four threads reports twenty-four rather than twenty. The coverage this buys is on the COUNT alone: `isResolved` beyond the window is still unseen, so a PR past twenty threads can under-report unresolved ones to `computeHealth`. That is the direction to fail in, and it is why the window keeps room for a busy PR rather than for a quiet week.
+
+- cac544b: The review-thread window is anchored at the **newest** threads. It was taking the oldest, which made a busy pull request read as clear while a reviewer was waiting.
+
+  `first: N` on a Relay connection returns the OLDEST N, and the inbox had been asking that way since the window was introduced. Verified on `kud/ambre#69`, which carried 67 review threads and was open for eleven days: `reviewThreads(first: 3)` returns threads first commented on at 2025-08-12, while `last: 3` returns 2025-08-20 and 2025-08-23. For the whole time that pull request sat in the inbox, the mapper was handed the oldest 50 and never saw the newest 17 — and its newest ten alone carry eight unresolved threads.
+
+  Both consumers in `@kud/gh-workflow`'s `map.ts` were wrong, in different directions and both in the unsafe one. `conversationOf` builds `lastEventAt` as a max over thread comment times, so the whose-move clock read stale by days on exactly the pull requests with live discussion. Worse, `computeHealth` tests `unresolvedThreads > 0` — and threads get RESOLVED over time, so sampling the oldest end systematically sampled the threads most likely to be resolved already. The token fell through to `waiting` or `approved` and the row read clear. A false `threads` costs a glance; a false clear costs a missed review.
+
+  `last` biases both the other way, and costs exactly what `first` cost at the same window size. The query-side pin lives in `@kud/gh`'s `inbox.test.ts` and the consumer-side pin in `@kud/gh-workflow`'s `map.test.ts`, so they fail together if the anchor is ever swapped back for symmetry with the other windows in that file — a change that would compile cleanly and silently reintroduce the false clear.
+
+  `GHDetail` also gains `threadsSampled`, how many threads the fetch actually returned, beside the `threadsTotal` that now reads the connection's own count. Two numbers rather than a truncation flag, so a consumer can say how many it is not showing rather than only that something was cut. One honest limit remains: `totalCount` counts resolved and unresolved alike and GitHub offers no `isResolved` argument, so `unresolvedThreads` past the window is permanently a sample.
+
+- Updated dependencies [c1115f3]
+- Updated dependencies [4c8bc86]
+- Updated dependencies [cac544b]
+  - @kud/gh@0.17.0
+
 ## 0.12.0
 
 ### Minor Changes
