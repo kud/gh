@@ -191,6 +191,108 @@ const frameOf = async (item: GHItem, withSidebar: boolean) => {
 const frameFor = (labels: string[] | undefined, withSidebar = false) =>
   frameOf(issue(labels), withSidebar)
 
+/* A whole section at once, so uniformity across rows is what is under test. */
+const frameOfSection = async (items: GHItem[]) => {
+  const sections: Section[] = [
+    { id: "in-progress", label: "In progress", items },
+  ]
+  const stdout = new FakeStdout(COLS + 4, 30)
+  const stdin = new FakeStdin()
+  const instance = render(
+    <App
+      fetcher={async () => ({ sections, login: "kud" })}
+      title="cockpit"
+    />,
+    {
+      stdout: stdout as never,
+      stdin: stdin as never,
+      debug: true,
+      exitOnCtrlC: false,
+      patchConsole: false,
+    },
+  )
+  await settle()
+  await settle()
+  const frame = stdout.lastFrame()
+  instance.unmount()
+  instance.cleanup()
+  return frame
+}
+
+/*
+ * A label on EVERY row of a section classifies nothing — it is the section
+ * header repeated once per row. `impliedLabels` already suppresses those, keyed
+ * on repo, which is right for a repo convention and blind to uniformity that
+ * comes from the QUERY: a `label:plan` view spanning five repos draws `plan` on
+ * every row while only the repo in the config is exempt.
+ *
+ * What it costs is not a wasted cell but a wasted TIER. The row has three
+ * neutrals and the label cell spends the middle one; a tone met on every single
+ * row is calibrated to and filed as background, so a uniform label teaches the
+ * reader that `secondary` means nothing — and the varied labels further down
+ * inherit that.
+ */
+describe("a label every row in the section carries", () => {
+  const row = (n: number, labels: string[], repo: string): GHItem => ({
+    ...issue(labels),
+    number: n,
+    repo,
+    url: `https://github.com/${repo}/issues/${n}`,
+  })
+
+  it("is suppressed even when no repo declares it implied", async () => {
+    const frame = await frameOfSection([
+      row(1, ["plan"], "kud/gh"),
+      row(2, ["plan"], "kud/ink-ui"),
+      row(3, ["plan"], "kud/jira-cli"),
+    ])
+    expect(impliedLabels("kud/gh")).not.toContain("plan")
+    expect(frame).not.toContain(TAG)
+  })
+
+  it("keeps the labels that actually vary", async () => {
+    configureInbox({ labelPriority: ["plan", "spike"] })
+    const frame = await frameOfSection([
+      row(1, ["plan", "spike"], "kud/gh"),
+      row(2, ["plan"], "kud/ink-ui"),
+    ])
+    expect(frame).toContain("spike")
+    expect(frame).not.toContain("plan")
+  })
+
+  /*
+   * One row makes every label trivially uniform, and suppressing there would
+   * hide the only classification on screen.
+   */
+  it("says nothing about uniformity in a section of one", async () => {
+    const frame = await frameOfSection([row(1, ["plan"], "kud/gh")])
+    expect(frame).toContain(`${TAG} plan`)
+  })
+})
+
+/*
+ * `6d (1w)` — active 6d ago, open for 1w. It was `6d · 1w`, on the argument
+ * that the left value is by construction the smaller and that the invariant
+ * teaches the order without a legend. Knowing which value is SMALLER is not
+ * knowing which is WHICH, and the invariant is only visible inside one unit —
+ * `6d · 1w` needs weeks converted to days before it even reads as ordered, and
+ * cross-unit pairs are the common case rather than the edge.
+ */
+describe("the age cell", () => {
+  it("subordinates the lifetime to the last-activity age", async () => {
+    const frame = await frameOf(heavy([]), false)
+    expect(frame).toContain("6d (1w)")
+    expect(frame).not.toContain("6d · 1w")
+  })
+
+  it("collapses to one value when nothing has touched the row", async () => {
+    const untouched = { ...heavy([]), activityAge: "1w", age: "1w" }
+    const frame = await frameOf(untouched, false)
+    expect(frame).toContain("1w")
+    expect(frame).not.toContain("(1w)")
+  })
+})
+
 describe("a row carrying labels", () => {
   it("draws nothing at all — glyph included — when none were fetched", async () => {
     // `minimal` omits the selection, so the field VANISHES rather than arriving
@@ -284,6 +386,6 @@ describe("a row carrying labels", () => {
     // The title is elided in the MIDDLE, so assert its head rather than a span
     // truncation would cut through.
     expect(tight).toContain("PROJ-1125: Wire")
-    expect(tight).toContain("6d · 1w")
+    expect(tight).toContain("6d (1w)")
   })
 })

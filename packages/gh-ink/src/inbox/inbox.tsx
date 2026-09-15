@@ -1943,7 +1943,17 @@ const RepoHeaderRow = ({
     <Box marginTop={gap ? 1 : 0}>
       <Text color="cyan">{active ? "❯ " : "  "}</Text>
       <Text dimColor={!active}>{"── "}</Text>
-      <Text dimColor={!active} bold={active}>
+      {/* The repo name is the answer to "what am I looking at"; the rules either
+          side of it are furniture. They were the same tier, so the one word on
+          this line that carries anything was painted as skippable. `secondary`
+          — the middle neutral, no new token — while the `──` runs stay in the
+          furniture tier. An active header keeps bold and its own colour and is
+          untouched. */}
+      <Text
+        dimColor={false}
+        color={active ? undefined : colors.secondary}
+        bold={active}
+      >
         {repo}
       </Text>
       <Text dimColor={!active}>{" " + rule}</Text>
@@ -2287,11 +2297,21 @@ const ItemRow = ({
   sparkFrame = 0,
   cols = COLS,
   markerCols = 0,
+  uniformLabels = [],
 }: {
   item: AnyItem
   active: boolean
   gap?: boolean
   login?: string
+  /**
+   * Labels carried by EVERY label-bearing row in this section, measured once by
+   * the list. Suppressed here for the same reason `impliedLabels` suppresses a
+   * repo's conventional ones — a label on every row classifies nothing — but on
+   * the section axis, which catches uniformity that comes from the query rather
+   * than from a repo convention. Defaulted so a host that does not measure it
+   * keeps exactly the behaviour it had.
+   */
+  uniformLabels?: readonly string[]
   /**
    * Width of the task rows' marker cell in THIS list — the widest `marker`
    * any of them carries, measured once by the list so every row draws the
@@ -2597,15 +2617,41 @@ const ItemRow = ({
   // to the single-glyph health vocabulary instead of spelling out "unresolved".
   const unresolvedLabel =
     item.unresolved > 0 ? `\u{f086} ${item.unresolved}` : ""
-  // `3h · 2d` — active 3h ago, open for 2d. The left value is by construction
-  // the smaller of the two (nothing can be touched before it exists), which is
-  // what teaches the order without a legend, a colour or a second glyph column.
-  // Collapsed to one value when they agree, so an untouched row does not read
-  // as `2d · 2d`.
-  const ageLabel =
+  // `3h (2d)` — active 3h ago, open for 2d. Collapsed to one value when they
+  // agree, so an untouched row does not read as `2d (2d)`.
+  //
+  // PARENTHESES, NOT A DIVIDER, and the argument this replaces was wrong in a
+  // way worth recording. It ran: the left value is by construction the smaller
+  // of the two (nothing can be touched before it exists), and that invariant
+  // teaches the order without a legend, a colour or a second glyph column.
+  //
+  // It fails twice. Knowing which value is SMALLER is not knowing which value is
+  // WHICH — monotonicity establishes that an ordering exists and says nothing
+  // about what the two quantities are. And it only reads as ordered inside one
+  // unit: `0m · 1d` is obviously ordered, while `6d · 1w` needs weeks converted
+  // to days before the ordering is even visible. Cross-unit pairs are the COMMON
+  // case here rather than the edge, because GitHub ages cross units within a
+  // fortnight — so the one worked example that would teach the pattern is the
+  // one almost never on screen.
+  //
+  // A parenthetical is read as subordinate to the number beside it by every
+  // reader who has ever read anything, which kills the "two peers separated by a
+  // dot" reading that was causing the confusion: the bare value is THE age, the
+  // parenthetical is the lifetime. It costs nothing — `6d · 1w` and `6d (1w)`
+  // are both seven columns, so the budget below is unchanged — and it frees the
+  // `·` to mean one thing everywhere else on the row.
+  //
+  // Kept as a pair as well as a string: the string is what the width budget
+  // measures (one cell, one number of columns), the pair is what the renderer
+  // needs to paint the two halves at different tiers. Deriving the split back
+  // out of the string would mean parsing punctuation the line above just wrote.
+  const agePair =
     item.activityAge && item.activityAge !== item.age
-      ? `${item.activityAge} · ${item.age}`
-      : item.age
+      ? { activity: item.activityAge, lifetime: item.age }
+      : null
+  const ageLabel = agePair
+    ? `${agePair.activity} (${agePair.lifetime})`
+    : item.age
   const mergedLabel = merged ? "merged" : ""
   // Never both: a row merged from here is already being announced, and stacking
   // GONE onto MERGED would report one departure twice.
@@ -2635,7 +2681,11 @@ const ItemRow = ({
    * "classified" with no classification behind it. Filtered after the slice it
    * would take a slot and then vanish.
    */
-  const implied = impliedLabels(item.repo)
+  // Two axes of "says nothing", unioned: the repo's own convention, and
+  // whatever this SECTION happens to make uniform. See `uniformLabels` above
+  // for why the second exists — a `label:plan` view spanning five repos is
+  // uniform by construction while only one of them is in the config.
+  const implied = [...impliedLabels(item.repo), ...uniformLabels]
   const labelNames = (item.labels ?? [])
     .filter((l) => !implied.includes(l))
     .sort((a, b) => labelPriority(a) - labelPriority(b) || a.localeCompare(b))
@@ -2854,7 +2904,10 @@ const ItemRow = ({
           unknown turn (no login, no lastActor): a count we cannot attribute is
           still worth seeing. */}
       {unresolvedLabel && !givingUp.threads ? (
-        <Text bold={!spokeLast} color={spokeLast ? colors.secondary : colors.accent}>
+        <Text
+          bold={!spokeLast}
+          color={spokeLast ? colors.secondary : colors.accent}
+        >
           {"  " + unresolvedLabel}
         </Text>
       ) : null}
@@ -2863,9 +2916,24 @@ const ItemRow = ({
           {"  by " + item.author}
         </Text>
       ) : null}
-      {/* Age last, so every row ends on the date — a consistent right edge. */}
+      {/* Age last, so every row ends on the date — a consistent right edge.
+          Two tiers inside one cell, because the two halves are not equally
+          worth reading: last-activity is the live fact you scan for, lifetime is
+          background you consult. Painting both `dimColor` said "skip all of
+          this" about the half you came here for. Last-activity takes
+          `secondary` — the middle neutral the label cell already spends, no new
+          token and no hue — and the parenthetical stays in the furniture tier.
+          The parentheses carry the meaning on their own for a reader who sees no
+          colour at all; the tier only reinforces them. */}
       {ageLabel && !givingUp.age ? (
-        <Text dimColor>{"  " + ageLabel}</Text>
+        agePair ? (
+          <>
+            <Text color={colors.secondary}>{"  " + agePair.activity}</Text>
+            <Text dimColor>{` (${agePair.lifetime})`}</Text>
+          </>
+        ) : (
+          <Text color={colors.secondary}>{"  " + ageLabel}</Text>
+        )
       ) : null}
       {/* Except for the three seconds a row is on its way out. */}
       {/* Both suppressed behind an overlay — see the task row for why a pill
@@ -3685,9 +3753,7 @@ const BrowseScreen = ({
     items: [],
   }
   const searched =
-    search != null
-      ? filterBySearch([rawSection], search, login)
-      : [rawSection]
+    search != null ? filterBySearch([rawSection], search, login) : [rawSection]
   const filtered =
     repoFilter.size > 0 ? filterByRepos(searched, repoFilter, login) : searched
   const section = filterActive
@@ -3721,6 +3787,43 @@ const BrowseScreen = ({
       i.kind === "task" ? Math.max(w, [...(i.marker ?? "")].length) : w,
     0,
   )
+  /*
+   * Labels every row in this section carries, and which therefore classify
+   * nothing — the section header repeated once per row.
+   *
+   * `impliedLabels` already does this, keyed on REPO, which is the right axis
+   * for a repo convention (`kud/plans` puts `plan` on everything) and cannot
+   * catch uniformity that comes from the QUERY. A `label:plan` view spanning
+   * five repos draws `plan` on all sixty rows while only the one repo in the
+   * config is exempt. Same fact, different axis, so it is computed here and
+   * unioned with the repo's own inside the row.
+   *
+   * The cost of getting it wrong is not a wasted cell, it is a wasted TIER. The
+   * row has exactly three neutrals — default for the answer, `secondary` for
+   * context, `dimColor` for furniture — and the label cell spends the middle
+   * one. A tone the eye meets on every single row is calibrated to and filed as
+   * background, so a uniform label does not merely say nothing, it teaches the
+   * reader that `secondary` means nothing, and the varied labels further down
+   * the list inherit that.
+   *
+   * Over the whole section rather than the visible window, for the same reason
+   * `markerCols` above is: a cell that appears as you scroll is worse than one
+   * that is always there.
+   *
+   * Only when the section has more than one row — one row makes every label
+   * trivially uniform, and suppressing there would hide the only classification
+   * on screen.
+   */
+  const labelBearing = section.items.filter(
+    (i): i is GHItem => i.kind === "pr" || i.kind === "issue",
+  )
+  const uniformLabels =
+    labelBearing.length > 1
+      ? (labelBearing[0]?.labels ?? []).filter((name: string) =>
+          labelBearing.every((i) => (i.labels ?? []).includes(name)),
+        )
+      : []
+
   const hasMore = viewStart + visibleCount < section.items.length
   const activeItem = section.items[cursor]
 
@@ -4106,11 +4209,14 @@ const BrowseScreen = ({
     // behaviours for one bar. Same contract as ink-ui's useTabs, which this
     // screen does not mount because its tab is a position over sections that
     // come and go, clamped separately above.
-    const step = key.leftArrow || (key.tab && key.shift) ? -1 : key.rightArrow || key.tab ? 1 : 0
+    const step =
+      key.leftArrow || (key.tab && key.shift)
+        ? -1
+        : key.rightArrow || key.tab
+          ? 1
+          : 0
     if (step !== 0)
-      setTabIdx(
-        (i) => (i + step + localSections.length) % localSections.length,
-      )
+      setTabIdx((i) => (i + step + localSections.length) % localSections.length)
     // Ink's exit, not process.exit: it unmounts and hands the terminal back
     // (alternate screen included) instead of leaving whatever was on it.
     if (input === "q") exit()
@@ -4686,6 +4792,10 @@ const BrowseScreen = ({
                   sparkFrame={sparkFrame}
                   cols={listCols}
                   markerCols={markerCols}
+                  // Computed against section.items for the same reason as
+                  // markerCols and prefix above: uniformity is a property of the
+                  // group, not of whatever the scroll happens to be showing.
+                  uniformLabels={uniformLabels}
                   // `i > 0` is window-relative and stays that way: the window's
                   // first row never draws its gap, and fitCount does not charge
                   // for one. The rule itself is gapsAbove, shared with fitCount so
