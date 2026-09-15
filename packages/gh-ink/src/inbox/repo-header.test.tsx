@@ -203,6 +203,38 @@ describe("the fence on screen", () => {
     expect(line).toMatch(/^│ ❯ ── kud\/ambre ─+ *│$/)
   })
 
+  /*
+   * THE TURN COLUMN DRAWS NO RIGHTWARD ARROW, at any cursor position.
+   *
+   * `❯` sits at column 0 and the turn cell at column 4, and both used to be
+   * small rightward points — so a `→` present on some rows and not others was a
+   * second candidate answer to "which row am I on", which is the question the
+   * cursor exists to answer. `←` (their move) is kept and points the other way;
+   * "you spoke last" is the absence of a claim and draws as a blank, the same
+   * way `none` health already does.
+   *
+   * Asserted across every ROW rather than one cell, because the failure this
+   * guards against is a rightward arrow reappearing anywhere in the aligned
+   * zone — a cell-scoped assertion would miss it arriving in a neighbour. Scoped
+   * to rows and not the whole frame because the footer's `←→ tab` hint is a
+   * legitimately different use of the glyph: those are keycaps, not a turn.
+   */
+  it("draws no rightward arrow on any row", async () => {
+    const { stdout, done } = mount()
+    await settle()
+    await settle()
+    const rows = stdout
+      .lastFrame()
+      .replace(ANSI, "")
+      .split("\n")
+      .filter((l) => /#\d/.test(l))
+    done()
+    // `pr()` above has no lastActor, so these rows take the blank arm. The point
+    // is that no arm of the turn cell may produce `→`.
+    expect(rows.length).toBeGreaterThan(0)
+    for (const row of rows) expect(row).not.toContain("→")
+  })
+
   // A selectable row that advertises nothing is a row nobody presses — and on a
   // fence the fixed strip was actively wrong, offering `m` (which opens nothing
   // there) over the two keys that do.

@@ -79,7 +79,11 @@ const tallest = (frame: string) => frame.split("\n").filter(Boolean).length
 // wraps splits one of these across two lines, so a substring test over the whole
 // frame catches the failure exactly — nothing else about the layout is asserted.
 const LABELS = [
-  "You spoke last · waiting on them",
+  // `→` is a blank now, so its legend row is gone — see the turn cell. These two
+  // are what the turn column promises today, and the pin has a row for the first
+  // time despite having always sat in that column.
+  "They spoke last · reply owed",
+  "Pinned · stays under Your move",
   "your repos + filed by you",
   "switch to branch here",
   "open repo in new pane",

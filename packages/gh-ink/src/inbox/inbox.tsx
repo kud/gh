@@ -273,7 +273,7 @@ const turnSentences = (item: GHItem, login: string): string[] => {
   // sentence below would otherwise answer a question nobody asked.
   if (item.pinned)
     return [
-      "You pinned this (!). It stays under Your move until you unpin it, whatever else the row says.",
+      "You pinned this (+). It stays under Your move until you unpin it, whatever else the row says.",
     ]
   if (!item.lastActor) return ["Nothing has been said on it yet."]
   const d = item.detail
@@ -287,10 +287,10 @@ const turnSentences = (item: GHItem, login: string): string[] => {
   const them = item.author && item.author !== login ? item.author : null
   if (!them)
     return [
-      `You spoke last (→), ${when}. It is waiting on a reviewer, not on you.`,
+      `You spoke last, ${when}. It is waiting on a reviewer, not on you.`,
     ]
 
-  const lines = [`You spoke last (→), ${when}. The ball is with ${them}.`]
+  const lines = [`You spoke last, ${when}. The ball is with ${them}.`]
   if (d?.lastCommitAt && d.lastEventAt && d.lastCommitAt < d.lastEventAt)
     lines.push(
       `Nothing has been pushed since ${relativeTime(
@@ -1780,7 +1780,7 @@ const InboxHeader = ({
           {statusSeg}
         </Text>
       ) : null}
-      <Text color="cyan" dimColor>
+      <Text color={colors.info} dimColor>
         {"╌".repeat(fill)}
       </Text>
     </Box>
@@ -1854,7 +1854,7 @@ export const CiStatusLine = ({
   if (state.kind === "error")
     return (
       <Box marginBottom={1}>
-        <Text color="red" bold>
+        <Text color={colors.error} bold>
           {"  ✗ "}
         </Text>
         <Text dimColor>{`${name}  no build / not configured`}</Text>
@@ -1941,7 +1941,7 @@ const RepoHeaderRow = ({
   const rule = "─".repeat(fill)
   return (
     <Box marginTop={gap ? 1 : 0}>
-      <Text color="cyan">{active ? "❯ " : "  "}</Text>
+      <Text color={colors.info}>{active ? "❯ " : "  "}</Text>
       <Text dimColor={!active}>{"── "}</Text>
       {/* The repo name is the answer to "what am I looking at"; the rules either
           side of it are furniture. They were the same tier, so the one word on
@@ -2398,7 +2398,7 @@ const ItemRow = ({
   if (item.kind === "show-more")
     return (
       <Box>
-        <Text color="cyan">{active ? "❯ " : "  "}</Text>
+        <Text color={colors.info}>{active ? "❯ " : "  "}</Text>
         {/* The computed run, not a bare corner. A collapsed group under a
             non-last story still needs its ancestor stem, or its column breaks
             while every visible sibling keeps theirs. */}
@@ -2411,7 +2411,7 @@ const ItemRow = ({
   if (item.kind === "show-less")
     return (
       <Box>
-        <Text color="cyan">{active ? "❯ " : "  "}</Text>
+        <Text color={colors.info}>{active ? "❯ " : "  "}</Text>
         <Text dimColor>{prefix}</Text>
         <Text dimColor>{active ? "↵ " : "  "}</Text>
         <Text dimColor>show less</Text>
@@ -2467,7 +2467,7 @@ const ItemRow = ({
     )
     return (
       <Box marginTop={gap ? 1 : 0}>
-        <Text color="cyan">{active ? "❯ " : "  "}</Text>
+        <Text color={colors.info}>{active ? "❯ " : "  "}</Text>
         <Text dimColor>{prefix}</Text>
         {/* The branch this ticket opens, and it must come BEFORE the transit
             cell: the children draw their own glyph run immediately after this
@@ -2595,13 +2595,39 @@ const ItemRow = ({
   // two apart. The colourblind invariant health-display.ts states for its own
   // map has to hold ACROSS the adjacent cells too, not just within one, and
   // `pinMarkIsUnambiguous` in health-display.test.ts now pins that.
+  // `→` IS A BLANK, and that is a silhouette ruling rather than a tidy-up.
+  //
+  // The cursor is `❯` at column 0 and this cell sits at column 4 on a top-level
+  // row. Both were small rightward points, so at scan speed — when the eye is
+  // asking "which row am I on" — a rightward mark four columns in, present on
+  // some rows and not others, was a second candidate answer to that question.
+  // The collision is not that two marks are close; it is that they POINT THE
+  // SAME WAY while only one of them is on every row.
+  //
+  // Substituting another rightward glyph (`▸`, `›`, `»`) patches the symptom and
+  // lands on a different neighbour — `▸` beside `◆` is two filled blobs in
+  // adjacent cells. Blanking separates by DIRECTION, which is a shape channel
+  // and therefore survives the colourblind invariant that a hue swap would not.
+  // `←` points left; nothing else on the row is a horizontal arrow (not the
+  // health map, the transit frames, the merge sparkle, `\u{f086}` or
+  // `\u{f02b}`), and the tree run `└─` is furniture two tiers down.
+  //
+  // Nothing is lost that this cell was carrying. `→` said "you spoke last,
+  // nothing is being asked of you" — the ABSENCE of a claim, and absence already
+  // draws as a blank here (`none` health is `" "`). The band header says it in
+  // words, the thread cell is already quiet on `spokeLast`, and the explain
+  // action has room for a sentence. What it buys is a sparse column whose only
+  // ink is `←`, the one state that is a claim on you.
+  //
+  // The accepted cost: "you spoke last" and "we never learned who spoke" now
+  // draw alike. The second is a FETCH fact rather than a domain one — the same
+  // distinction `UNREAD_DISPLAY` makes — and neither is actionable, so it is not
+  // worth a column in the aligned zone.
   const [turnIcon, turnColor] = item.pinned
     ? [PIN_MARK, colors.accent]
-    : !login || !item.lastActor
-      ? [" ", "white"]
-      : spokeLast
-        ? ["→", colors.secondary]
-        : ["←", colors.accent]
+    : !login || !item.lastActor || spokeLast
+      ? [" ", colors.muted]
+      : ["←", colors.accent]
   const numStr = `#${item.number}`.padEnd(7)
   // Hide "by me" — the author suffix is only signal when it's someone else.
   const showAuthor = !!item.author && item.author !== login
@@ -2831,7 +2857,7 @@ const ItemRow = ({
 
   return (
     <Box>
-      <Text color="cyan">{active ? "❯ " : "  "}</Text>
+      <Text color={colors.info}>{active ? "❯ " : "  "}</Text>
       <Text dimColor>{prefix}</Text>
       <Text color={color as any} bold>
         {icon + " "}
@@ -3023,13 +3049,13 @@ export const ActionMenu = ({
       paddingX={1}
       marginTop={1}
     >
-      <Text color="cyan" bold>
+      <Text color={colors.info} bold>
         {title}
       </Text>
       <Text dimColor>{"─".repeat(32)}</Text>
       {actions.map((a, i) => (
         <Box key={a.label}>
-          <Text color="cyan">{i === cursor ? "❯ " : "  "}</Text>
+          <Text color={colors.info}>{i === cursor ? "❯ " : "  "}</Text>
           <Text bold={i === cursor}>{a.label}</Text>
           <Text dimColor>{"  " + a.hint}</Text>
         </Box>
@@ -3045,9 +3071,18 @@ export const ActionMenu = ({
 // vertically. Purely informational — any key closes it.
 // The turn column's vocabulary, kept beside healthLegend so the two read as
 // one system in the modal.
+// One row, not two: `→` is a blank now (see the turn cell), so a legend line
+// for it would teach a glyph the list never draws. The pin has never had a line
+// here at all, while sitting in this very column — the legend documented ten
+// health states and two arrows and said nothing about the `+` beside them.
+// Labels stay at or under ~30 columns. They share the modal's Status column with
+// `healthLegend`, whose longest is 26, so the widest label here sets that
+// column's width — and past about 32 the three-column layout stops fitting at
+// 130 and silently drops to two. `help-modal.test.ts` pins the three-column
+// case; if it starts failing after an edit here, this is why.
 const TURN_LEGEND: [string, string, string][] = [
-  ["←", colors.accent, "They spoke last · your turn"],
-  ["→", colors.secondary, "You spoke last · waiting on them"],
+  ["←", colors.accent, "They spoke last · reply owed"],
+  [PIN_MARK, colors.accent, "Pinned · stays under Your move"],
 ]
 
 // Tab meanings are supplied by the caller rather than hardcoded: home's tabs are
@@ -3340,7 +3375,7 @@ export const HelpModal = ({
       width={contentWidth + MODAL_CHROME_COLS}
     >
       <Box>
-        <Text color="cyan" bold>
+        <Text color={colors.info} bold>
           Legend
         </Text>
         {scrollable ? (
@@ -3422,7 +3457,7 @@ const RepoPicker = ({
       paddingX={1}
       minWidth={42}
     >
-      <Text color="cyan" bold>
+      <Text color={colors.info} bold>
         {`Filter by repo  (${selected.size} on)`}
       </Text>
       <Text dimColor>{"─".repeat(36)}</Text>
@@ -3432,7 +3467,7 @@ const RepoPicker = ({
         const active = idx === cursor
         return (
           <Box key={repo}>
-            <Text color="cyan">{active ? "❯ " : "  "}</Text>
+            <Text color={colors.info}>{active ? "❯ " : "  "}</Text>
             <Text color={on ? "green" : undefined}>{on ? "◉ " : "○ "}</Text>
             <Text bold={active}>{repo}</Text>
           </Box>
@@ -4705,9 +4740,9 @@ const BrowseScreen = ({
 
       {search != null ? (
         <Box marginBottom={1}>
-          <Text color="cyan">{"  / "}</Text>
+          <Text color={colors.info}>{"  / "}</Text>
           <Text>{search}</Text>
-          {searchInput ? <Text color="cyan">▏</Text> : null}
+          {searchInput ? <Text color={colors.info}>▏</Text> : null}
           <Text dimColor>{`   ${matchCount} match${
             matchCount !== 1 ? "es" : ""
           }${searchInput ? "  ↵ accept · esc clear" : "  esc clear"}`}</Text>
@@ -4835,7 +4870,7 @@ const BrowseScreen = ({
 
       <Box marginTop={1}>
         {flash ? (
-          <Text color="green">{flash}</Text>
+          <Text color={colors.success}>{flash}</Text>
         ) : (
           <FooterHints hints={hints} />
         )}
