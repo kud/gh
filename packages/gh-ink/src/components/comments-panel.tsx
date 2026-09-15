@@ -16,7 +16,7 @@ type FileLink = (path: string, line?: number) => string
 const clamp = (n: number, lo: number, hi: number) =>
   Math.max(lo, Math.min(n, hi))
 
-const commentLines = (
+export const commentLines = (
   { author, body }: Comment,
   width: number,
   fileLink: FileLink,
@@ -25,6 +25,8 @@ const commentLines = (
   const pad = " ".repeat(indent)
   // Frame each comment with a `── author ──────` rule — the same grouping vibe
   // as the glance's repo dividers — so comments are scannable, not a wall.
+  // A blank under the rule as well as over it: a body that opens with a
+  // heading or a bold line sat flush against the rule and read as part of it.
   const fill = Math.max(3, width - indent - author.length - 4)
   const lines: StyledLine[] = [
     {
@@ -35,6 +37,7 @@ const commentLines = (
         { text: " " + "─".repeat(fill), dim: true },
       ],
     },
+    { text: "" },
   ]
   const bodyLines = renderMarkdown(body, width - indent, fileLink)
   if (bodyLines.length === 0) lines.push({ text: pad + "(empty)", dim: true })
