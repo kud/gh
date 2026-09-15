@@ -1,5 +1,32 @@
 # @kud/gh-ink
 
+## 0.55.0
+
+### Minor Changes
+
+- e451025: Your own PRs band by what kind of move, not only whose.
+
+  From a review queue "your move" is one verb. On the tab of PRs you wrote it is three — merge it, work on it, finish writing it — and seven of yours under one `Your move (7)` header was true while saying nothing about which: two were green, one red, three were drafts sitting at the top because `sortItems` sinks drafts only within their repo. On the `authored` standing the two ends now peel off, ordered by cost to clear: `Ready to merge` (`approved`, which the health ladder already guarantees is green and quiet; or `waiting` on a repo you own), then `Your move`, `Unclassified`, `Their move`, and `Drafts` last. Repo grouping restarts inside each band as it always has; the review standings are untouched.
+
+  `bandOf` is exported beside `whoseMove` — the same six arguments, answering `Band`, which is `Move` plus `"merge"` and `"draft"`. The token beats the turn arrow for the two carve-outs (an approved PR whose reviewer said "squash please" is answered by merging; a commented-on draft is still a draft) and the pin beats both.
+
+- e72aee1: A row the search index forgets is held for five minutes.
+
+  GitHub's search is eventually consistent: a PR being re-indexed after a burst of updates — an `atlantis apply`, a status churn — drops out of `search` results for a fetch or two and comes back, with nothing about it changed. The inbox read every fetch as the whole truth, so one such fetch announced the row as gone and the next as new. Found 2026-09-15 on an open PR with two approvals and six green checks that one fetch omitted while a direct query returned it.
+
+  `reconcile` in gh-ink's diff carries forward any `pr` or `issue` row that was on the board and appears in no fresh section, in the section it had and beside the neighbour it had, stamped `GHItem.heldSince` on the first absence, until `HOLD_MS` (five minutes) has passed. Present anywhere in the fetch — another tab, or `done`, the positive sign it merged — and it is not held. Nothing marks a held row; the diff reads it as unchanged and the apply gate does not fire. Expiry leaves through the ordinary `out` at the fetch where the inbox stops believing. The hold survives a relaunch: the cache is written after reconciliation. Task rows and sampled sections are not held.
+
+- e72aee1: A task row can carry a one-cell mark before its key.
+
+  `TaskRow.marker` and `markerColor` — ink-ui `Tabs`' pair, meaning-named so the package grows no Jira vocabulary — draw in a fixed cell after the tree stem and before the key, where jira-ink's board draws its priority arrow. The list measures the cell once, over the whole section: every task row draws the same width or none, so a mark on one row never shifts the keys of the others, and a surface that marks nothing is drawn exactly as before.
+
+### Patch Changes
+
+- Updated dependencies [e451025]
+- Updated dependencies [e72aee1]
+- Updated dependencies [e72aee1]
+  - @kud/gh-workflow@0.12.0
+
 ## 0.54.0
 
 ### Minor Changes
