@@ -1,5 +1,60 @@
 # @kud/gh-cockpit
 
+## 0.6.0
+
+### Minor Changes
+
+- 2367989: The PR summary line degrades by dropping the least valuable cell rather than the only elastic one, so a narrow terminal no longer wraps a line the module says never wraps.
+
+  The header has always claimed "the numbers are never truncated and the line never wraps". The first half held; the second did not. The ladder was **one rung** — the head branch went, and everything else stayed — so there was no step at all between fitting and wrapping: once `kud · opened 3 months ago` exceeded the width on its own, nothing could give and the line wrapped.
+
+  The ranking, most expendable first, which is now the order cells are dropped: the **author**, because it is `kud` on very nearly every row of a solo cockpit; **`opened Nd ago`**, because staleness is the inbox's question and by the time you have drilled in you have already decided to look; then the **head branch**; and `→ base` is kept longest, because since the previous release it is drawn only when it is _not_ the repo default — so its presence already means it is the notable fact on the line.
+
+  That inverts what the old single rung sacrificed. It gave up the branch name and kept both provenance cells, which is backwards: it protected the two facts you can most afford to lose.
+
+  The size, file count and draft marker are never dropped. The numbers are never truncated, and a draft changes the meaning of the whole panel below the line.
+
+  `trail` on the returned `Summary` splits into `author` and `opened`, since dropping them independently is the whole point.
+
+- 4c8bc86: The PR summary line draws `→ base` only when the base is not the repo's default branch, and draws it a tier brighter than the provenance around it. The arrow's presence is now the signal.
+
+  A pull request onto `develop`, or onto a stacked base, read identically to an ordinary one in every other cell on that line — which made it exactly the fact you can be wrong about and never notice. The line exists to answer "what IS this pull request" before you start reading CI results, and it was silent on the one thing that changes the answer.
+
+  Suppression alone would not have done it. Presence cannot fire from inside the dim tier: `→ develop` wedged between two branch-shaped tokens, in a run already littered with `·`, at identical luminance, gives the eye no reason to stop — and this module's own header defines dim as "provenance you look at deliberately or not at all". So `base` comes back as its own cell and is drawn at the plain tier while the head branch stays dim. Two channels, presence and luminance, both already in this screen's vocabulary, and no hue spent: there is no "notable" colour token, a PR onto `develop` on a repo with a develop flow is entirely correct rather than wrong, and colour is the one channel a colourblind reader cannot use alone.
+
+  Why suppress rather than always draw it brighter: the draft marker's own rationale says a cell that is usually empty teaches you to skip past it. A cell that is usually **identical** teaches the same skip, faster. `→ main` on every pull request is the most efficient way there is to train a reader out of looking at that cell, so by the time it says `develop` they stopped weeks ago. Always-shown-and-dim was not the neutral option — it manufactured the blindness.
+
+  `@kud/gh` gains `fetchDefaultBranch`, a `gh repo view --json defaultBranchRef` call in its own module. It is a second call rather than a field on the health projection because `gh pr view --json` has no default-branch field at all — checked against the live field list on gh 2.100.0 — and because it is a per-repo fact that caches on a different key from anything per-PR. Cockpit keys it by repo through the drill cache, so the answer paints from disk immediately, revalidates behind it, and a repo that renames its default heals itself on the next drill-in. The call is mounted beside the health fetch and adds no wall clock.
+
+  It **throws** on a failed lookup rather than resolving `undefined`, and the distinction is load-bearing. `undefined` already means _draw the base_, so against a caller that revalidates on every mount a swallowed failure would redraw a cell that had been correctly suppressed — one network blip flickering `→ main` back onto a pull request it had been absent from. Answered-with-no-default and did-not-answer are now different outcomes.
+
+  The line was deliberately **not** given a new overflow ladder. It still has the one rung it has always had — the head branch goes, everything else stays — which remains right now that `→ base` appears only when it is notable. That the ladder is one step at all, so a narrow enough terminal wraps a line the module claims never wraps, is true today with no suppression anywhere near it, and is tracked separately.
+
+- 2e307ca: The drill views hand `q` and `esc` back to the app. `esc` goes back one level, `q` quits from any depth, and the footers say so.
+
+  This is the second half of the navigation contract. `@kud/ink-ui`'s manual puts it plainly: _a view exported from a `*-ink` package takes `onBack` and never binds `esc` or `q` itself_ — the host's peel routes to it. Five views were binding both, which is why `q` inside a drill went _back_ rather than quitting, and why leaving the app from three levels down meant three presses of a key labelled "quit".
+
+  Each drill now publishes a **peel** through `DetailContext.registerPeel` — its own layers, innermost first, reporting whether there was one to close. When a drill says no, closing the drill is the root's next layer out. `FilePicker` and `CheckLogView` publish nothing at all, because they are leaves: they push no layers, so the drill above closes them.
+
+  `AiLauncher` is the exception that proves the shape. It is not a leaf — agent → placement is two screens — so it publishes just the step it can pop itself, and backing out of the placement returns to the agent list rather than throwing the launcher away. Its `step` stays inside it, where it belongs; lifting it into both callers would have put the launcher's internal state in two places that do not own it.
+
+  **What you will notice:** `q` in a drill now quits instead of going back, and every drill footer reads `esc back` rather than `q/esc back`. A reply box is unaffected — the root stands its keys down while a text field has focus, so `q` types a `q` and backspace deletes.
+
+  The `process.exit(0)` after `runHere()` in the AI panel is deliberately untouched. It is not a quit binding: a shell command is taking the terminal over, and Ink's async unmount would race the handover.
+
+### Patch Changes
+
+- Updated dependencies [c1115f3]
+- Updated dependencies [4d5f45b]
+- Updated dependencies [4c8bc86]
+- Updated dependencies [2e307ca]
+- Updated dependencies [cac544b]
+- Updated dependencies [7f5a616]
+- Updated dependencies [a59a289]
+  - @kud/gh@0.17.0
+  - @kud/gh-workflow@0.12.1
+  - @kud/gh-ink@0.57.0
+
 ## 0.5.6
 
 ### Patch Changes
