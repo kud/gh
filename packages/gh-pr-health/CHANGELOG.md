@@ -1,5 +1,12 @@
 # @kud/gh-pr-health
 
+## 0.1.105
+
+### Patch Changes
+
+- Updated dependencies [8fc48e3]
+  - @kud/gh-ink@0.54.0
+
 ## 0.1.104
 
 ### Patch Changes
