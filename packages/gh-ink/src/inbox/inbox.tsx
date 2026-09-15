@@ -25,6 +25,7 @@ export type { InboxBudget }
 import { checkoutDirs, inboxConfig, profileOf } from "./config.js"
 import {
   diffSections,
+  reconcile,
   keyOf,
   rowKeyOfMark,
   summariseDiff,
@@ -2285,11 +2286,18 @@ const ItemRow = ({
   parent,
   sparkFrame = 0,
   cols = COLS,
+  markerCols = 0,
 }: {
   item: AnyItem
   active: boolean
   gap?: boolean
   login?: string
+  /**
+   * Width of the task rows' marker cell in THIS list — the widest `marker`
+   * any of them carries, measured once by the list so every row draws the
+   * same cell or none. See `TaskRow.marker`.
+   */
+  markerCols?: number
   /**
    * Columns available to this row, which is NOT always the frame width: a rail
    * beside the list takes its share, and a budget that does not know the rail is
@@ -2434,6 +2442,7 @@ const ItemRow = ({
         (item.pill ? pillWidth(item.pill) + 1 : 0) -
         (farewellLabel ? pillWidth(farewellLabel) + 2 : 0) -
         prefix.length -
+        (markerCols > 0 ? markerCols + 1 : 0) -
         12,
     )
     return (
@@ -2457,6 +2466,17 @@ const ItemRow = ({
         <Text bold color={transient ? TRANSIT_COLOUR[transient] : undefined}>
           {transitIcon + " "}
         </Text>
+        {/* The host's mark — a priority arrow — in its own fixed cell, never
+            folded into the transit cell: transit is refresh choreography that
+            is blank between refreshes, and a mark that vanished for the length
+            of an arrival animation is exactly the shift the cell exists to
+            prevent. Where the board draws it too: after the stem, before the
+            key, so the eye learns one place. */}
+        {markerCols > 0 ? (
+          <Text color={item.markerColor}>
+            {(item.marker ?? "").padEnd(markerCols) + " "}
+          </Text>
+        ) : null}
         {/* Stated in full every time, including when the same ticket heads two
             bands. Its PRs genuinely straddle them — the band reads each PR, not
             the ticket — and a dimmed key-only repeat was tried and dropped: it
@@ -3694,6 +3714,13 @@ const BrowseScreen = ({
   const viewStart = viewStarts[activeId] ?? 0
   const visibleCount = windowCount(section.items, viewStart, listHeight)
   const visibleItems = section.items.slice(viewStart, viewStart + visibleCount)
+  // Over the whole section, not the visible window: a marker cell that came
+  // and went as the list scrolled would shift every key in it.
+  const markerCols = section.items.reduce(
+    (w, i) =>
+      i.kind === "task" ? Math.max(w, [...(i.marker ?? "")].length) : w,
+    0,
+  )
   const hasMore = viewStart + visibleCount < section.items.length
   const activeItem = section.items[cursor]
 
@@ -4636,6 +4663,7 @@ const BrowseScreen = ({
                   }
                   sparkFrame={sparkFrame}
                   cols={listCols}
+                  markerCols={markerCols}
                   // `i > 0` is window-relative and stays that way: the window's
                   // first row never draws its gap, and fitCount does not charge
                   // for one. The rule itself is gapsAbove, shared with fitCount so
@@ -5123,7 +5151,18 @@ export const App = ({
     setSkippedForBudget(false)
     if (manual) setRefreshing(true)
     fetcher()
-      .then((fresh) => {
+      .then((fetched) => {
+        // Rows the search went quiet about are carried forward before anything
+        // reads the fetch — the cache included, so a held row survives a
+        // relaunch with its `heldSince` and the hold still expires on time.
+        const fresh = {
+          ...fetched,
+          sections: reconcile(
+            displayedSections.current,
+            fetched.sections,
+            Date.now(),
+          ),
+        }
         if (fresh.budget) setBudget(fresh.budget)
         // Applied at once rather than through the manual-apply gate. That gate
         // exists so the LIST cannot reshuffle under you mid-read; the rail holds
