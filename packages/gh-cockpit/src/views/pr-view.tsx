@@ -139,7 +139,8 @@ export const PrView = ({
     { key: "draft", text: summary.draft },
     { key: "head", text: summary.head },
     { key: "base", text: summary.base },
-    { key: "trail", text: summary.trail },
+    { key: "author", text: summary.author },
+    { key: "opened", text: summary.opened },
   ].filter((c): c is { key: string; text: string } => !!c.text)
 
   const checkLabel = (c: PrCheck) =>

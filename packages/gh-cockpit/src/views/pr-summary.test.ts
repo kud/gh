@@ -39,7 +39,7 @@ const WIDE = 200
  * returned separately for their tiers.
  */
 const line = (s: Summary) =>
-  joinCells([s.size, s.files, s.draft, s.head, s.base, s.trail])
+  joinCells([s.size, s.files, s.draft, s.head, s.base, s.author, s.opened])
 
 describe("summaryOf", () => {
   it("reads as size, files, branches, author and age", () => {
@@ -59,7 +59,7 @@ describe("summaryOf", () => {
   it("hands the file count back on its own, out of the dim run", () => {
     const s = summaryOf(item, health(), WIDE)
     expect(s.files).toBe("12 files")
-    expect(s.trail).not.toContain("files")
+    expect(s.author).not.toContain("files")
     expect(s.head).not.toContain("files")
   })
 
@@ -131,10 +131,12 @@ describe("summaryOf", () => {
   })
 
   /*
-   * The head branch is the only elastic element, so it is the only one that
-   * gives way — and under pressure, what am I merging INTO outranks what the
-   * branch is called. That ordering survives suppression: the base is now drawn
-   * only when it is notable, which makes it the more worth keeping, not less.
+   * THE LADDER, dropping from the bottom of a ranking. It was one rung — the head
+   * branch went and everything else stayed — which meant there was no step at all
+   * between "fits" and "wraps", and the header's "the line never wraps" was
+   * false for any terminal narrow enough. The ranking, most expendable first:
+   * the author, `opened Nd ago`, the head branch, and `→ base` kept longest
+   * because it is drawn only when it is notable at all.
    */
   it("drops the head branch and keeps the base when the line will not fit", () => {
     const long = {
@@ -144,6 +146,47 @@ describe("summaryOf", () => {
     const s = summaryOf(long, health(), 48)
     expect(s.base).toBe("→ main")
     expect(s.head).toBeNull()
+  })
+
+  it("gives up the author first — it is `kud` on nearly every row", () => {
+    // Wide enough for everything but the author.
+    const s = summaryOf(item, health(), 60)
+    expect(s.author).toBeNull()
+    expect(s.opened).toBe("opened 3d ago")
+    expect(s.head).toBe("fix/turn-arrow")
+  })
+
+  it("gives up the age second, before the branch it took to get there", () => {
+    const s = summaryOf(item, health(), 50)
+    expect(s.author).toBeNull()
+    expect(s.opened).toBeNull()
+    expect(s.head).toBe("fix/turn-arrow")
+  })
+
+  /*
+   * The floor. Below this the line cannot shrink further without truncating a
+   * number, which it never does — but it must still be ONE line, and it is:
+   * everything elastic is gone and what remains is fixed-width by construction.
+   */
+  it("keeps the base standing when everything elastic has gone", () => {
+    const s = summaryOf(item, health({ baseRefName: "develop" }), 10, "main")
+    expect(s.base).toBe("→ develop")
+    expect(s.head).toBeNull()
+    expect(s.author).toBeNull()
+    expect(s.opened).toBeNull()
+  })
+
+  /*
+   * The bug this ladder exists to fix: with one rung, a line whose remainder
+   * still exceeded `cols` had nowhere left to go and wrapped. Nothing narrower
+   * than the fixed cells may now exceed its own budget by an elastic cell.
+   */
+  it("never leaves an elastic cell standing over budget", () => {
+    for (const cols of [20, 30, 40, 50, 60, 70, 80]) {
+      const s = summaryOf(item, health({ baseRefName: "develop" }), cols, "main")
+      const elastic = [s.head, s.author, s.opened].filter(Boolean).length
+      if (line(s).length > cols) expect(elastic).toBe(0)
+    }
   })
 
   it("never truncates the numbers to make room", () => {

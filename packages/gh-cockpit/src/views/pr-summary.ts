@@ -93,10 +93,11 @@ export { sizeOf, sizePartsOf }
  * inbox's question — by the time you have drilled in you have already decided to
  * look.
  *
- * The branch pair is the only elastic element, so it is the only one that gives
- * way. When the line will not fit, the HEAD branch is dropped and `→ base` kept:
- * under pressure, what am I merging INTO outranks what it is called. The numbers
- * are never truncated and the line never wraps.
+ * When the line will not fit, cells are dropped from the bottom of a ranking —
+ * the author first, then `opened Nd ago`, then the head branch, with `→ base`
+ * kept longest because it is drawn only when it is notable at all. The numbers
+ * are never truncated and the line never wraps. See the ladder in `summaryOf`
+ * for why that second claim needed three rungs rather than one to be true.
  *
  * `defaultBranch` turns the arrow itself into the signal. A base that IS the
  * repo's default is the answer you already assumed, and drawing it spends a cell
@@ -156,8 +157,10 @@ export type Summary = {
   head: string | null
   /** `→ base`, PLAIN — null whenever the base is the default. */
   base: string | null
-  /** Author and age, dim. */
-  trail: string | null
+  /** The author's login, dim. First to go under pressure. */
+  author: string | null
+  /** `opened 3d ago`, dim. Second to go. */
+  opened: string | null
 }
 
 /** The cells in the fixed order the line draws them. */
@@ -167,7 +170,8 @@ export const SUMMARY_KEYS = [
   "draft",
   "head",
   "base",
-  "trail",
+  "author",
+  "opened",
 ] as const
 
 /**
@@ -229,10 +233,9 @@ export const summaryOf = (
   // teaches you to skip past it.
   const draft = item.health === "draft" ? `~ draft` : null
 
-  const trail =
-    [author, opened].filter((p): p is string => !!p).join(DIVIDER) || null
-
-  const widthOf = (cells: (string | null)[]) => joinCells(cells).length
+  const widthOf = (s: Summary) =>
+    joinCells([s.size, s.files, s.draft, s.head, s.base, s.author, s.opened])
+      .length
 
   const full: Summary = {
     size,
@@ -240,19 +243,41 @@ export const summaryOf = (
     draft,
     head: item.branch ?? null,
     base,
-    trail,
+    author,
+    opened,
   }
 
-  if (widthOf([size, files, draft, full.head, base, trail]) <= cols) return full
+  /*
+   * THE LADDER, dropping from the bottom of a ranking rather than sacrificing
+   * the one cell that happened to be elastic.
+   *
+   * It used to be a single rung — the head branch went, everything else stayed —
+   * on the reasoning that the branch pair was the only elastic element and that
+   * under pressure what you are merging INTO outranks what it is called. The
+   * ranking was right and the ladder was too short: if the remainder still
+   * exceeded `cols`, the line wrapped, which the header above flatly claims it
+   * never does. One rung means there is no step between "fits" and "wraps".
+   *
+   * The ranking, most expendable first, which is also the order these are
+   * dropped:
+   *
+   *   1. the author   — `kud` on very nearly every row of a solo cockpit
+   *   2. `opened Nd ago` — staleness is the INBOX's question, and by the time
+   *      you have drilled in you have already decided to look
+   *   3. the head branch
+   *   4. `→ base` — kept longest, because it is now drawn ONLY when it is not
+   *      the default, so its presence already means it is the notable fact
+   *
+   * Size, file count and the draft marker are never dropped: the numbers are
+   * never truncated, and a draft changes the meaning of the whole panel below.
+   */
+  const rungs: (keyof Summary)[] = ["author", "opened", "head"]
 
-  // The one rung the ladder has ever had: the head branch goes and everything
-  // else stays. It is still the only elastic cell — `→ base` now appears solely
-  // when it is notable, so under pressure it outranks the name of what is being
-  // merged, exactly as it did when the base was always drawn.
-  //
-  // Note this ladder is ONE step and always has been: if the remainder still
-  // exceeds `cols`, the line wraps and the "never wraps" claim above fails.
-  // That is true on a PR with no suppression anywhere near it, so it is not this
-  // change's to fix — see the issue tracking the inverted ladder.
-  return { ...full, head: null }
+  const line = { ...full }
+  for (const cell of rungs) {
+    if (widthOf(line) <= cols) return line
+    line[cell] = null
+  }
+  return line
+
 }
