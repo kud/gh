@@ -131,7 +131,11 @@ const before: Section[] = [
     items: [
       pr(1, STAYS, "approved"),
       pr(2, MOVES, "approved"),
-      pr(3, LEAVES, "waiting"),
+      // Already held: the search went quiet about it a hold ago (a relaunch
+      // from cache carries the stamp), so the refresh below is the fetch
+      // where the inbox stops believing and reports it gone. A FIRST absence
+      // is never a departure any more — see `reconcile`.
+      { ...pr(3, LEAVES, "waiting"), heldSince: 1 },
     ],
   },
 ]

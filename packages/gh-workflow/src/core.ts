@@ -134,6 +134,16 @@ export type GHItem = {
    */
   pinned?: boolean
   /**
+   * When a fetch first came back without this row while nothing said it had
+   * merged or closed — GitHub's search index is eventually consistent, and a
+   * document being re-indexed after a burst of updates drops out of results
+   * for a while. A surface that holds the previous fetch carries the row
+   * forward stamped with this, and lets it go once the hold has run out. For
+   * the machine only: nothing draws it, and the diff reads the row as
+   * unchanged. Epoch milliseconds.
+   */
+  heldSince?: number
+  /**
    * What this row STANDS FOR, when that differs from what it is. Absent means
    * the row is a unit of work and is counted as one.
    *
@@ -191,6 +201,18 @@ export type TaskRow = {
   /** @deprecated Legacy spelling of `depth: 1`. See `GHItem.indent`. */
   indent?: boolean
   instanceKey?: string
+  /**
+   * A one-cell mark drawn in a fixed column before the key — a Jira priority
+   * `▲` / `▼`, say — and the colour to paint it, the same pair ink-ui's `Tabs`
+   * takes. Meaning-named rather than `priority`, because this package has no
+   * Jira vocabulary and the host decides what earns the cell. Every task row
+   * in a list gets one of the same width or none: a mark on one row alone
+   * shifts every key after it, and a list that moves when a row gains a mark
+   * is a list you have to re-find. A row that has nothing to say passes a
+   * blank of the same width rather than omitting the field.
+   */
+  marker?: string
+  markerColor?: string
   /**
    * Trailing annotation, rendered dim after the summary — a recurrence marker,
    * a source hint, anything secondary to the title. Its own node rather than

@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest"
 
-import { diffSections, keyOf, markKey, summariseDiff } from "./diff.js"
+import {
+  diffSections,
+  keyOf,
+  markKey,
+  reconcile,
+  summariseDiff,
+  HOLD_MS,
+} from "./diff.js"
 import type { GHItem, Section } from "./inbox.js"
 
 /*
@@ -308,5 +315,119 @@ describe("a sampled section", () => {
     ]
     expect(diffSections(before, after).transients.get(markKey("mine", "u/c")))
       .toBeUndefined()
+  })
+})
+
+describe("reconcile", () => {
+  /*
+   * GitHub's search index is eventually consistent: a PR being re-indexed after
+   * a burst of updates drops out of results for a fetch or two, then comes
+   * back, and nothing about it changed. Found 2026-09-15 on an open PR with two
+   * approvals and six green checks that one fetch omitted while a direct query
+   * returned it. Read as ground truth, that is a row that leaves and comes
+   * back with the diff announcing both.
+   */
+  const T0 = 1_000_000
+  const urls = (sections: Section[]) =>
+    sections.map((s) => [
+      s.id,
+      s.items.map((i) => (keyOf(i) ?? i.kind) + ("heldSince" in i && i.heldSince ? "*" : "")),
+    ])
+
+  it("keeps a row the fetch went quiet about, where it was", () => {
+    const prev = section([a, b, c])
+    const held = reconcile(prev, section([a, c]), T0)
+    expect(urls(held)).toEqual([["open", ["u/a", "u/b*", "u/c"]]])
+    // And the diff then sees nothing leaving.
+    expect(diffSections(prev, held).counts.removed).toBe(0)
+  })
+
+  it("lets a row go once it has been quiet for the hold", () => {
+    const prev = section([a, b, c])
+    const first = reconcile(prev, section([a, c]), T0)
+    // Still held, still with its FIRST absence as the stamp.
+    const again = reconcile(first, section([a, c]), T0 + HOLD_MS - 1)
+    expect(urls(again)).toEqual([["open", ["u/a", "u/b*", "u/c"]]])
+    const expired = reconcile(again, section([a, c]), T0 + HOLD_MS + 1)
+    expect(urls(expired)).toEqual([["open", ["u/a", "u/c"]]])
+  })
+
+  it("forgets the hold the moment the row is back", () => {
+    const prev = section([a, b, c])
+    const held = reconcile(prev, section([a, c]), T0)
+    const back = reconcile(held, section([a, b, c]), T0 + 1)
+    expect(urls(back)).toEqual([["open", ["u/a", "u/b", "u/c"]]])
+  })
+
+  // Present anywhere in the fresh fetch is not quiet: another tab is a move
+  // for the diff to narrate, and `done` is the positive sign it merged.
+  it("does not hold a row that moved or merged", () => {
+    const prev = section([a, b])
+    const moved = reconcile(
+      prev,
+      [
+        { id: "open", label: "Open", items: [a] },
+        { id: "done", label: "Done", items: [b] },
+      ],
+      T0,
+    )
+    expect(urls(moved)).toEqual([
+      ["open", ["u/a"]],
+      ["done", ["u/b"]],
+    ])
+  })
+
+  // Hosts only push sections that have rows, so a tab emptied by one quiet
+  // fetch comes back with its held row rather than vanishing whole.
+  it("brings back a section the fetch left out", () => {
+    const prev: Section[] = [
+      { id: "open", label: "Open", items: [a] },
+      { id: "mine", label: "Mine", items: [b] },
+    ]
+    const held = reconcile(prev, [{ id: "open", label: "Open", items: [a] }], T0)
+    expect(urls(held)).toEqual([
+      ["open", ["u/a"]],
+      ["mine", ["u/b*"]],
+    ])
+  })
+
+  // A sampled section's rows leave because the window scrolled; holding them
+  // would only grow the window. And a task row's source is consistent.
+  it("holds neither sampled rows nor task rows", () => {
+    const task = {
+      kind: "task" as const,
+      key: "SHOP-1",
+      summary: "s",
+      url: "t/1",
+      status: "Open",
+      age: "",
+      indent: false,
+    }
+    const prev: Section[] = [
+      { id: "issues", label: "Issues", items: [a, b], sampled: { total: 95 } },
+      { id: "tasks", label: "Tasks", items: [task] },
+    ]
+    const fresh: Section[] = [
+      { id: "issues", label: "Issues", items: [a], sampled: { total: 95 } },
+    ]
+    expect(urls(reconcile(prev, fresh, T0))).toEqual([["issues", ["u/a"]]])
+  })
+
+  it("puts a held row back under the neighbour it had", () => {
+    const header = { kind: "repo-header" as const, repo: "kud/a", age: "", indent: false }
+    const header2 = { kind: "repo-header" as const, repo: "kud/b", age: "", indent: false }
+    const prev: Section[] = [
+      { id: "open", label: "Open", items: [header, a, b, header2, c] },
+    ]
+    // The fresh layout gained a row above; the old index would land `b`
+    // under the wrong header, the anchor keeps it beside `a`.
+    const d = item({ url: "u/d", number: 4 })
+    const fresh: Section[] = [
+      { id: "open", label: "Open", items: [header, d, a, header2, c] },
+    ]
+    const held = reconcile(prev, fresh, T0)
+    expect(urls(held)).toEqual([
+      ["open", ["repo-header", "u/d", "u/a", "u/b*", "repo-header", "u/c"]],
+    ])
   })
 })

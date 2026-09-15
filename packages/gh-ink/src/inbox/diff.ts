@@ -315,3 +315,119 @@ export const tabsOfMarks = (
     }
   return out
 }
+
+/**
+ * How long a row that vanished from every search is believed to still be
+ * there. Re-indexing after a status churn is seconds to a minute; five minutes
+ * covers it with margin and bounds the damage when the row really is gone.
+ * Time rather than a refresh count, because `r` pressed twice in ten seconds
+ * would spend a count-based grace on nothing.
+ */
+export const HOLD_MS = 5 * 60 * 1000
+
+// Where a held row goes back in: after the nearest row ABOVE it in `prev` that
+// is still in the fresh section, so it stays under the repo header it had. Only
+// when nothing above it survived does it fall back to its old index.
+const anchorIndex = (
+  prevItems: AnyItem[],
+  prevIndex: number,
+  freshItems: AnyItem[],
+): number => {
+  const freshAt = new Map<string, number>()
+  freshItems.forEach((item, i) => {
+    const key = keyOf(item)
+    if (key) freshAt.set(key, i)
+  })
+  for (let i = prevIndex - 1; i >= 0; i--) {
+    const key = keyOf(prevItems[i]!)
+    const at = key === null ? undefined : freshAt.get(key)
+    if (at !== undefined) return at + 1
+  }
+  return Math.min(prevIndex, freshItems.length)
+}
+
+/**
+ * Carry forward the rows a fetch went quiet about.
+ *
+ * GitHub's search index is eventually consistent: a PR being re-indexed after
+ * a burst of updates — an `atlantis apply`, a status churn — drops out of
+ * `search` results for a while, then comes back, and nothing about the PR
+ * changed. Read as ground truth, one such fetch reports the row as gone and the
+ * next as new, with the diff narrating both. Found 2026-09-15 on an open PR
+ * with two approvals and six green checks that the cockpit's fetch omitted
+ * while a direct query returned it.
+ *
+ * So a GitHub row that was on the board and is now in NO fresh section is kept
+ * in the section it had, stamped `heldSince` on the first absence, until
+ * `HOLD_MS` has passed. Present anywhere in `fresh` — another tab, or `done`,
+ * which is the positive sign it merged or closed — and it is not held: a move
+ * is the diff's to narrate, and the `out` on a merge is honest. Expiry leaves
+ * through that same `out` at the fetch where we stop believing, never
+ * retroactively.
+ *
+ * Only `pr` and `issue` rows: they are the ones a search index stands behind.
+ * A task row comes from a source whose answer is consistent, and a ticket that
+ * left its section did so because its status moved. Rows in a `sampled`
+ * section are not held either — there a row leaves because the window
+ * scrolled, and holding it would only grow the window.
+ *
+ * Nothing visible marks a held row. As far as anyone knows it is unchanged,
+ * and "the index did not return this one" is a fact about GitHub's replica,
+ * not about the PR — nothing the reader can act on.
+ */
+export const reconcile = (
+  prev: Section[],
+  fresh: Section[],
+  now: number,
+  holdMs: number = HOLD_MS,
+): Section[] => {
+  if (prev.length === 0) return fresh
+  const present = new Set<string>()
+  for (const section of fresh)
+    for (const item of section.items) {
+      const key = keyOf(item)
+      if (key) present.add(key)
+    }
+
+  const bySection = new Map<string, { item: GHItem; index: number }[]>()
+  const labels = new Map<string, { label: string; at: number }>()
+  prev.forEach((section, at) => {
+    if (section.sampled) return
+    section.items.forEach((item, index) => {
+      if (item.kind !== "pr" && item.kind !== "issue") return
+      const row = item as GHItem
+      if (present.has(row.url)) return
+      const heldSince = row.heldSince ?? now
+      if (now - heldSince > holdMs) return
+      const held = { ...row, heldSince }
+      const list = bySection.get(section.id)
+      if (list) list.push({ item: held, index })
+      else bySection.set(section.id, [{ item: held, index }])
+      labels.set(section.id, { label: section.label, at })
+    })
+  })
+  if (bySection.size === 0) return fresh
+
+  const out = fresh.map((section) => {
+    const rows = bySection.get(section.id)
+    if (!rows) return section
+    bySection.delete(section.id)
+    const prevItems = prev.find((s) => s.id === section.id)?.items ?? []
+    const items = [...section.items]
+    for (const row of [...rows].sort((a, b) => a.index - b.index))
+      items.splice(anchorIndex(prevItems, row.index, items), 0, row.item)
+    return { ...section, items }
+  })
+  // A section the fresh fetch omitted because it came back empty — hosts only
+  // push sections that have rows — comes back with its held rows, where it
+  // stood. Its headers are not resurrected: the held rows are all it holds.
+  for (const [id, rows] of bySection) {
+    const { label, at } = labels.get(id)!
+    out.splice(Math.min(at, out.length), 0, {
+      id,
+      label,
+      items: rows.sort((a, b) => a.index - b.index).map((r) => r.item),
+    })
+  }
+  return out
+}
