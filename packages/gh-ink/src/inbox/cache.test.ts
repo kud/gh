@@ -39,6 +39,22 @@ describe("glance cache", () => {
     expect(readCache(KEY)?.login).toBe("kud")
   })
 
+  // A fresh cache is the launch that never refetches, so a rail left out of
+  // the file is a rail that does not exist until the next refresh.
+  it("round-trips the rail beside the rows", async () => {
+    const sidebar = {
+      title: "Initiatives",
+      rows: [{ key: "PROJ-1", label: "x", live: 2, done: 1, total: 3 }],
+    }
+    writeCache(KEY, { sections, login: "kud", sidebar })
+    expect(readCache(KEY)?.sidebar).toEqual(sidebar)
+  })
+
+  it("reads an entry with no rail as one without a rail, not a broken one", async () => {
+    writeCache(KEY, { sections, login: "kud" })
+    expect(readCache(KEY)?.sidebar).toBeUndefined()
+  })
+
   it("treats a just-written entry as fresh", async () => {
     writeCache(KEY, { sections, login: "kud" })
     expect(isFresh(readCache(KEY))).toBe(true)

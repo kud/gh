@@ -34,7 +34,8 @@ import {
 import type { Transient } from "./diff.js"
 import {
   SidePanel,
-  SIDEBAR_COLS,
+  railWidth,
+  type LiveLabel,
   type Sidebar,
 } from "../components/side-panel.js"
 import {
@@ -3431,6 +3432,7 @@ const BrowseScreen = ({
   transients,
   onTabChange,
   sidebar,
+  liveLabel,
 }: {
   brand: string
   sections: Section[]
@@ -3444,6 +3446,8 @@ const BrowseScreen = ({
    * its own to answer with.
    */
   sidebar?: Sidebar
+  /** The host's words for a row's `live` count — see `SidePanel`. */
+  liveLabel?: LiveLabel
   /** URLs of rows merged from this cockpit, still inside their hold. */
   mergedUrls?: string[]
   /** URLs of rows closed or dismissed from here, still inside their hold. */
@@ -3716,7 +3720,7 @@ const BrowseScreen = ({
   // unbounded pulse survived review. The ticker is gated on the marks as a whole
   // and bounded by PULSE_SETTLE_MS instead; see it for what that cost.
   // Closed by default, even where a host supplies one. The rail costs
-  // SIDEBAR_COLS out of the list, and the list is what the cockpit is opened for —
+  // railWidth(COLS) out of the list, and the list is what the cockpit is opened for —
   // a roadmap consulted now and then does not get to narrow every row all day.
   // `i` brings it in, and the footer advertises that key while it is away.
   const [railOpen, setRailOpen] = useState(false)
@@ -3735,7 +3739,8 @@ const BrowseScreen = ({
   // What the LIST has, which is the frame minus whatever the rail took. Computed
   // once here and handed down: a row cannot see the rail, and a budget that does
   // not know about it overflows by exactly the rail's width.
-  const listCols = showRail ? COLS - SIDEBAR_COLS : COLS
+  const railCols = railWidth(COLS)
+  const listCols = showRail ? COLS - railCols : COLS
 
   const [sparkFrame, setSparkFrame] = useState(0)
   const sparkling =
@@ -4655,6 +4660,8 @@ const BrowseScreen = ({
         {showRail && sidebar ? (
           <SidePanel
             sidebar={sidebar}
+            liveLabel={liveLabel}
+            width={railCols}
             height={listHeight}
             focused={railActive}
             cursor={railAt}
@@ -4786,6 +4793,7 @@ export const App = ({
   extensions,
   tabHelp,
   emptyHint,
+  liveLabel,
 }: {
   fetcher: () => Promise<{
     sections: Section[]
@@ -4809,6 +4817,13 @@ export const App = ({
     sidebar?: Sidebar
   }>
   cacheKey?: string
+  /**
+   * What the rail calls a row's `live` count, in this host's words — `4 on
+   * board` / `off board` on a ticket cockpit. A prop rather than part of the
+   * fetch result because it is vocabulary, not data: it never goes stale, and
+   * a function would not survive the cache the sidebar is painted from.
+   */
+  liveLabel?: LiveLabel
   // What this inbox is called, for the loading line. The shell is host-agnostic;
   // only the host knows whether it is a cockpit, a board, or something else.
   title?: string
@@ -5189,6 +5204,10 @@ export const App = ({
       displayedKey.current = signatureOf(cached.sections)
       displayedSections.current = cached.sections
       setFetchedAt(cached.at)
+      // The rail paints with the rows it was cached beside. Left out, a fresh
+      // cache — the case where nothing refetches — launched with no rail at
+      // all: `i` was gated on a sidebar that had not arrived, and would not.
+      if (cached.sidebar) setSidebar(cached.sidebar)
       setState({
         phase: "browse",
         sections: cached.sections,
@@ -5283,6 +5302,7 @@ export const App = ({
           const shared = cacheKey ? readCache(cacheKey) : null
           if (shared && shared.at > firedAt) {
             receive({ sections: shared.sections, login: shared.login })
+            if (shared.sidebar) setSidebar(shared.sidebar)
             setFetchedAt(shared.at)
             return
           }
@@ -5527,6 +5547,7 @@ export const App = ({
         transients={transients}
         onTabChange={setVisibleTab}
         sidebar={sidebar}
+        liveLabel={liveLabel}
         ciStatusState={hasCiStatus ? ciStatusState : undefined}
         ciJob={ciJob}
         tabHelp={tabHelp}

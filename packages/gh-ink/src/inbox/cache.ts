@@ -3,6 +3,7 @@ import { homedir } from "node:os"
 import { join } from "node:path"
 import { useState, useEffect } from "react"
 import type { Section } from "./inbox.js"
+import type { Sidebar } from "../components/side-panel.js"
 import { inboxConfig } from "./config.js"
 
 // On-disk cache for the inbox glance, so launch renders instantly from the last
@@ -94,6 +95,13 @@ export type CachedCockpit = {
   login: string
   at: number
   budget?: InboxBudget
+  /**
+   * The rail, when the host supplied one. Cached beside the rows because it is
+   * painted beside them: a launch that trusts the cache never refetches, so a
+   * rail left out of the file is a rail that does not exist until the next
+   * refresh — `i` did nothing and the footer did not even offer it.
+   */
+  sidebar?: Sidebar
 }
 
 const cacheDir = (): string =>
@@ -115,6 +123,7 @@ export const readCache = (key: string): CachedCockpit | null => {
       login: raw.login ?? "",
       at: raw.at ?? 0,
       budget: raw.budget,
+      ...(Array.isArray(raw.sidebar?.rows) ? { sidebar: raw.sidebar } : {}),
     }
   } catch {
     return null
@@ -129,7 +138,12 @@ export const isFresh = (
 
 export const writeCache = (
   key: string,
-  data: { sections: Section[]; login: string; budget?: InboxBudget },
+  data: {
+    sections: Section[]
+    login: string
+    budget?: InboxBudget
+    sidebar?: Sidebar
+  },
 ): void => {
   try {
     mkdirSync(cacheDir(), { recursive: true })

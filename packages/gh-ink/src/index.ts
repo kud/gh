@@ -14,6 +14,9 @@ export {
 export {
   SidePanel,
   SIDEBAR_COLS,
+  MIN_SIDEBAR_COLS,
+  railWidth,
+  type LiveLabel,
   railCapacity,
   counts,
   type Sidebar,

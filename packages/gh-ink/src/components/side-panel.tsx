@@ -43,19 +43,27 @@ export type SidebarRow = {
   url?: string
 }
 
+/**
+ * Plain data, deliberately: a host caches its last fetch to disk and paints it
+ * on the next launch, and this rides along in that file. A function on it would
+ * not survive the round trip, so the host's words for `live` travel as a prop
+ * on `SidePanel` instead — vocabulary is configuration, not data that goes
+ * stale.
+ */
 export type Sidebar = {
   /** Heading for the rail. The host's vocabulary, never ours. */
   title: string
   rows: SidebarRow[]
-  /**
-   * What to call `live` on screen, in the host's words — `4 on board` and `off
-   * board` on a ticket cockpit, say. Takes the number rather than a word pair
-   * because the two states need not share a sentence shape: "off board" has no
-   * N in it. `live` itself stays a number, so the absent-draws-nothing contract
-   * and the host's sort are untouched.
-   */
-  liveLabel?: (live: number) => string
 }
+
+/**
+ * What to call `live` on screen, in the host's words — `4 on board` and `off
+ * board` on a ticket cockpit, say. Takes the number rather than a word pair
+ * because the two states need not share a sentence shape: "off board" has no
+ * N in it. `live` itself stays a number, so the absent-draws-nothing contract
+ * and the host's sort are untouched.
+ */
+export type LiveLabel = (live: number) => string
 
 /**
  * The rail's width, INCLUDING its rule and padding. Exported because the list
@@ -69,45 +77,51 @@ export type Sidebar = {
  * word and left the rail listing keys with an ellipsis after them. The key line
  * was never the constraint — the label is what makes a key readable, and a rail
  * you cannot read is forty columns spent on nothing.
+ *
+ * Widened again once the label became the row's first line: at 45 usable
+ * columns a real epic title still lost its last two words. But a 200-column
+ * terminal has room to give where a 120-column one does not — at 120 a rail
+ * this wide leaves the list 52 columns, which elides a PR title past its own
+ * key. So this is the CEILING, and `railWidth` sizes the rail to the frame:
+ * a third of it, never below the 52 the grid was laid out for, never above.
  */
-export const SIDEBAR_COLS = 52
+export const SIDEBAR_COLS = 64
+export const MIN_SIDEBAR_COLS = 52
+
+/** How wide the rail is in a frame of `cols` — pass the same number to `width`. */
+export const railWidth = (cols: number): number =>
+  Math.max(MIN_SIDEBAR_COLS, Math.min(SIDEBAR_COLS, Math.round(cols / 3)))
 
 // The rule that separates the rail from the list, and the breathing room after
-// it. Both come out of the width above rather than being added to it, so a host
-// subtracting SIDEBAR_COLS gets the whole cost in one number.
+// it. Both come out of the width rather than being added to it, so a host
+// subtracting `railWidth` gets the whole cost in one number.
 const RULE = 1
 const PAD = 2
-const CONTENT = SIDEBAR_COLS - RULE - PAD
+const contentOf = (width: number): number => width - RULE - PAD
 
 // The label line: two fixed marker cells, then the words. Two marks in two
 // cells, never one cell doing both jobs — `❯` is where YOU are, `←` is what
 // wants you, and a row can easily be both, which a shared cell would have to
 // resolve by hiding one of them.
 const MARKS = 4
-const LABEL_COLS = CONTENT - MARKS
 
 // The facts line hangs under the label at a fixed grid, so a row gaining or
 // losing its bar never shifts the cell after it: key · bar · fraction · live.
-// Two-space gutters throughout; the widths sum to CONTENT exactly.
+// Two-space gutters throughout; the live cell takes whatever the width leaves.
 const FACTS_INDENT = 6
 const KEY_COLS = 10
 const BAR_COLS = 10
 const FRACTION_COLS = 5
 const GUTTER = "  "
-const LIVE_COLS =
-  CONTENT -
-  FACTS_INDENT -
-  KEY_COLS -
-  BAR_COLS -
-  FRACTION_COLS -
-  GUTTER.length * 3
+const FACTS_FIXED =
+  FACTS_INDENT + KEY_COLS + BAR_COLS + FRACTION_COLS + GUTTER.length * 3
 
 /**
  * What `live` says when the host has no words of its own. Two states, both
  * bright and both in words: the sort already puts a dormant initiative last,
  * and dimming it would re-hide the thing the rail was built to show.
  */
-const defaultLiveLabel = (live: number): string =>
+export const defaultLiveLabel: LiveLabel = (live) =>
   live === 0 ? "nothing live" : `${live} live`
 
 /** `done/total`, or nothing — a numerator with no denominator is not progress. */
@@ -125,7 +139,7 @@ const fractionOf = (row: SidebarRow): string =>
  */
 export const counts = (
   row: SidebarRow,
-  liveLabel: (live: number) => string = defaultLiveLabel,
+  liveLabel: LiveLabel = defaultLiveLabel,
 ): string =>
   [fractionOf(row), row.live !== undefined ? liveLabel(row.live) : ""]
     .filter(Boolean)
@@ -223,18 +237,25 @@ const Progress = ({ row }: { row: SidebarRow }) => {
  */
 export const SidePanel = ({
   sidebar,
+  liveLabel = defaultLiveLabel,
+  width = SIDEBAR_COLS,
   height,
   focused = false,
   cursor = 0,
 }: {
   sidebar: Sidebar
+  liveLabel?: LiveLabel
+  /** From `railWidth`, so the list beside it can subtract the same number. */
+  width?: number
   height?: number
   /** The arrows are pointed here, so this rail draws the cursor. */
   focused?: boolean
   /** Which row the cursor is on. Only drawn while `focused`. */
   cursor?: number
 }) => {
-  const liveLabel = sidebar.liveLabel ?? defaultLiveLabel
+  const content = contentOf(width)
+  const labelCols = content - MARKS
+  const liveCols = content - FACTS_FIXED
   const capacity =
     height === undefined
       ? sidebar.rows.length
@@ -255,7 +276,7 @@ export const SidePanel = ({
   // would read as a focusable nested panel.
   const focus = focused ? "  ● focus" : ""
   const rule = "╌".repeat(
-    Math.max(0, CONTENT - [...sidebar.title].length - focus.length - 1),
+    Math.max(0, content - [...sidebar.title].length - focus.length - 1),
   )
   return (
     // A rule down the left rather than a full box: the rail's other three edges
@@ -266,7 +287,7 @@ export const SidePanel = ({
     // colour and not dimmed, so the two rules read as one hierarchy.
     <Box
       flexDirection="column"
-      width={SIDEBAR_COLS}
+      width={width}
       flexShrink={0}
       height={height}
       borderStyle="single"
@@ -307,7 +328,7 @@ export const SidePanel = ({
                 {/* The answer, so the brightest thing on the row; bold is the
                     cursor's, as `SelectableRow` does it. */}
                 <Text bold={active}>
-                  {truncateWords(row.label, LABEL_COLS)}
+                  {truncateWords(row.label, labelCols)}
                 </Text>
               </Box>
               <Box paddingLeft={FACTS_INDENT}>
@@ -320,7 +341,7 @@ export const SidePanel = ({
                 <Text>
                   {GUTTER +
                     (row.live !== undefined
-                      ? liveLabel(row.live).slice(0, LIVE_COLS)
+                      ? liveLabel(row.live).slice(0, liveCols)
                       : "")}
                 </Text>
               </Box>

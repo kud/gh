@@ -85,6 +85,8 @@ export {
   sortByRecency,
   sortItems,
   SIDEBAR_COLS,
+  MIN_SIDEBAR_COLS,
+  railWidth,
   SidePanel,
   counts,
   railCapacity,

@@ -6,6 +6,7 @@ import {
   railCapacity,
   counts,
   truncateWords,
+  railWidth,
   type Sidebar,
 } from "./side-panel.js"
 
@@ -121,9 +122,9 @@ describe("the live cell", () => {
   it("draws the host's words on the rail", () => {
     const frame = frameOf(
       <SidePanel
+        liveLabel={(n) => (n === 0 ? "off board" : `${n} on board`)}
         sidebar={{
           title: "Initiatives",
-          liveLabel: (n) => (n === 0 ? "off board" : `${n} on board`),
           rows: [
             { key: "P-1", label: "moving", live: 2, done: 1, total: 4 },
             { key: "P-2", label: "quiet", live: 0, done: 0, total: 9 },
@@ -208,5 +209,26 @@ describe("the row anatomy", () => {
   it("names the focus in a word, not only a hue", () => {
     expect(frameOf(<SidePanel sidebar={two} focused />)).toContain("● focus")
     expect(frameOf(<SidePanel sidebar={two} />)).not.toContain("● focus")
+  })
+})
+
+describe("railWidth", () => {
+  // A third of the frame, floored at the width the grid was laid out for and
+  // capped where a label stops needing more.
+  it("sizes the rail to the frame between its floor and ceiling", () => {
+    expect(railWidth(120)).toBe(52)
+    expect(railWidth(156)).toBe(52)
+    expect(railWidth(180)).toBe(60)
+    expect(railWidth(200)).toBe(64)
+    expect(railWidth(300)).toBe(64)
+  })
+
+  it("gives a wider rail's columns to the label", () => {
+    const long = "Cloudsearch → OpenSearch migration: frontend-royalties & frontend-contract"
+    const row = { key: "P-1", label: long, live: 1 }
+    const narrow = frameOf(<SidePanel sidebar={{ title: "Initiatives", rows: [row] }} width={52} />)
+    const wide = frameOf(<SidePanel sidebar={{ title: "Initiatives", rows: [row] }} width={64} />)
+    expect(narrow).toContain("Cloudsearch → OpenSearch migration…")
+    expect(wide).toContain("migration: frontend-royalties")
   })
 })

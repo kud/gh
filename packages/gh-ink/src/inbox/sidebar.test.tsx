@@ -5,6 +5,10 @@ import { render } from "ink"
 import { App, COLS } from "./inbox.js"
 import type { Section, TaskRow } from "./inbox.js"
 import type { Sidebar } from "../components/side-panel.js"
+import { mkdtempSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { writeCache } from "./cache.js"
 
 /*
  * The rail answers a question the tabs cannot: a tab files a row by the stage it
@@ -91,7 +95,11 @@ const sidebar: Sidebar = {
   ],
 }
 
-const mount = async (withSidebar: boolean, columns = 120) => {
+const mount = async (
+  withSidebar: boolean,
+  columns = 120,
+  cacheKey?: string,
+) => {
   const stdout = new FakeStdout(columns, 40)
   const stdin = new FakeStdin()
   const instance = render(
@@ -102,6 +110,7 @@ const mount = async (withSidebar: boolean, columns = 120) => {
         ...(withSidebar ? { sidebar } : {}),
       })}
       title="cockpit"
+      cacheKey={cacheKey}
     />,
     {
       stdout: stdout as never,
@@ -278,5 +287,26 @@ describe("browsing the rail", () => {
     expect(frame()).not.toContain("● focus")
     expect(frame()).toContain("m actions")
     stop()
+  })
+})
+
+describe("the rail on a launch painted from the cache", () => {
+  // A fresh cache is the launch that never refetches. The rail used to arrive
+  // only with a fetch, so on exactly that launch `i` did nothing and the footer
+  // did not even offer it — "sometimes I can't see the initiatives".
+  it("is there without a fetch", async () => {
+    process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "gh-ink-rail-"))
+    try {
+      writeCache("rail", { sections, login: "kud", sidebar })
+      // The fetcher would supply a rail too; what is pinned is that the cached
+      // paint already has one, so the key works before any fetch answers.
+      const { frame, press, stop } = await mount(true, 120, "rail")
+      expect(frame()).toContain("i initiatives")
+      await press("i")
+      expect(frame()).toContain("PROJ-900")
+      stop()
+    } finally {
+      delete process.env.XDG_CACHE_HOME
+    }
   })
 })
