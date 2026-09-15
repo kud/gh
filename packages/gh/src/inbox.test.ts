@@ -107,18 +107,39 @@ describe("buildInboxQuery", () => {
 
   // The window is the dominant cost on every PR-bearing source, because it
   // multiplies beneath five searches at once. Measured 2026-09-09 on a live
-  // account: the whole document costs 34 points at `first: 10` against 114 at
-  // the `first: 50` it replaced, and the deepest of 13 PR rows carried two
-  // threads. `totalCount` is what stops the narrower window lying — a consumer
-  // comparing it against `nodes.length` can see the sample as a sample, which
-  // is what `@kud/gh-workflow`'s `threadsTotal` now reads.
+  // account: the whole document costs 54 points at a window of 20 against 114 at
+  // the 50 it replaced, and the deepest of 13 PR rows carried two threads.
+  // `totalCount` is what stops the narrower window lying — a consumer comparing
+  // it against `nodes.length` can see the sample as a sample, which is what
+  // `@kud/gh-workflow`'s `threadsTotal` and `threadsSampled` now read.
   it("windows review threads narrowly and says how many there really are", () => {
     const query = buildInboxQuery()
-    expect(query).not.toContain("reviewThreads(first: 50)")
+    expect(query).not.toContain("reviewThreads(first:")
     for (const alias of OPEN_PR_SOURCES)
       expect(blockFor(query, alias)).toContain(
-        "reviewThreads(first: 10) { totalCount",
+        "reviewThreads(last: 20) { totalCount",
       )
+  })
+
+  /*
+   * THE ANCHOR, pinned by itself, because reverting it breaks nothing visible.
+   *
+   * `first` returns the OLDEST N of a Relay connection. On `kud/ambre#69` — 67
+   * threads, open 11 days — `first: 3` returns threads from 2025-08-12 while
+   * `last: 3` returns 2025-08-20 and 2025-08-23, and the newest 17 were invisible
+   * to the mapper for the whole time that PR sat in the inbox. Two consumers
+   * were wrong in different directions: `conversationOf`'s `lastEventAt` read
+   * stale by days, and `computeHealth` sampled the threads most likely to be
+   * already RESOLVED, so a PR with live discussion read clear.
+   *
+   * A future tidy swapping `last` back to `first` for symmetry with the other
+   * windows in this file would cost nothing at compile time and reintroduce a
+   * silent false-clear. This test is the only thing in the way.
+   */
+  it("anchors the review-thread window at the newest threads", () => {
+    const query = buildInboxQuery()
+    for (const alias of OPEN_PR_SOURCES)
+      expect(blockFor(query, alias)).toContain("reviewThreads(last:")
   })
 
   /*
@@ -438,8 +459,10 @@ describe("source coverage", () => {
   })
 
   it("calls a source whole when it came back under its cap and matched no more", () => {
-    expect(sourceCoverage({ myPRs: { issueCount: 8, nodes: new Array(8).fill({}) } }).myPRs)
-      .toEqual({ total: 8, shown: 8, cap: 30, capped: false, partial: false })
+    expect(
+      sourceCoverage({ myPRs: { issueCount: 8, nodes: new Array(8).fill({}) } })
+        .myPRs,
+    ).toEqual({ total: 8, shown: 8, cap: 30, capped: false, partial: false })
   })
 
   /*
@@ -466,7 +489,9 @@ describe("source coverage", () => {
     // `Incoming 0 of 5` on a live board, and the extreme case of the same
     // fault: an empty node list beside a non-zero count. Nothing was capped and
     // the source did not fail either — it answered, with nothing in it.
-    expect(sourceCoverage({ repoPRs: { issueCount: 5, nodes: [] } }).repoPRs).toEqual({
+    expect(
+      sourceCoverage({ repoPRs: { issueCount: 5, nodes: [] } }).repoPRs,
+    ).toEqual({
       total: 5,
       shown: 0,
       cap: 30,
@@ -499,7 +524,9 @@ describe("source coverage", () => {
     // The two-tier path raises `reviewRequests` to 100. Measured against the
     // default 20 it would read as capped forever, and the host would keep
     // firing an overflow fetch that had already succeeded.
-    const data = { reviewRequests: { issueCount: 90, nodes: new Array(90).fill({}) } }
+    const data = {
+      reviewRequests: { issueCount: 90, nodes: new Array(90).fill({}) },
+    }
     expect(sourceCoverage(data).reviewRequests?.capped).toBe(true)
     expect(
       sourceCoverage(data, { reviewRequests: 100 }).reviewRequests?.capped,
@@ -785,7 +812,10 @@ describe("mergeHealth", () => {
       overflowPr("PR_one"),
       overflowPr("PR_two"),
     ])
-    const merged = mergeHealth(data, [undefined, { nodes: [enriched("PR_two")] }])
+    const merged = mergeHealth(data, [
+      undefined,
+      { nodes: [enriched("PR_two")] },
+    ])
     expect(merged.reviewRequests.nodes[0]).not.toHaveProperty("reviewDecision")
     expect(merged.reviewRequests.nodes[1]).toHaveProperty("reviewDecision")
   })
@@ -797,6 +827,8 @@ describe("mergeHealth", () => {
   })
 
   it("survives no data at all", () => {
-    expect(mergeHealth(undefined, [{ nodes: [enriched("PR_one")] }])).toBeUndefined()
+    expect(
+      mergeHealth(undefined, [{ nodes: [enriched("PR_one")] }]),
+    ).toBeUndefined()
   })
 })

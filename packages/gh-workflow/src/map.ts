@@ -146,14 +146,20 @@ const conversationOf = (
 }
 
 // `threadsTotal` reads the connection's own `totalCount`, never the length of
-// what came back. The inbox query windows `reviewThreads` at `first: 10` — five
-// times the deepest PR measured on a live account, and a third of the cost of
-// the `first: 50` it replaced — so counting the returned nodes would report a
-// windowed sample as the whole, and report it as complete. `nodes.length` stays
-// the fallback for a caller whose query omits the scalar; where both are
-// present the scalar is the only one that can exceed the window.
+// what came back. The inbox query windows `reviewThreads` at `last: 20`, so
+// counting the returned nodes would report a windowed sample as the whole — and
+// report it as complete. The field's NAME has been a lie since it was written;
+// at `first: 50` it was almost always right by accident, because almost every
+// PR carries fewer than fifty threads. `nodes.length` stays the fallback for a
+// caller whose query omits the scalar; where both are present the scalar is the
+// only one that can exceed the window.
+//
+// `threadsSampled` is how many actually came back, so the pair says both what
+// there is and how much of it was seen. See `GHDetail` for why this is two
+// numbers rather than a truncation flag.
 const detailOf = (node: any, lastEventAt?: string): GHDetail => {
   const active = latestChecks(node.statusCheckRollup?.contexts?.nodes ?? [])
+  const threads = node.reviewThreads?.nodes ?? []
   return {
     reviewDecision: node.reviewDecision ?? undefined,
     mergeable: node.mergeable ?? undefined,
@@ -163,7 +169,8 @@ const detailOf = (node: any, lastEventAt?: string): GHDetail => {
     threadsTotal:
       typeof node.reviewThreads?.totalCount === "number"
         ? node.reviewThreads.totalCount
-        : (node.reviewThreads?.nodes ?? []).length,
+        : threads.length,
+    threadsSampled: threads.length,
     lastCommitAt: node.commits?.nodes?.[0]?.commit?.committedDate,
     lastEventAt,
   }
@@ -230,8 +237,12 @@ export const toGHItem = (
     // Only when the node carries them: a section cached before the query
     // selected size, or a node built by hand, has none, and the row draws no
     // cell for an absent number rather than `+0 -0`.
-    ...(typeof node.additions === "number" ? { additions: node.additions } : {}),
-    ...(typeof node.deletions === "number" ? { deletions: node.deletions } : {}),
+    ...(typeof node.additions === "number"
+      ? { additions: node.additions }
+      : {}),
+    ...(typeof node.deletions === "number"
+      ? { deletions: node.deletions }
+      : {}),
     ...(typeof node.changedFiles === "number"
       ? { changedFiles: node.changedFiles }
       : {}),

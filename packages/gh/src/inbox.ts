@@ -19,15 +19,15 @@
  * ~16,870 — because `statusCheckRollup.contexts` appears in five PR fragments
  * and `reviewThreads` multiplies beneath each one. A caller that renders a
  * title and a link was paying for every check run on every open PR. That
- * window is `first: 10` now and the same document measures 34 points, but the
+ * window is `last: 20` now and the same document measures 54 points, but the
  * axis is unchanged: the multiplication is what `minimal` exists to drop.
  */
 /**
  * How many of your own open PRs to ask for.
  *
  * This is the single biggest lever on the query's cost, because connections
- * MULTIPLY: the health and conversation fragments hang ~50 nodes off each PR
- * (`reviewThreads(first: 10)` at two nodes a thread,
+ * MULTIPLY: the health and conversation fragments hang ~60 nodes off each PR
+ * (`reviewThreads(last: 20)` at two nodes a thread,
  * `statusCheckRollup.contexts(first: 20)`, `labels(first: 10)`), so the outer
  * number is a multiplier on all of them.
  * GitHub scores a call by the nodes it could return, not by how many calls you
@@ -64,7 +64,7 @@ export const MY_PRS_LIMIT = 30
  * THE NUMBERS ARE NOT ONE NUMBER, because a row is not one weight. 30 was set
  * for PULL REQUESTS and the issue sources inherited it, which is how a cap sized
  * against `reviewThreads(first: 50)` came to govern a row carrying
- * `comments(last: 1)` and ten labels. A PR drags roughly 50 nested nodes — it
+ * `comments(last: 1)` and ten labels. A PR drags roughly 60 nested nodes — it
  * was 80 while the thread window was `first: 50`; an issue drags about 12.
  *
  * Measured 2026-09-07, same account, same selections that actually ship:
@@ -301,20 +301,64 @@ const PR_SIZE = `
 // justified fifty: across 13 PR rows on that account the deepest carried TWO
 // threads and the median carried none — nothing above ten, on either PR source.
 //
+// The anchor is free. Measured 2026-09-15 on `myPRs` with the shipping
+// selection, `first: 20` and `last: 20` both cost 8 points at 1,950 nodes — the
+// window is the same size whichever end it is taken from, so nothing about the
+// fix below needs the narrowing to pay for it.
+//
 // `totalCount` is what makes narrowing safe rather than merely cheap. A window
 // smaller than the world is the same trap `sourceCoverage` exists for one level
 // up, and the scalar costs nothing: a consumer comparing it against
 // `nodes.length` knows whether it is holding the threads or a sample of them,
 // instead of counting what came back and calling that the total. Note the
 // coverage it buys is on the COUNT — `isResolved` beyond the window is still
-// unseen, so a PR carrying eleven threads can still under-report unresolved
-// ones to `computeHealth`. That is the direction to fail in and the reason the
-// window keeps five times the observed maximum rather than two.
+// unseen, so a PR carrying twenty-one threads can still under-report unresolved
+// ones to `computeHealth`. `totalCount` counts resolved and unresolved alike and
+// GitHub offers no `isResolved` argument, so `unresolvedThreads` is permanently
+// a sample; the honest stopping point is a window plus an honest sample size,
+// never an "N unresolved" claim built on a windowed count.
+//
+// `last`, NOT `first`, AND THIS IS A BUG FIX RATHER THAN A PREFERENCE. A Relay
+// connection's `first` returns the OLDEST N. Verified on `kud/ambre#69`, which
+// carried 67 review threads and was open for 11 days (2025-08-12 → merged
+// 2025-08-23): `reviewThreads(first: 3)` returns threads first commented on at
+// 2025-08-12T23:44, while `last: 3` returns 2025-08-20 and 2025-08-23. So all
+// the time that PR sat in the inbox, a `first: 50` window handed the mapper the
+// oldest 50 and dropped the newest 17 — and its `last: 10` window alone carries
+// 8 unresolved threads.
+//
+// Both readers in `@kud/gh-workflow`'s `map.ts` were wrong, in different
+// directions and both unsafe:
+//
+//   • `conversationOf` builds `lastEventAt` as a max over thread comment times,
+//     so the whose-move CLOCK read stale by days on exactly the PRs with live
+//     discussion.
+//   • `computeHealth` tests `unresolvedThreads > 0`. Threads get RESOLVED over
+//     time, so anchoring at `first` systematically samples the end of a PR most
+//     likely to be already resolved — the token fell through to `waiting` or
+//     `approved` and the row read CLEAR while a reviewer was waiting. A false
+//     `threads` costs a glance; a false clear costs a missed review.
+//
+// `last` biases both the other way, which is the right way, and costs exactly
+// what `first` costs at the same N.
+//
+// TWENTY, NOT TEN, and the measured distribution does not decide this — at the
+// deepest-carried TWO threads above, 10 and 20 are both complete for every row
+// in the inbox, so the choice is not paid for by that table. What pays for it is
+// ambre#69: 67 threads is the only evidence anyone holds of what a BUSY PR looks
+// like, and a quiet week is not a ceiling. The margin is spent on the two
+// readers that are not the health token — `conversationOf` sums
+// `comments.totalCount` across the window, and `detailOf` reports numbers a
+// human reads. 50→20 removes 1,800 nodes; 20→10 removes another 600, so the win
+// is banked at 20 and the last step buys three points for the only headroom
+// there is against the next PR that gets busy. The budget note above already
+// made this argument for the row caps: against 5,000 points an hour with a
+// 10-minute cache, what actually fails is wall clock at the proxy, not cost.
 const PR_CONVERSATION = `
       reactionGroups { content viewerHasReacted }
       comments(last: 1) { totalCount nodes { author { __typename login } createdAt reactionGroups { content viewerHasReacted } } }
       reviews(last: 1) { nodes { author { __typename login } state submittedAt } }
-      reviewThreads(first: 10) { totalCount nodes {
+      reviewThreads(last: 20) { totalCount nodes {
         isResolved
         comments(last: 1) { totalCount nodes { author { __typename login } createdAt } }
       } }

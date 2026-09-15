@@ -100,23 +100,76 @@ describe("toGHItem", () => {
     expect(toGHItem(pr()).unresolved).toBe(1)
   })
 
-  // @kud/gh windows `reviewThreads` at `first: 10`, so on any PR carrying more
-  // the nodes are a sample. Counting them reports fourteen threads as ten and
-  // reports that as the whole number — the count has to come off the connection.
+  // @kud/gh windows `reviewThreads` at `last: 20`, so on any PR carrying more
+  // the nodes are a sample. Counting them reports twenty-four threads as twenty
+  // and reports that as the whole number — the count has to come off the
+  // connection.
   it("takes the thread total from the connection, not from the window", () => {
     const deep = pr({
       reviewThreads: {
-        totalCount: 14,
-        nodes: Array.from({ length: 10 }, () => ({ isResolved: true })),
+        totalCount: 24,
+        nodes: Array.from({ length: 20 }, () => ({ isResolved: true })),
       },
     })
-    expect(toGHItem(deep).detail?.threadsTotal).toBe(14)
+    const detail = toGHItem(deep).detail
+    expect(detail?.threadsTotal).toBe(24)
+    // Both numbers, so a consumer can say "and 4 more" rather than merely that
+    // something was cut.
+    expect(detail?.threadsSampled).toBe(20)
   })
 
   // A caller whose own query omits the scalar still gets a number rather than
   // zero — the fixture above is exactly that query.
   it("falls back to the returned nodes when no total was selected", () => {
-    expect(toGHItem(pr()).detail?.threadsTotal).toBe(2)
+    const detail = toGHItem(pr()).detail
+    expect(detail?.threadsTotal).toBe(2)
+    expect(detail?.threadsSampled).toBe(2)
+  })
+
+  /*
+   * The whose-move clock is a max over event times, and thread comments are part
+   * of it — so the window's ANCHOR decides whether it can see the newest one at
+   * all. `@kud/gh` takes `reviewThreads(last:)` for exactly this reason: on a PR
+   * with more threads than the window, `first` hands the mapper the oldest and
+   * the clock reads stale by however long the discussion has been running.
+   *
+   * This pins the consumer end of that contract — that the latest thread comment
+   * wins `lastEventAt` — so the query-side pin in `@kud/gh`'s `inbox.test.ts` and
+   * this one fail together if the anchor moves.
+   */
+  it("takes lastEventAt from the newest thread comment", () => {
+    const talkative = pr({
+      reviewThreads: {
+        totalCount: 2,
+        nodes: [
+          {
+            isResolved: false,
+            comments: {
+              totalCount: 1,
+              nodes: [
+                {
+                  author: { login: "priya" },
+                  createdAt: "2026-09-02T09:00:00Z",
+                },
+              ],
+            },
+          },
+          {
+            isResolved: false,
+            comments: {
+              totalCount: 1,
+              nodes: [
+                {
+                  author: { login: "priya" },
+                  createdAt: "2026-09-08T17:30:00Z",
+                },
+              ],
+            },
+          },
+        ],
+      },
+    })
+    expect(toGHItem(talkative).detail?.lastEventAt).toBe("2026-09-08T17:30:00Z")
   })
 
   it("maps an issue node", () => {

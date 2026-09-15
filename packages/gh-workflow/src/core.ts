@@ -32,6 +32,17 @@ export type GHDetail = {
   // though it had looked.
   checksStale?: number
   threadsTotal: number
+  // How many review threads the fetch actually RETURNED, against the
+  // `threadsTotal` it reports. The inbox windows `reviewThreads`, so the two
+  // differ on a busy PR and a consumer that wants to say "and 9 more" needs both
+  // numbers rather than a `threadsTruncated` boolean — the boolean is the
+  // derivation (`sampled < total`), and storing a derivation in place of its
+  // inputs means nobody can ever render the remainder.
+  //
+  // Optional in the `checksStale` register above and for the same reason:
+  // undefined means THIS FETCH DID NOT SAY, which is not the same as nothing
+  // having been cut.
+  threadsSampled?: number
   lastCommitAt?: string
   lastEventAt?: string
 }
@@ -891,19 +902,19 @@ export const layoutGHItems = (
   // could not reach, then waiting, then not yet asked.
   const bands = (["merge", "you", "unknown", "them", "draft"] as const).map(
     (side) => ({
-    side,
-    rows: sorted.filter(
-      (i) =>
-        bandOf(
-          i.health,
-          sectionId,
-          i.standing,
-          !!i.lastActor && i.lastActor !== login,
-          i.pinned,
-          i.repo.startsWith(`${login}/`),
-        ) === side,
-    ),
-  }),
+      side,
+      rows: sorted.filter(
+        (i) =>
+          bandOf(
+            i.health,
+            sectionId,
+            i.standing,
+            !!i.lastActor && i.lastActor !== login,
+            i.pinned,
+            i.repo.startsWith(`${login}/`),
+          ) === side,
+      ),
+    }),
   )
   const filled = bands.filter((b) => b.rows.length > 0)
 
