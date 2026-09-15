@@ -11,7 +11,7 @@ import React, {
   useContext,
   type ReactNode,
 } from "react"
-import { Text as InkText, Box, useApp, useInput, useWindowSize } from "ink"
+import { Text as InkText, Box, useInput, useWindowSize } from "ink"
 import type { InboxExtension, ExtensionTarget } from "./extension.js"
 import {
   invalidateCache,
@@ -48,6 +48,7 @@ import {
   StatusMessage,
   Tabs,
   Switch,
+  useAppKeys,
   useListCursor,
 } from "@kud/ink-ui"
 import {
@@ -3044,7 +3045,7 @@ export const ActionMenu = ({
     <Box
       flexDirection="column"
       borderStyle="round"
-      borderColor="cyan"
+      borderColor={colors.info}
       backgroundColor={OVERLAY_BG}
       paddingX={1}
       marginTop={1}
@@ -3369,7 +3370,7 @@ export const HelpModal = ({
     <Box
       flexDirection="column"
       borderStyle="round"
-      borderColor="cyan"
+      borderColor={colors.info}
       backgroundColor={OVERLAY_BG}
       paddingX={1}
       width={contentWidth + MODAL_CHROME_COLS}
@@ -3407,7 +3408,7 @@ const ExplainModal = ({ item, login }: { item: GHItem; login: string }) => (
   <Box
     flexDirection="column"
     borderStyle="round"
-    borderColor="cyan"
+    borderColor={colors.info}
     backgroundColor={OVERLAY_BG}
     paddingX={1}
     width={Math.min(COLS, 78)}
@@ -3452,7 +3453,7 @@ const RepoPicker = ({
     <Box
       flexDirection="column"
       borderStyle="round"
-      borderColor="cyan"
+      borderColor={colors.info}
       backgroundColor={OVERLAY_BG}
       paddingX={1}
       minWidth={42}
@@ -3541,6 +3542,8 @@ const BrowseScreen = ({
   fetchedAt,
   refreshError,
   hidden,
+  peelRef,
+  onTyping,
   onOpenPr,
   onOpenIssue,
   onOpenExt,
@@ -3621,6 +3624,21 @@ const BrowseScreen = ({
   // and the flash would fire only once, reading as "it recovered".
   refreshError?: { message: string; at: number }
   hidden?: boolean
+  /**
+   * Where this screen publishes its PEEL — close the topmost layer it owns and
+   * report whether there was one. The app root binds `esc` / `backspace` once
+   * (`useAppKeys`) and calls through this, because Ink runs every active
+   * `useInput` on every key with no order and no propagation: "who gets esc" is
+   * only ever settled by there being one claimant.
+   *
+   * A ref rather than a callback prop so the closure stays current without
+   * re-registering, and a plain function rather than a stack because the layers
+   * here are a PRIORITY ORDER over this screen's own booleans, not a history of
+   * what was pushed.
+   */
+  peelRef?: React.MutableRefObject<(() => boolean) | null>
+  /** True while a text field owns the keyboard, so the root stands its keys down. */
+  onTyping?: (typing: boolean) => void
   onOpenPr?: (item: GHItem) => void
   onOpenIssue?: (item: GHItem) => void
   onOpenExt?: (id: string, target?: ExtensionTarget) => void
@@ -3635,7 +3653,6 @@ const BrowseScreen = ({
   ciJob?: string
 }) => {
   const { rows } = useWindowSize()
-  const { exit } = useApp()
   // Both directions are the same filter with `keep` flipped, so the host supplies
   // one predicate rather than two filters. No predicate — or no side asked for —
   // and there is no split: every section stands.
@@ -3905,6 +3922,47 @@ const BrowseScreen = ({
   // nobody can see.
   const railActive = showRail && railFocus && railRows.length > 0
   const railAt = Math.min(railCursor, Math.max(0, railRows.length - 1))
+
+  /*
+   * THE PEEL — close the topmost layer this screen owns, innermost first, and
+   * say whether there was one. The app root owns `esc` / `backspace` and calls
+   * this; nothing here binds either key.
+   *
+   * `searchInput` has NO ARM and that is deliberate rather than an omission: the
+   * root hook is inactive while the field has focus, so esc there never reaches
+   * this function and the field's own branch stays the live handler.
+   *
+   * The menu sits ABOVE search and the repo filter, which fixes a live ordering
+   * bug — with the action menu open and a filter set, esc used to clear the
+   * filter and leave the menu standing.
+   *
+   * Re-published on every render rather than memoised: it closes over state that
+   * changes constantly, and a stale peel closes the wrong layer.
+   */
+  const peel = (): boolean => {
+    if (help) return setHelp(false), true
+    if (explain) return setExplain(false), true
+    if (repoPicker) return setRepoPicker(false), true
+    if (railActive) return setRailFocus(false), true
+    // `menu.handleKey` keeps its own esc arm — it is exported and PrView mounts
+    // it too, so this double-closes by one idempotent state update rather than
+    // buying surgery on a two-caller hook.
+    if (menu.actions !== null) return menu.close(), true
+    if (search != null) return setSearch(null), true
+    if (repoFilter.size > 0) return setRepoFilter(new Set()), true
+    return false
+  }
+  useEffect(() => {
+    if (!peelRef) return
+    peelRef.current = peel
+    return () => {
+      peelRef.current = null
+    }
+  })
+
+  useEffect(() => {
+    onTyping?.(searchInput)
+  }, [searchInput, onTyping])
   // What the LIST has, which is the frame minus whatever the rail took. Computed
   // once here and handed down: a row cannot see the rail, and a budget that does
   // not know about it overflows by exactly the rail's width.
@@ -4094,8 +4152,10 @@ const BrowseScreen = ({
     }
 
     if (repoPicker) {
-      // ↑↓ belong to useListCursor above, gated on repoPicker.
-      if (key.escape || key.return) return setRepoPicker(false)
+      // ↑↓ belong to useListCursor above, gated on repoPicker. `esc` is the
+      // root's (see the peel); `↵` closes it from here because confirming is not
+      // the same gesture as backing out.
+      if (key.return) return setRepoPicker(false)
       if (input === "a") return setRepoFilter(new Set())
       if (input === " ") {
         const repo = allRepos[repoCursor]
@@ -4165,10 +4225,6 @@ const BrowseScreen = ({
         setRailCursor((c) => Math.min(railRows.length - 1, c + 1))
         return
       }
-      if (key.escape) {
-        setRailFocus(false)
-        return
-      }
       if (key.return || input === "o") {
         const row = railRows[railAt]
         if (!row) return
@@ -4208,15 +4264,6 @@ const BrowseScreen = ({
       if (input !== "r" && input !== "q" && !key.leftArrow && !key.rightArrow)
         return
     }
-    if (key.escape && search != null) {
-      setSearch(null)
-      return
-    }
-    if (key.escape && repoFilter.size > 0) {
-      setRepoFilter(new Set())
-      return
-    }
-
     if (menu.handleKey(key)) return
 
     // Not useListCursor / useTabs, and not an oversight. The cursor steps through
@@ -4254,7 +4301,6 @@ const BrowseScreen = ({
       setTabIdx((i) => (i + step + localSections.length) % localSections.length)
     // Ink's exit, not process.exit: it unmounts and hands the terminal back
     // (alternate screen included) instead of leaving whatever was on it.
-    if (input === "q") exit()
     if (input === "r") {
       onRefresh?.()
       return
@@ -4901,9 +4947,11 @@ const NoRowsScreen = ({
   detail?: string
   onRetry: () => void
 }) => {
-  const { exit } = useApp()
+  // `r` only. `q` belongs to the app root's `useAppKeys`, which is mounted above
+  // this screen and stays mounted through every phase — including `loading`,
+  // where nothing used to bind it at all and a cold fetch could only be left
+  // with ctrl+c.
   useInput((input) => {
-    if (input === "q") exit()
     if (input === "r") onRetry()
   })
   return (
@@ -5083,6 +5131,51 @@ export const App = ({
   const { rows } = useWindowSize()
 
   const [state, setState] = useState<AppState>({ phase: "loading" })
+
+  /*
+   * `q`, `esc` and `backspace` belong to the APP, not to a screen — mounted
+   * once, here, at the only place that is above every phase.
+   *
+   * Ink runs every active `useInput` on every key, with no order and no
+   * propagation, so "who gets esc" cannot be settled by layering handlers: it is
+   * settled by there being one claimant. Before this there were five for `q` and
+   * eight for `esc`, and a gap nobody had noticed — during `phase: "loading"`
+   * NOTHING bound `q`, because App returns above BrowseScreen and NoRowsScreen
+   * only mounts on empty or failed, so a cold fetch could be left only with
+   * ctrl+c. Mounting here closes that for free.
+   *
+   * `onQuit` is deliberately not passed: its default is Ink's own `exit()`,
+   * which unmounts and hands the terminal back — byte-for-byte what the two
+   * bindings this replaces did, minus two `useApp()` calls. `atRoot` is left at
+   * its default `"ignore"`, because a key that sometimes quits is a key you
+   * flinch from.
+   *
+   * The peels are refs rather than a registry: each screen owns a priority order
+   * over its OWN booleans and publishes it as a plain function. That is not a
+   * back stack, and `@kud/ink-ui`'s own manual is explicit that it must not
+   * become one.
+   */
+  const browsePeel = useRef<(() => boolean) | null>(null)
+  const drillPeel = useRef<(() => boolean) | null>(null)
+  const [typing, setTyping] = useState(false)
+
+  useAppKeys({
+    isActive: !typing,
+    onBack: () => {
+      // Short on purpose while the drills still own their own `esc`: an
+      // unregistered drill is simply not the root's business, so behaviour
+      // inside one is bit-identical to before this hook existed. Closing the
+      // drill from here BEFORE it registers a peel would fire twice — the
+      // view's own handler and this one — and drop you two levels on one press.
+      if (
+        state.phase === "pr" ||
+        state.phase === "issue" ||
+        state.phase === "ext"
+      )
+        return drillPeel.current?.() ?? false
+      return browsePeel.current?.() ?? false
+    },
+  })
   const [pending, setPending] = useState<{
     sections: Section[]
     login: string
@@ -5749,7 +5842,15 @@ export const App = ({
         origin={origin}
         budget={budget}
         skippedForBudget={skippedForBudget}
+        // `hidden` keeps BOTH its jobs — don't render, and don't act on keys.
+        // It looks like one boolean doing two things, but the listen half is not
+        // simply `isActive`: four lines above that guard re-arm the idle pulse,
+        // deliberately, because a key pressed at a hidden tab is still evidence
+        // of a person at the keyboard. Gate the handler itself and an idle
+        // return to a hidden tab stops re-arming.
         hidden={overlay !== null}
+        peelRef={browsePeel}
+        onTyping={setTyping}
         mergedUrls={mergedUrls}
         leavingUrls={leavingUrls}
         transitSince={transitSince}
