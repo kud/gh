@@ -760,10 +760,65 @@ export const PIN_MARK = "+"
 // which is false for an issue that simply has no review state. And not
 // "Unknown", which reads as a null — 79 things broken rather than 79 things
 // deliberately not claimed.
-const BAND_LABEL: Record<Move, string> = {
+// `Ready to merge` and `Drafts` break the possessive grammar the same way and for
+// the same reason: they answer WHAT KIND of move, where the middle three still
+// answer WHOSE. `Ready to merge` is already the legend's own text for
+// `approved`, so it introduces no vocabulary; not `Mergeable`, which is
+// GitHub's word for conflict-free and true of an unreviewed PR, and not
+// `Approved`, which names the evidence rather than the action and misses the
+// owned-repo case. `Drafts` is the fact; `Not ready` is a judgement equally
+// true of a red build two bands up.
+const BAND_LABEL: Record<Band, string> = {
+  merge: "Ready to merge",
   you: "Your move",
   unknown: "Unclassified",
   them: "Their move",
+  draft: "Drafts",
+}
+
+/**
+ * The band a row files under: a `Move`, resolved one step further on the one
+ * standing where "your move" has more than one verb.
+ *
+ * From `queued` and `spoken`, your move is a single verb — review — and the
+ * three-way `Move` says everything the band can. From `authored` it is three:
+ * merge it, work on it, finish writing it. Seven PRs of yours under one
+ * `Your move (7)` header was true and told the reader nothing about which —
+ * two were green, one red, three were drafts sitting at the top because
+ * `sortItems` sinks drafts only within their repo. So on that standing alone
+ * the two ends peel off, ordered by cost to clear: one keypress first, not yet
+ * asked last, and `whoseMove` unchanged for everything between.
+ *
+ * `approved` is already the conjunction: `computeHealth` ranks every failure,
+ * conflict, open thread and running check above it, so a row carrying it is
+ * approved AND green AND quiet by construction. `waiting` on a repo you own is
+ * the same row with nobody asked — the case `whoseMove` claims for the same
+ * reason, resolved here to the verb it actually is.
+ *
+ * The token beats the turn arrow for the two carve-outs, which inverts
+ * `whoseMove`'s order for `approved` and `draft` only: an approved PR whose
+ * reviewer spoke last ("LGTM, squash please") is ready to merge — merging IS
+ * the reply — and a draft somebody commented on is still a draft, since
+ * nothing anyone says makes one mergeable. The pin is honoured before either,
+ * as everywhere: the viewer said so outright, and inference does not argue.
+ */
+export type Band = Move | "merge" | "draft"
+
+export const bandOf = (
+  health: Health | undefined,
+  sectionId: string,
+  standing?: Standing,
+  theySpokeLast?: boolean,
+  pinned?: boolean,
+  ownsRepo?: boolean,
+): Band => {
+  const position = standing ?? STANDING[sectionId] ?? "queued"
+  if (position === "authored" && !pinned) {
+    if (health === "approved" || (health === "waiting" && ownsRepo))
+      return "merge"
+    if (health === "draft") return "draft"
+  }
+  return whoseMove(health, sectionId, standing, theySpokeLast, pinned, ownsRepo)
 }
 
 // Lay out a section's GH items. The Done tab is a flat newest-first list; every
@@ -810,11 +865,14 @@ export const layoutGHItems = (
   // priority and sinks drafts. The band says what is known about a row; how rows
   // rank among themselves is a separate claim and re-ranking here would smuggle
   // it in.
-  const bands = (["you", "unknown", "them"] as const).map((side) => ({
+  // Ordered by cost to clear: one keypress, then work, then a verdict we
+  // could not reach, then waiting, then not yet asked.
+  const bands = (["merge", "you", "unknown", "them", "draft"] as const).map(
+    (side) => ({
     side,
     rows: sorted.filter(
       (i) =>
-        whoseMove(
+        bandOf(
           i.health,
           sectionId,
           i.standing,
@@ -823,7 +881,8 @@ export const layoutGHItems = (
           i.repo.startsWith(`${login}/`),
         ) === side,
     ),
-  }))
+  }),
+  )
   const filled = bands.filter((b) => b.rows.length > 0)
 
   return filled.flatMap(({ side, rows }) => [

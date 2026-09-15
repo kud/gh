@@ -88,6 +88,7 @@ import {
   sortByRecency,
   insertRepoHeaders,
   whoseMove,
+  bandOf,
   PIN_MARK,
   layoutGHItems,
   filterByOrigin,
@@ -109,6 +110,7 @@ import type {
   Section,
   PillVariant,
   Move,
+  Band,
   Standing,
   OriginSplit,
 } from "@kud/gh-workflow"
@@ -122,6 +124,7 @@ export {
   sortByRecency,
   insertRepoHeaders,
   whoseMove,
+  bandOf,
   PIN_MARK,
   layoutGHItems,
   filterByOrigin,
@@ -141,6 +144,7 @@ export type {
   Section,
   PillVariant,
   Move,
+  Band,
   Standing,
   OriginSplit,
 }

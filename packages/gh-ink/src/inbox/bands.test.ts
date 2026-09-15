@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { layoutGHItems, whoseMove, type GHItem } from "./inbox.js"
+import { layoutGHItems, whoseMove, bandOf, type GHItem } from "./inbox.js"
 
 /*
  * The 2026-08-26 case: the Review tab held 20 rows across five repos, of which
@@ -155,7 +155,9 @@ describe("whoseMove", () => {
       item({ repo: "viewer-org/tool", number: 3, health: "waiting" }),
     ]
     const laid = layoutGHItems(rows, "open", "viewer")
-    expect(labels(laid)).toEqual(["Your move (1)", "Their move (2)"])
+    // On your own repo nobody is asked, so the only move left is the merge —
+    // which is the band `authored` resolves it to, above Your move.
+    expect(labels(laid)).toEqual(["Ready to merge (1)", "Their move (2)"])
     expect(numbers(laid)).toEqual([1, 2, 3])
   })
 
@@ -343,7 +345,7 @@ describe("layoutGHItems bands", () => {
     ]
 
     const laid = layoutGHItems(rows, "draft", "viewer")
-    expect(labels(laid)).toEqual(["Your move (2)"])
+    expect(labels(laid)).toEqual(["Drafts (2)"])
     expect(numbers(laid)).toEqual([1, 2])
   })
 
@@ -403,5 +405,66 @@ describe("layoutGHItems bands", () => {
     ]
 
     expect(labels(layoutGHItems(rows, "done", "viewer"))).toEqual([])
+  })
+})
+
+describe("the authored bands", () => {
+  // On `queued` and `spoken` your move is one verb — review. On `authored` it
+  // is three: merge it, work on it, finish writing it. Seven PRs of yours under
+  // one "Your move (7)" was true and said nothing about which, with three
+  // drafts at the top because sortItems sinks them only within their repo. So
+  // the two ends peel off, ordered by cost to clear.
+  it("resolves your own PRs into ready · yours · theirs · drafts", () => {
+    const rows = [
+      item({ repo: "acme/a", number: 1, health: "draft" }),
+      item({ repo: "acme/a", number: 2, health: "approved" }),
+      item({ repo: "acme/a", number: 3, health: "ci-fail" }),
+      item({ repo: "acme/a", number: 4, health: "pending" }),
+      item({ repo: "acme/a", number: 5, health: "waiting" }),
+    ]
+    const laid = layoutGHItems(rows, "open", "viewer")
+    expect(labels(laid)).toEqual([
+      "Ready to merge (1)",
+      "Your move (1)",
+      "Their move (2)",
+      "Drafts (1)",
+    ])
+    expect(numbers(laid)).toEqual([2, 3, 4, 5, 1])
+  })
+
+  // `approved` is already the conjunction: computeHealth ranks every failure,
+  // conflict, thread and running check above it, so approved means green and
+  // quiet by construction. The turn arrow does not override it — "LGTM, squash
+  // please" is answered by merging — and a draft somebody commented on is
+  // still a draft, since nothing anyone says makes one mergeable.
+  it("lets the token beat the arrow for the two carve-outs", () => {
+    expect(bandOf("approved", "open", undefined, true)).toBe("merge")
+    expect(bandOf("draft", "open", undefined, true)).toBe("draft")
+    // Everything between still hears the arrow, as whoseMove always did.
+    expect(bandOf("pending", "open", undefined, true)).toBe("you")
+  })
+
+  it("honours the pin above both carve-outs", () => {
+    expect(bandOf("approved", "open", undefined, false, true)).toBe("you")
+    expect(bandOf("draft", "open", undefined, false, true)).toBe("you")
+  })
+
+  // From the other two standings "your move" is one verb, and a stranger's
+  // approved PR or draft is exactly where whoseMove already files it.
+  it("leaves the review standings on the three-way move", () => {
+    expect(bandOf("approved", "review")).toBe("you")
+    expect(bandOf("draft", "review")).toBe("them")
+    expect(bandOf("approved", "reviewed")).toBe("them")
+    expect(bandOf("draft", "reviewed")).toBe("them")
+  })
+
+  it("keeps a single-standing tab honest about which verb it holds", () => {
+    const rows = [
+      item({ repo: "kud/a", number: 1, health: "approved" }),
+      item({ repo: "kud/b", number: 2, health: "approved" }),
+    ]
+    expect(labels(layoutGHItems(rows, "open", "viewer"))).toEqual([
+      "Ready to merge (2)",
+    ])
   })
 })

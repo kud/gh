@@ -95,6 +95,7 @@ export {
   truncate,
   useActionMenu,
   whoseMove,
+  bandOf,
   windowCount,
   withHeaders,
   withoutItem,
