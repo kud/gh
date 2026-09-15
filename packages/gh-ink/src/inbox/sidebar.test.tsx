@@ -126,11 +126,13 @@ const mount = async (withSidebar: boolean, columns = 120) => {
   }
   return {
     frame: () => stdout.lastFrame(),
-    lineWith: (needle: string) =>
-      stdout
-        .lastFrame()
-        .split("\n")
-        .find((l) => l.includes(needle)) ?? "",
+    // The marks sit on the label line, above the key: a rail row is read by
+    // name, and the key is what you open.
+    rowOf: (key: string) => {
+      const lines = stdout.lastFrame().split("\n")
+      const at = lines.findIndex((l) => l.includes(key))
+      return at > 0 ? lines[at - 1]! : ""
+    },
     press,
     stop: () => {
       instance.unmount()
@@ -193,9 +195,9 @@ describe("the initiatives rail", () => {
 
   // Same arrow, same orange, same question as the PR rows: does this want me.
   it("marks an initiative that wants you", async () => {
-    const { lineWith, stop } = await mountOpen()
-    expect(lineWith("PROJ-900")).toContain("←")
-    expect(lineWith("PROJ-901")).not.toContain("←")
+    const { rowOf, stop } = await mountOpen()
+    expect(rowOf("PROJ-900")).toContain("←")
+    expect(rowOf("PROJ-901")).not.toContain("←")
     stop()
   })
 })
@@ -227,26 +229,26 @@ describe("browsing the rail", () => {
   })
 
   it("moves its own cursor with the arrows", async () => {
-    const { lineWith, press, stop } = await mountOpen()
+    const { rowOf, press, stop } = await mountOpen()
     await press(TAB)
-    expect(lineWith("PROJ-900")).toContain("❯")
+    expect(rowOf("PROJ-900")).toContain("❯")
     await press(DOWN)
-    expect(lineWith("PROJ-901")).toContain("❯")
-    expect(lineWith("PROJ-900")).not.toContain("❯")
+    expect(rowOf("PROJ-901")).toContain("❯")
+    expect(rowOf("PROJ-900")).not.toContain("❯")
     await press(UP)
-    expect(lineWith("PROJ-900")).toContain("❯")
+    expect(rowOf("PROJ-900")).toContain("❯")
     stop()
   })
 
   it("stops at the ends rather than wrapping", async () => {
-    const { lineWith, press, stop } = await mountOpen()
+    const { rowOf, press, stop } = await mountOpen()
     await press(TAB)
     await press(UP)
-    expect(lineWith("PROJ-900")).toContain("❯")
+    expect(rowOf("PROJ-900")).toContain("❯")
     await press(DOWN)
     await press(DOWN)
     await press(DOWN)
-    expect(lineWith("PROJ-901")).toContain("❯")
+    expect(rowOf("PROJ-901")).toContain("❯")
     stop()
   })
 

@@ -154,9 +154,14 @@ const frameAt = async (columns: number, withSidebar: boolean) => {
 
 // A row that fits is drawn on ONE line. A row that overflows is compressed by
 // Ink into a stack of fragments, which is what the reader actually sees — so
-// counting lines is a truer assertion than measuring the widest one.
+// counting lines is a truer assertion than measuring the widest one. Only the
+// list half counts: with the rail open, the segment after its rule is the
+// rail, whose rows carry keys of their own.
 const bodyLines = (frame: string) =>
-  frame.split("\n").filter((l) => /#\d|PROJ-/.test(l)).length
+  frame
+    .split("\n")
+    .map((l) => l.split("│")[1] ?? "")
+    .filter((l) => /#\d|PROJ-/.test(l)).length
 
 describe("a row given less width than it wants", () => {
   it("still draws each row on a single line, with the rail open", async () => {

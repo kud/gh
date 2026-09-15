@@ -1,7 +1,13 @@
 import React from "react"
 import { render } from "ink-testing-library"
 import { describe, it, expect } from "vitest"
-import { SidePanel, railCapacity, counts, type Sidebar } from "./side-panel.js"
+import {
+  SidePanel,
+  railCapacity,
+  counts,
+  truncateWords,
+  type Sidebar,
+} from "./side-panel.js"
 
 /*
  * The rail is fixed to the list's height, and Ink's answer to more rows than
@@ -45,7 +51,7 @@ describe("counts", () => {
   // notice, so a counted zero is printed rather than folded away.
   it("prints a zero it actually counted", () => {
     expect(counts({ key: "P-1", label: "x", done: 4, total: 9, live: 0 })).toBe(
-      "4/9 · 0 live",
+      "4/9 · nothing live",
     )
   })
 
@@ -98,5 +104,109 @@ describe("SidePanel", () => {
     expect(
       frameOf(<SidePanel sidebar={{ title: "Initiatives", rows: [] }} />),
     ).toContain("nothing open")
+  })
+})
+
+describe("the live cell", () => {
+  it("takes the host's words, with the number handed in", () => {
+    const onBoard = (n: number) => (n === 0 ? "off board" : `${n} on board`)
+    expect(
+      counts({ key: "P-1", label: "x", done: 1, total: 3, live: 4 }, onBoard),
+    ).toBe("1/3 · 4 on board")
+    expect(counts({ key: "P-1", label: "x", live: 0 }, onBoard)).toBe(
+      "off board",
+    )
+  })
+
+  it("draws the host's words on the rail", () => {
+    const frame = frameOf(
+      <SidePanel
+        sidebar={{
+          title: "Initiatives",
+          liveLabel: (n) => (n === 0 ? "off board" : `${n} on board`),
+          rows: [
+            { key: "P-1", label: "moving", live: 2, done: 1, total: 4 },
+            { key: "P-2", label: "quiet", live: 0, done: 0, total: 9 },
+          ],
+        }}
+      />,
+    )
+    expect(frame).toContain("2 on board")
+    expect(frame).toContain("off board")
+    expect(frame).toContain("1/4")
+    expect(frame).toContain("0/9")
+  })
+})
+
+describe("truncateWords", () => {
+  it("leaves a label that fits alone", () => {
+    expect(truncateWords("Automate the accounting run", 45)).toBe(
+      "Automate the accounting run",
+    )
+  })
+
+  // A cut mid word makes the reader finish the word before the row can be read.
+  it("cuts at a word boundary and says so", () => {
+    expect(
+      truncateWords(
+        "Cloudsearch → OpenSearch migration: frontend-royalties & frontend-contract",
+        45,
+      ),
+    ).toBe("Cloudsearch → OpenSearch migration…")
+  })
+
+  // `batch (…` reads as a typo where `batch…` reads as a cut.
+  it("drops the punctuation a boundary cut leaves dangling", () => {
+    expect(
+      truncateWords("Transfer of Earnings adjustments batch (Abacus)", 40),
+    ).toBe("Transfer of Earnings adjustments batch…")
+    expect(
+      truncateWords("Product analytics — Segment event tracking, funnels", 44),
+    ).toBe("Product analytics — Segment event tracking…")
+  })
+
+  // Honouring the boundary must not surrender half the line to a space.
+  it("falls back to a character cut when the boundary is too early", () => {
+    expect(truncateWords("https://example.com/a/very/long/path x", 20)).toBe(
+      "https://example.com…",
+    )
+  })
+})
+
+describe("the row anatomy", () => {
+  const two: Sidebar = {
+    title: "Initiatives",
+    rows: [
+      { key: "PROJ-1", label: "wants you", live: 1, wantsYou: true },
+      { key: "PROJ-2", label: "under the cursor", live: 0 },
+    ],
+  }
+
+  // Label first: a roadmap is read by name, and the key is what you open.
+  it("puts the label above its key", () => {
+    const lines = frameOf(<SidePanel sidebar={two} />).split("\n")
+    const label = lines.findIndex((l) => l.includes("wants you"))
+    expect(lines[label + 1]).toContain("PROJ-1")
+  })
+
+  // Two marks in two cells: `←` is what wants you, `❯` is where you are, and a
+  // row can be both without either hiding the other.
+  it("keeps the arrow and the cursor in their own cells", () => {
+    const frame = frameOf(<SidePanel sidebar={two} focused cursor={1} />)
+    expect(frame).toMatch(/  ← wants you/)
+    expect(frame).toMatch(/❯   under the cursor/)
+    const both = frameOf(
+      <SidePanel
+        sidebar={{ ...two, rows: [two.rows[0]!] }}
+        focused
+        cursor={0}
+      />,
+    )
+    expect(both).toMatch(/❯ ← wants you/)
+  })
+
+  it("names the focus in a word, not only a hue", () => {
+    expect(frameOf(<SidePanel sidebar={two} focused />)).toContain("● focus")
+    expect(frameOf(<SidePanel sidebar={two} />)).not.toContain("● focus")
   })
 })

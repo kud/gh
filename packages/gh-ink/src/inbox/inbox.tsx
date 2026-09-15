@@ -1732,11 +1732,11 @@ const InboxHeader = ({
   // its trailing word sits inside a width budget, so a row that gained one shed
   // its repo name or its age to pay for it, and reflowed while being read.
   const [statusText, statusColor] = hasPending
-    ? [`● ${pendingSummary || "new"} · r apply`, "#FF8700"]
+    ? [`● ${pendingSummary || "new"} · r apply`, colors.accent]
     : refreshing
       ? ["↻ refreshing…", "cyan"]
       : appliedSummary
-        ? [`◉ ${appliedSummary}`, "#FF8700"]
+        ? [`◉ ${appliedSummary}`, colors.accent]
         : fetchedAt
           ? [`updated ${agoText(fetchedAt)}`, undefined]
           : ["", undefined]
@@ -1754,14 +1754,14 @@ const InboxHeader = ({
   )
   return (
     <Box marginBottom={1}>
-      <Text color="#FF8700" bold>
+      <Text color={colors.accent} bold>
         {brand}
       </Text>
       <Text dimColor>{countSeg}</Text>
       {userSeg ? <Text>{userSeg}</Text> : null}
       {scopeLabel ? <Text dimColor>{workLabel}</Text> : null}
       {budgetLabel ? (
-        <Text bold color={budgetCritical ? "#FF5F5F" : "#FF8700"}>
+        <Text bold color={budgetCritical ? "#FF5F5F" : colors.accent}>
           {budgetSeg}
         </Text>
       ) : null}
@@ -1866,7 +1866,7 @@ export const CiStatusLine = ({
       </Text>
       <Text bold>{status.job}</Text>
       <Text dimColor>{"  " + label}</Text>
-      <Text color="#FF8700">{"  #" + status.buildNumber}</Text>
+      <Text color={colors.accent}>{"  #" + status.buildNumber}</Text>
       {status.age ? <Text dimColor>{"  " + status.age}</Text> : null}
     </Box>
   )
@@ -2171,13 +2171,13 @@ const TRANSIT_IN_FRAMES = ["·", "○", "◎", "◉"]
 const TRANSIT_COLOUR: Record<Transient, string> = {
   in: "#3FB950",
   out: "#8B949E",
-  changed: "#FF8700",
+  changed: colors.accent,
   // A move is neither an arrival nor a departure, so it takes the colour of the
   // third thing that can happen to a row you already had: it changed. Both ends
   // of one move wear the same colour and the same word, which is what lets you
   // recognise the row you just watched leave when you land on the tab it went to.
-  "moved-in": "#FF8700",
-  "moved-out": "#FF8700",
+  "moved-in": colors.accent,
+  "moved-out": colors.accent,
 }
 // Lower case, like every other pill on the row. The capitals were doing a job
 // back when these were bare coloured words competing with a line of dim metadata
@@ -2355,7 +2355,7 @@ const ItemRow = ({
   if (item.kind === "subgroup-header")
     return (
       <Box marginTop={gap ? 1 : 0}>
-        <Text color="#FF8700" bold>
+        <Text color={colors.accent} bold>
           {"  » "}
         </Text>
         <Text bold>{item.label}</Text>
@@ -2457,7 +2457,7 @@ const ItemRow = ({
             the ticket — and a dimmed key-only repeat was tried and dropped: it
             made the second band's heading harder to read for a duplication that
             was never actually confusing. */}
-        <Text color="#FF8700" bold={active}>
+        <Text color={colors.accent} bold={active}>
           {item.key + "  "}
         </Text>
         <Text
@@ -2551,12 +2551,12 @@ const ItemRow = ({
   // map has to hold ACROSS the adjacent cells too, not just within one, and
   // `pinMarkIsUnambiguous` in health-display.test.ts now pins that.
   const [turnIcon, turnColor] = item.pinned
-    ? [PIN_MARK, "#FF8700"]
+    ? [PIN_MARK, colors.accent]
     : !login || !item.lastActor
       ? [" ", "white"]
       : spokeLast
         ? ["→", colors.secondary]
-        : ["←", "#FF8700"]
+        : ["←", colors.accent]
   const numStr = `#${item.number}`.padEnd(7)
   // Hide "by me" — the author suffix is only signal when it's someone else.
   const showAuthor = !!item.author && item.author !== login
@@ -2764,7 +2764,7 @@ const ItemRow = ({
       <Text color={turnColor as any} bold={turnIcon === "←"}>
         {turnIcon + " "}
       </Text>
-      <Text color="#FF8700">{numStr}</Text>
+      <Text color={colors.accent}>{numStr}</Text>
       <Text
         bold={active || (!!transient && isArrival(transient))}
         dimColor={!!transient && isDeparture(transient)}
@@ -2829,7 +2829,7 @@ const ItemRow = ({
           unknown turn (no login, no lastActor): a count we cannot attribute is
           still worth seeing. */}
       {unresolvedLabel && !givingUp.threads ? (
-        <Text bold={!spokeLast} color={spokeLast ? colors.secondary : "#FF8700"}>
+        <Text bold={!spokeLast} color={spokeLast ? colors.secondary : colors.accent}>
           {"  " + unresolvedLabel}
         </Text>
       ) : null}
@@ -2953,7 +2953,7 @@ export const ActionMenu = ({
 // The turn column's vocabulary, kept beside healthLegend so the two read as
 // one system in the modal.
 const TURN_LEGEND: [string, string, string][] = [
-  ["←", "#FF8700", "They spoke last · your turn"],
+  ["←", colors.accent, "They spoke last · your turn"],
   ["→", colors.secondary, "You spoke last · waiting on them"],
 ]
 
@@ -3157,7 +3157,7 @@ export const HelpModal = ({
       })),
       {
         cell: "\u{f086}",
-        color: "#FF8700",
+        color: colors.accent,
         bold: true,
         label: "Open-thread count",
       },
@@ -3172,7 +3172,7 @@ export const HelpModal = ({
             title: "Tabs",
             rows: tabHelp.map(([tab, meaning]) => ({
               cell: tab,
-              color: "#FF8700",
+              color: colors.accent,
               label: meaning,
             })),
           },
@@ -3284,7 +3284,7 @@ const ExplainModal = ({ item, login }: { item: GHItem; login: string }) => (
     paddingX={1}
     width={Math.min(COLS, 78)}
   >
-    <Text color="#FF8700" bold>
+    <Text color={colors.accent} bold>
       {`#${item.number} · ${item.repo}`}
     </Text>
     <Text>{item.title}</Text>
@@ -4498,7 +4498,7 @@ const BrowseScreen = ({
           refusing what you ask for, and `r` is never gated. */}
       {skippedForBudget ? (
         <Box marginBottom={1}>
-          <Text bold color="#FF8700">
+          <Text bold color={colors.accent}>
             {"  ⚡ auto-refresh paused to save API budget"}
           </Text>
           <Text dimColor>{"   r refreshes anyway"}</Text>
@@ -4533,7 +4533,7 @@ const BrowseScreen = ({
               s.id,
               pulseSettled ? PULSE_SETTLED_FRAME : sparkFrame,
             ),
-            markerColor: "#FF8700",
+            markerColor: colors.accent,
           }))}
         />
       </Box>
@@ -4549,7 +4549,7 @@ const BrowseScreen = ({
         </Box>
       ) : repoFilter.size > 0 ? (
         <Box marginBottom={1}>
-          <Text color="#FF8700">{"  ◉ "}</Text>
+          <Text color={colors.accent}>{"  ◉ "}</Text>
           <Text>{`${repoFilter.size} repo${
             repoFilter.size !== 1 ? "s" : ""
           }`}</Text>
