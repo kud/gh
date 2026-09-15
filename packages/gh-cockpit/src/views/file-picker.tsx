@@ -92,8 +92,10 @@ export const FilePicker = ({
     setNote(`↗ ${f.path}${f.line ? `:${f.line}` : ""} — ${ed}`)
   }
 
-  useInput((input, key) => {
-    if (key.escape || input === "q") return onBack()
+  // Neither `esc` nor `q` is bound here. This is a LEAF — it pushes no layers of
+  // its own — so the drill above it closes it through its peel, and the app root
+  // owns both keys. See `DetailContext.registerPeel`.
+  useInput((_input, key) => {
     if (key.return && list[safeCursor]) void open(list[safeCursor])
   })
 
@@ -104,7 +106,7 @@ export const FilePicker = ({
       hints={[
         ["↑↓", "nav"],
         ["↵", "open in editor"],
-        ["q/esc", "back"],
+        ["esc", "back"],
       ]}
     >
       {!files ? (

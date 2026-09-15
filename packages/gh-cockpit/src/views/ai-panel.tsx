@@ -126,11 +126,20 @@ export const AiLauncher = ({
   login,
   prompt,
   onBack,
+  peelRef,
 }: {
   item: { number: number; repo: string; branch?: string }
   login: string
   prompt?: string
   onBack: () => void
+  /**
+   * Where the launcher publishes its own two-step back. It is NOT a leaf — agent
+   * → placement is two screens — so backing out of the placement returns to the
+   * agent list rather than leaving the launcher entirely. `step` stays here
+   * because it belongs here; lifting it into both callers would put the
+   * launcher's internal state in two places that do not own it.
+   */
+  peelRef?: React.MutableRefObject<(() => boolean) | null>
 }) => {
   const [agents, setAgents] = useState<Agent[] | null>(null)
   const [step, setStep] = useState<"agent" | "place">("agent")
@@ -184,15 +193,23 @@ export const AiLauncher = ({
     }
   }
 
-  useInput((input, key) => {
-    if (key.escape || input === "q") {
-      if (step === "place") {
-        setStep("agent")
-        setCursor(0)
-        return
-      }
-      return onBack()
+  // `esc` / `q` are the app's; what is published here is only the step this view
+  // can pop itself. Returning `false` hands the press back up, where the drill
+  // above closes the launcher.
+  useEffect(() => {
+    if (!peelRef) return
+    peelRef.current = () => {
+      if (step !== "place") return false
+      setStep("agent")
+      setCursor(0)
+      return true
     }
+    return () => {
+      peelRef.current = null
+    }
+  })
+
+  useInput((input, key) => {
     if (key.return) {
       if (step === "agent") {
         setAgent((agents ?? [])[safeCursor] ?? null)
@@ -213,7 +230,7 @@ export const AiLauncher = ({
       hints={[
         ["↑↓", "nav"],
         ["↵", step === "agent" ? "choose" : "launch"],
-        ["q/esc", step === "place" ? "back" : "close"],
+        ["esc", step === "place" ? "back" : "close"],
       ]}
     >
       {!agents ? (

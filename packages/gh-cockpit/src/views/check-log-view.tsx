@@ -118,8 +118,10 @@ export const CheckLogView = ({
     }
   }, [repo, jobId])
 
-  useInput((input, key) => {
-    if (key.escape || input === "q") return onBack()
+  // Neither `esc` nor `q` is bound here. This is a LEAF — it pushes no layers of
+  // its own — so the drill above it closes it through its peel, and the app root
+  // owns both keys. See `DetailContext.registerPeel`.
+  useInput((input) => {
     if (input === "o" && url) $`open ${url}`.catch(() => {})
   })
 
@@ -141,7 +143,7 @@ export const CheckLogView = ({
         ["↑↓/space", "scroll"],
         ["g/G", "top/tail"],
         ["o", "open"],
-        ["q/esc", "back"],
+        ["esc", "back"],
       ]}
     >
       <ScrollView lines={lines} initialStart={jumpTo} />

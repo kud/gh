@@ -1,5 +1,5 @@
 import { $ } from "zx"
-import React, { useState } from "react"
+import React, { useEffect, useRef, useState } from "react"
 import { Box, useInput } from "ink"
 import { Tabs, type TabItem } from "@kud/ink-ui"
 import { DrillView } from "./drill-view.js"
@@ -20,6 +20,8 @@ export const IssueView = ({
   item,
   login,
   onBack,
+  registerPeel,
+  onTyping,
 }: {
   item: {
     number: number
@@ -30,6 +32,10 @@ export const IssueView = ({
   }
   login: string
   onBack: () => void
+  // `esc` and `backspace` are the app's — see `DetailContext`. This view says
+  // what to close; it does not bind them.
+  registerPeel?: (peel: (() => boolean) | null) => void
+  onTyping?: (typing: boolean) => void
 }) => {
   const [replying, setReplying] = useState(false)
   const [ai, setAi] = useState(false)
@@ -43,9 +49,26 @@ export const IssueView = ({
     { value: "conversation", label: "Conversation" },
   ]
 
+  // Mirrors PrView's peel, minus the layers an issue does not have — no check
+  // log, no file picker, no action menu. `replying` is the same unreachable
+  // guard it is there: the root stands its keys down while the box has focus.
+  const aiPeel = useRef<(() => boolean) | null>(null)
+  const peel = (): boolean => {
+    if (replying) return true
+    if (ai) return aiPeel.current?.() ?? (setAi(false), true)
+    if (copy) return setCopy(false), true
+    return false
+  }
+  useEffect(() => {
+    registerPeel?.(peel)
+    return () => registerPeel?.(null)
+  })
+  useEffect(() => {
+    onTyping?.(replying)
+  }, [replying, onTyping])
+
   useInput(
     (input, key) => {
-      if (key.escape || input === "q") return onBack()
       if (input === "o") $`open ${item.url}`.catch(() => {})
       // Same key as PrView's, deliberately: the two drills mirror each other, and
       // an issue is the half of the inbox that most often wants delegating.
@@ -62,6 +85,7 @@ export const IssueView = ({
         login={login}
         prompt={seedPromptFor({ ...item, kind: "issue" })}
         onBack={() => setAi(false)}
+        peelRef={aiPeel}
       />
     )
 
@@ -82,7 +106,7 @@ export const IssueView = ({
         ["a", "AI"],
         ["y", "copy prompt"],
         ["o", "open in browser"],
-        ["q/esc", "back"],
+        ["esc", "back"],
       ]}
     >
       <Box marginBottom={1}>

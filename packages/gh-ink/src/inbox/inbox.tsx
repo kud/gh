@@ -166,6 +166,22 @@ export type DetailContext = {
    * once. Optional so a host that cannot merge need not implement it.
    */
   onMerged?: (item: GHItem) => void
+  /**
+   * Where a drill publishes its PEEL — close the topmost layer it owns and say
+   * whether there was one. `esc` and `backspace` are bound once at the app root
+   * and routed here; a drill view binds neither itself, per `@kud/ink-ui`'s
+   * contract that a view exported from a `*-ink` package takes `onBack` and
+   * leaves the app's keys to the app.
+   *
+   * Returning `false` means "no layer of mine was open", at which point the root
+   * closes the drill itself.
+   */
+  registerPeel?: (peel: (() => boolean) | null) => void
+  /**
+   * True while a text field inside the drill owns the keyboard — a reply box —
+   * so the root stands `q`, `esc` and `backspace` down and the field keeps them.
+   */
+  onTyping?: (typing: boolean) => void
 }
 
 export type Action = {
@@ -5162,17 +5178,22 @@ export const App = ({
   useAppKeys({
     isActive: !typing,
     onBack: () => {
-      // Short on purpose while the drills still own their own `esc`: an
-      // unregistered drill is simply not the root's business, so behaviour
-      // inside one is bit-identical to before this hook existed. Closing the
-      // drill from here BEFORE it registers a peel would fire twice — the
-      // view's own handler and this one — and drop you two levels on one press.
+      // Inside a drill the drill's own layers peel first; when it reports none
+      // left, closing the drill IS the next layer out. An `ext` body registers
+      // no peel, so it closes on the first press, which is what it did before.
       if (
         state.phase === "pr" ||
         state.phase === "issue" ||
         state.phase === "ext"
-      )
-        return drillPeel.current?.() ?? false
+      ) {
+        if (drillPeel.current?.()) return true
+        setState({
+          phase: "browse",
+          sections: state.sections,
+          login: state.login,
+        })
+        return true
+      }
       return browsePeel.current?.() ?? false
     },
   })
@@ -5894,6 +5915,10 @@ export const App = ({
           item: overlay.item,
           kind: overlay.kind,
           login: state.login,
+          registerPeel: (peel) => {
+            drillPeel.current = peel
+          },
+          onTyping: setTyping,
           onBack: toBrowse,
           onRefresh: applyOrRefresh,
           onRemove: markLeaving,

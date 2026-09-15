@@ -22,10 +22,18 @@ export const detailFor = (ctx: DetailContext) =>
       onRefresh={ctx.onRefresh}
       onRemove={ctx.onRemove}
       onMerged={ctx.onMerged}
+      registerPeel={ctx.registerPeel}
+      onTyping={ctx.onTyping}
     />
   ) : (
     // No refresh/remove/merged: IssueView has no action menu to hang them off,
     // so passing them would type-check into a handler nothing ever calls. They
     // belong here the day it grows the `M` menu PrView has.
-    <IssueView item={ctx.item} login={ctx.login} onBack={ctx.onBack} />
+    <IssueView
+      item={ctx.item}
+      login={ctx.login}
+      onBack={ctx.onBack}
+      registerPeel={ctx.registerPeel}
+      onTyping={ctx.onTyping}
+    />
   )

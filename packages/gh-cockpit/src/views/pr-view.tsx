@@ -1,5 +1,5 @@
 import { $ } from "zx"
-import React, { useState } from "react"
+import React, { useEffect, useRef, useState } from "react"
 import { Box, Text, useInput } from "ink"
 import { colors, Tabs, useTabs, type TabItem } from "@kud/ink-ui"
 import { DrillView } from "./drill-view.js"
@@ -41,6 +41,8 @@ export const PrView = ({
   onRefresh,
   onRemove,
   onMerged,
+  registerPeel,
+  onTyping,
 }: {
   // The full row, not a structural subset: the action menu is built from the
   // same item the inbox builds it from, so a narrower shape here would mean
@@ -55,6 +57,10 @@ export const PrView = ({
   // before dropping it. Optional all the way down, so a merge still works if the
   // shell never wired one — HealthPanel falls back to reloading, as it always did.
   onMerged?: (item: GHItem) => void
+  // `esc` and `backspace` are the app's, bound once at its root — this view
+  // publishes what to close instead of binding them. See `DetailContext`.
+  registerPeel?: (peel: (() => boolean) | null) => void
+  onTyping?: (typing: boolean) => void
 }) => {
   const [log, setLog] = useState<LogTarget | null>(null)
   const [ai, setAi] = useState(false)
@@ -143,6 +149,37 @@ export const PrView = ({
     { key: "opened", text: summary.opened },
   ].filter((c): c is { key: string; text: string } => !!c.text)
 
+  /*
+   * THE PEEL — this drill's own layers, innermost first. Returning `false` means
+   * nothing of mine is open, at which point closing the whole drill is the
+   * root's next layer out.
+   *
+   * `replying` is a GUARD rather than a behaviour: the root stands its keys down
+   * while the reply box has focus, so this arm is unreachable today. It exists
+   * so that if that wiring ever regresses, `esc` in a half-typed reply does
+   * nothing instead of throwing the drill away with the text in it.
+   *
+   * The AI launcher gets to peel its own two-step first — agent → placement is
+   * two screens, and backing out of the placement should not leave the launcher.
+   */
+  const aiPeel = useRef<(() => boolean) | null>(null)
+  const peel = (): boolean => {
+    if (menu.actions !== null) return menu.close(), true
+    if (replying) return true
+    if (log !== null) return setLog(null), true
+    if (files) return setFiles(false), true
+    if (ai) return aiPeel.current?.() ?? (setAi(false), true)
+    if (copy) return setCopy(false), true
+    return false
+  }
+  useEffect(() => {
+    registerPeel?.(peel)
+    return () => registerPeel?.(null)
+  })
+  useEffect(() => {
+    onTyping?.(replying)
+  }, [replying, onTyping])
+
   const checkLabel = (c: PrCheck) =>
     c.workflowName
       ? `${c.workflowName} / ${c.context ?? c.name}`
@@ -164,7 +201,6 @@ export const PrView = ({
   useInput(
     (input, key) => {
       if (menu.handleKey(key)) return
-      if (key.escape || input === "q") return onBack()
       // `M`, not `m`: HealthPanel owns lowercase `m` for merge on this screen.
       // Same mnemonic as the inbox's `m`, one shift away, and both are safe to
       // hit by mistake — the menu is inert until you pick something, and merge
@@ -238,6 +274,7 @@ export const PrView = ({
         login={login}
         prompt={seedPromptFor(item)}
         onBack={() => setAi(false)}
+        peelRef={aiPeel}
       />
     )
 
@@ -282,7 +319,7 @@ export const PrView = ({
           ["M", "actions"],
           ["←→", "tab"],
           ["o", "open PR"],
-          ["q", "back"],
+          ["esc", "back"],
         ]
       : [
           ["↑↓", "thread"],
@@ -293,7 +330,7 @@ export const PrView = ({
           ["a", "AI"],
           ["y", "copy prompt"],
           ["←→", "tab"],
-          ["q", "back"],
+          ["esc", "back"],
         ]
 
   return (
