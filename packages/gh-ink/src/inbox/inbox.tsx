@@ -4033,12 +4033,33 @@ const BrowseScreen = ({
       }
       if (key.return || input === "o") {
         const row = railRows[railAt]
+        if (!row) return
+        // ↵ opens the initiative the way ↵ opens a row: through whichever
+        // extension claims task rows — the ticket drill, on a Jira cockpit. A
+        // rail row IS a container of work, so it is handed over as one, and
+        // the drill it lands in is the same screen its children open. Only
+        // where no extension claims tasks does ↵ fall through to the browser,
+        // which `o` reaches directly on any host.
+        if (
+          key.return &&
+          openDrillView({
+            kind: "task",
+            key: row.key,
+            ticket: row.key,
+            summary: row.label,
+            url: row.url ?? "",
+            status: "",
+            age: "",
+            indent: false,
+          })
+        )
+          return
         // Silent where the host gave no URL. That is a fact about the surface
         // rather than a failure the reader can act on, and a flash saying so
         // would be noise on every press.
-        if (row?.url) {
-          quietly`open ${row.url}`.catch(() => {})
-          showFlash(`↗ Opened ${row.key}`)
+        if (row.url) {
+          quietly`open `.catch(() => {})
+          showFlash(`↗ Opened `)
         }
         return
       }
@@ -4440,6 +4461,7 @@ const BrowseScreen = ({
       [
         ["↑↓", "initiative"],
         ["↵", "open"],
+        ["o", "browser"],
         ["⇥/esc", "back to list"],
         ["?", "help"],
         ["q", "quit"],

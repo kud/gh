@@ -41,6 +41,13 @@ export type SidebarRow = {
    * an error about a host decision the reader cannot change.
    */
   url?: string
+  /**
+   * A one-cell mark drawn before the key on the facts line — a priority
+   * arrow — and its colour: the same pair `TaskRow` takes, so a host fills
+   * both from one source. Absent draws the blank the cell keeps anyway.
+   */
+  marker?: string
+  markerColor?: string
 }
 
 /**
@@ -331,7 +338,12 @@ export const SidePanel = ({
                   {truncateWords(row.label, labelCols)}
                 </Text>
               </Box>
-              <Box paddingLeft={FACTS_INDENT}>
+              <Box>
+                {/* The mark sits in the indent, in the cell the list draws it
+                    in — before the key, so the eye learns one place. */}
+                <Text color={row.markerColor}>
+                  {" ".repeat(FACTS_INDENT - 2) + (row.marker ?? " ") + " "}
+                </Text>
                 <Text color={colors.secondary}>
                   {row.key.padEnd(KEY_COLS) + GUTTER}
                 </Text>

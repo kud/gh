@@ -232,3 +232,24 @@ describe("railWidth", () => {
     expect(wide).toContain("migration: frontend-royalties")
   })
 })
+
+describe("the rail's marker", () => {
+  it("draws the host's mark before the key, and a blank where there is none", () => {
+    const frame = frameOf(
+      <SidePanel
+        sidebar={{
+          title: "Initiatives",
+          rows: [
+            { key: "P-1", label: "high", marker: "⇈", live: 1 },
+            { key: "P-2", label: "plain", live: 1 },
+          ],
+        }}
+      />,
+    )
+    const lines = frame.split("\n")
+    const marked = lines.find((l) => l.includes("P-1")) ?? ""
+    const plain = lines.find((l) => l.includes("P-2")) ?? ""
+    expect(marked).toMatch(/⇈ P-1/)
+    expect(plain.indexOf("P-2")).toBe(marked.indexOf("P-1"))
+  })
+})
