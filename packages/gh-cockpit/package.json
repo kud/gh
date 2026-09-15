@@ -55,7 +55,7 @@
   "dependencies": {
     "@kud/gh": "0.16.0",
     "@kud/gh-ink": "0.52.1",
-    "@kud/ink-ui": "0.28.2",
+    "@kud/ink-ui": "0.29.0",
     "zx": "8.8.5",
     "@kud/gh-workflow": "0.11.0"
   },

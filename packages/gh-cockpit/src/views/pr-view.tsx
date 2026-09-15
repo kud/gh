@@ -89,8 +89,6 @@ export const PrView = ({
   // switching is suspended for the same reason.
   const menuOpen = menu.actions !== null
 
-  // useTabs binds Tab/Shift+Tab only — the ←→ binding below is not redundant
-  // with it, and removing it drops arrow navigation entirely.
   const { active, setActive } = useTabs(tabItems, {
     initial: defaultTab ?? "health",
     isActive: inputActive && !menuOpen,
@@ -184,8 +182,6 @@ export const PrView = ({
         setFiles(true)
         return
       }
-      if (key.leftArrow || key.rightArrow)
-        setActive((t) => (t === "health" ? "conversation" : "health"))
     },
     { isActive: inputActive },
   )

@@ -4044,14 +4044,15 @@ const BrowseScreen = ({
       setCursors((p) => ({ ...p, [activeId]: next }))
       setViewStarts((p) => ({ ...p, [activeId]: newVs }))
     }
-    if (key.leftArrow) setTabIdx((i) => Math.max(0, i - 1))
-    if (key.rightArrow)
-      setTabIdx((i) => Math.min(localSections.length - 1, i + 1))
-    if (key.tab)
+    // ←→ and Tab are one gesture on the ring, wrapping at both ends — the
+    // arrows used to clamp while Tab wrapped four lines below, two end
+    // behaviours for one bar. Same contract as ink-ui's useTabs, which this
+    // screen does not mount because its tab is a position over sections that
+    // come and go, clamped separately above.
+    const step = key.leftArrow || (key.tab && key.shift) ? -1 : key.rightArrow || key.tab ? 1 : 0
+    if (step !== 0)
       setTabIdx(
-        (i) =>
-          (i + (key.shift ? -1 : 1) + localSections.length) %
-          localSections.length,
+        (i) => (i + step + localSections.length) % localSections.length,
       )
     // Ink's exit, not process.exit: it unmounts and hands the terminal back
     // (alternate screen included) instead of leaving whatever was on it.
