@@ -1,6 +1,6 @@
 {
   "name": "@kud/gh-webhook-replay",
-  "version": "0.1.27",
+  "version": "0.1.28",
   "description": "Replay the latest pull_request webhook delivery on a GitHub repo hook.",
   "type": "module",
   "bin": {
