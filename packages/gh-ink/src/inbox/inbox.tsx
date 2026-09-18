@@ -36,9 +36,15 @@ import type { Transient } from "./diff.js"
 import {
   SidePanel,
   railWidth,
+  railsOf,
+  railRowsOf,
   type LiveLabel,
-  type Sidebar,
+  type Rails,
 } from "../components/side-panel.js"
+import {
+  StatusStripLine,
+  type StatusStrip,
+} from "../components/status-strip.js"
 import {
   colors,
   CommandPalette,
@@ -305,9 +311,7 @@ const turnSentences = (item: GHItem, login: string): string[] => {
   // back to you as someone else's inaction.
   const them = item.author && item.author !== login ? item.author : null
   if (!them)
-    return [
-      `You spoke last, ${when}. It is waiting on a reviewer, not on you.`,
-    ]
+    return [`You spoke last, ${when}. It is waiting on a reviewer, not on you.`]
 
   const lines = [`You spoke last, ${when}. The ball is with ${them}.`]
   if (d?.lastCommitAt && d.lastEventAt && d.lastCommitAt < d.lastEventAt)
@@ -723,16 +727,16 @@ export const maxViewStart = (items: AnyItem[], budget: number): number => {
  */
 export const rowKey = (item: AnyItem): string =>
   item.kind === "task"
-    ? (item.instanceKey ?? item.key)
+    ? item.instanceKey ?? item.key
     : item.kind === "repo-header"
-      ? `header:${item.repo}`
-      : item.kind === "subgroup-header"
-        ? `subgroup:${item.label}`
-        : item.kind === "show-more"
-          ? `show-more:${item.hidden[0]?.repo ?? ""}`
-          : item.kind === "show-less"
-            ? `show-less:${item.toHide[0]?.repo ?? ""}`
-            : `${item.repo}/${item.number}`
+    ? `header:${item.repo}`
+    : item.kind === "subgroup-header"
+    ? `subgroup:${item.label}`
+    : item.kind === "show-more"
+    ? `show-more:${item.hidden[0]?.repo ?? ""}`
+    : item.kind === "show-less"
+    ? `show-less:${item.toHide[0]?.repo ?? ""}`
+    : `${item.repo}/${item.number}`
 
 const firstSelectable = (section: Section): number =>
   Math.max(
@@ -1732,8 +1736,8 @@ const InboxHeader = ({
   const countSeg = loading
     ? "      loading…  "
     : quiet
-      ? "  "
-      : `  ${String(total).padStart(3)} item${total !== 1 ? "s" : ""}  ·  `
+    ? "  "
+    : `  ${String(total).padStart(3)} item${total !== 1 ? "s" : ""}  ·  `
   const userSeg = loading || quiet ? "" : `@${login}  `
   // A LABEL, not a control, and the HOST'S WORD rather than one of ours. Which
   // side you are on is settled when the command starts, so a switch here would
@@ -1770,12 +1774,12 @@ const InboxHeader = ({
   const [statusText, statusColor] = hasPending
     ? [`● ${pendingSummary || "new"} · r apply`, colors.accent]
     : refreshing
-      ? ["↻ refreshing…", "cyan"]
-      : appliedSummary
-        ? [`◉ ${appliedSummary}`, colors.accent]
-        : fetchedAt
-          ? [`updated ${agoText(fetchedAt)}`, undefined]
-          : ["", undefined]
+    ? ["↻ refreshing…", "cyan"]
+    : appliedSummary
+    ? [`◉ ${appliedSummary}`, colors.accent]
+    : fetchedAt
+    ? [`updated ${agoText(fetchedAt)}`, undefined]
+    : ["", undefined]
   const statusSeg = statusText ? statusText + "  " : ""
 
   const fill = Math.max(
@@ -1820,7 +1824,25 @@ const InboxHeader = ({
 // A standing single-line row, always the same height (one line + marginBottom)
 // across loading/error/ready so the content below it never jumps.
 export type CiStatusState =
-  { kind: "loading" } | { kind: "error" } | { kind: "ready"; status: CiStatus }
+  | { kind: "loading" }
+  | { kind: "error" }
+  | { kind: "ready"; status: CiStatus }
+
+// The strip's poll state, the same three-way shape as the CI line's: out for
+// the first answer, or ready with what the host said — `null` being a real
+// answer ("nothing configured"), never a failed one, since a failed poll keeps
+// the last strip up rather than blanking the row.
+export type StripStatusState =
+  | { kind: "loading" }
+  | { kind: "ready"; strip: StatusStrip | null }
+
+/** What the strip SAYS, ignoring when it said it. */
+export const stripSignature = (strip: StatusStrip | null): string =>
+  strip === null
+    ? "∅"
+    : strip.items
+        .map((i) => `${i.key}=${i.state}${i.alarm ? "▲" : ""}`)
+        .join(",")
 
 export const toCiStatusState = (status: CiStatus | null): CiStatusState =>
   status ? { kind: "ready", status } : { kind: "error" }
@@ -2276,11 +2298,7 @@ export const TAB_MARK = "●"
  * level up. The trailing WORD on a row never got it, which is why a row gaining a
  * marker used to reflow — see the transit marks, which now live here instead.
  */
-export const tabMarker = (
-  marked: Set<string>,
-  id: string,
-  frame = 0,
-): string =>
+export const tabMarker = (marked: Set<string>, id: string, frame = 0): string =>
   marked.has(id) ? `${TAB_PULSE[frame % TAB_PULSE.length] as string} ` : "  "
 
 // The dot breathing rather than sitting still. A tab you are NOT looking at is
@@ -2463,10 +2481,10 @@ const ItemRow = ({
     const transitIcon = !transient
       ? " "
       : isDeparture(transient)
-        ? (TRANSIT_OUT_FRAMES[rampAt(TRANSIT_OUT_FRAMES.length)] as string)
-        : isArrival(transient)
-          ? (TRANSIT_IN_FRAMES[rampAt(TRANSIT_IN_FRAMES.length)] as string)
-          : "\u25C9"
+      ? (TRANSIT_OUT_FRAMES[rampAt(TRANSIT_OUT_FRAMES.length)] as string)
+      : isArrival(transient)
+      ? (TRANSIT_IN_FRAMES[rampAt(TRANSIT_IN_FRAMES.length)] as string)
+      : "\u25C9"
     // The prefix term is new here and easy to miss: a task row had no indent
     // to price until stories became tasks hanging under an epic, so this
     // budget never carried one and a depth-1 story overflowed by exactly its
@@ -2597,15 +2615,15 @@ const ItemRow = ({
   const icon = merged
     ? (MERGED_FRAMES[sparkFrame % MERGED_FRAMES.length] as string)
     : transient && isDeparture(transient)
-      ? (TRANSIT_OUT_FRAMES[rampAt(TRANSIT_OUT_FRAMES.length)] as string)
-      : transient && isArrival(transient)
-        ? (TRANSIT_IN_FRAMES[rampAt(TRANSIT_IN_FRAMES.length)] as string)
-        : healthIcon
+    ? (TRANSIT_OUT_FRAMES[rampAt(TRANSIT_OUT_FRAMES.length)] as string)
+    : transient && isArrival(transient)
+    ? (TRANSIT_IN_FRAMES[rampAt(TRANSIT_IN_FRAMES.length)] as string)
+    : healthIcon
   const color = merged
     ? MERGED_COLOUR
     : transient
-      ? TRANSIT_COLOUR[transient]
-      : healthColor
+    ? TRANSIT_COLOUR[transient]
+    : healthColor
   // Whose turn it is, in its own fixed cell. Arrows rather than the nerd-font
   // comment glyph because this column sits in the aligned zone left of the
   // title: a PUA codepoint that renders double-width in some fonts would shift
@@ -2656,8 +2674,8 @@ const ItemRow = ({
   const [turnIcon, turnColor] = item.pinned
     ? [PIN_MARK, colors.accent]
     : !login || !item.lastActor || spokeLast
-      ? [" ", colors.muted]
-      : ["←", colors.accent]
+    ? [" ", colors.muted]
+    : ["←", colors.accent]
   const numStr = `#${item.number}`.padEnd(7)
   // Hide "by me" — the author suffix is only signal when it's someone else.
   const showAuthor = !!item.author && item.author !== login
@@ -3068,8 +3086,8 @@ export const ActionMenu = ({
     item.kind === "task"
       ? item.key
       : item.kind === "pr" || item.kind === "issue"
-        ? `#${item.number}`
-        : ""
+      ? `#${item.number}`
+      : ""
   return (
     <Box
       flexDirection="column"
@@ -3583,6 +3601,8 @@ const BrowseScreen = ({
   extensions,
   ciStatusState,
   ciJob,
+  stripState,
+  stripLabel,
   tabHelp,
   origin,
   budget,
@@ -3608,7 +3628,7 @@ const BrowseScreen = ({
    * in", and the whole reason the rail exists is that a container has no state of
    * its own to answer with.
    */
-  sidebar?: Sidebar
+  sidebar?: Rails
   /** The host's words for a row's `live` count — see `SidePanel`. */
   liveLabel?: LiveLabel
   /** URLs of rows merged from this cockpit, still inside their hold. */
@@ -3688,6 +3708,10 @@ const BrowseScreen = ({
   // present once wired; undefined means "no CI row at all" (home's cockpit).
   ciStatusState?: CiStatusState
   ciJob?: string
+  // The status strip renders under the CI line, same contract: its poll state
+  // once wired, undefined for no strip at all.
+  stripState?: StripStatusState
+  stripLabel?: string
 }) => {
   const { rows } = useWindowSize()
   // Both directions are the same filter with `keep` flipped, so the host supplies
@@ -3744,12 +3768,18 @@ const BrowseScreen = ({
   // list's height budget so the tree never grows taller than the terminal
   // (Ink clips overflow from the top, which would eat the CI line).
   const reserveCiRow = ciStatusState != null
+  // The strip costs the same two rows, for the same reason.
+  const reserveStripRow = stripState != null
   const ciStatus = ciStatusState?.kind === "ready" ? ciStatusState.status : null
   const listHeight = Math.max(
     5,
     // -10 rather than -8: the extra 2 are the frame's top and bottom border
     // rows, so the tree never grows taller than the terminal inside the frame.
-    rows - 10 - (filterActive ? 2 : 0) - (reserveCiRow ? 2 : 0),
+    rows -
+      10 -
+      (filterActive ? 2 : 0) -
+      (reserveCiRow ? 2 : 0) -
+      (reserveStripRow ? 2 : 0),
   )
 
   useEffect(() => {
@@ -3951,13 +3981,18 @@ const BrowseScreen = ({
   // a roadmap consulted now and then does not get to narrow every row all day.
   // `i` brings it in, and the footer advertises that key while it is away.
   const [railOpen, setRailOpen] = useState(false)
-  const showRail = railOpen && !!sidebar
+  // A stack with no sections is no rail: `[]` from a host is the same claim as
+  // leaving it out, and must not earn a key that opens an empty column.
+  const rails = railsOf(sidebar)
+  const hasRail = rails.length > 0
+  const railTitle = rails.map((s) => s.title.toLowerCase()).join(" · ")
+  const showRail = railOpen && hasRail
   // Which half of the screen owns the arrow keys. Two regions, one at a time —
   // the alternative is a second visible cursor and no way to tell which one ↵
   // would act on.
   const [railFocus, setRailFocus] = useState(false)
   const [railCursor, setRailCursor] = useState(0)
-  const railRows = sidebar?.rows ?? []
+  const railRows = railRowsOf(sidebar)
   // Focus cannot outlive what it was pointing at: a rail closed while focused,
   // or one that came back shorter, would otherwise leave the arrows driving a row
   // nobody can see.
@@ -4250,7 +4285,7 @@ const BrowseScreen = ({
     // Only where there is a rail to open. A key that visibly does nothing is
     // worse than an absent one — it reads as a broken feature rather than as a
     // surface that does not have it.
-    if (input === "i" && sidebar) {
+    if (input === "i" && hasRail) {
       setRailOpen((open) => {
         // Closing it hands the arrows back. Focus left behind on a hidden rail is
         // the one state where nothing on screen says which region ↵ would act on.
@@ -4312,6 +4347,16 @@ const BrowseScreen = ({
         }
         return
       }
+      // `c` copies the same URL `o` opens, as it does on a list row — the rail
+      // is the same vocabulary at a different distance. Silent with no URL, for
+      // the reason `o` is.
+      if (input === "c") {
+        const row = railRows[railAt]
+        if (!row?.url) return
+        clipboard(row.url)
+        showFlash(`✓ Copied URL for ${row.key}`)
+        return
+      }
       // Everything the rail does not claim still works while it holds focus —
       // `r`, `q`, `?`, `i`, tab — because those are about the screen, not about
       // whichever half of it you are standing in. Only the row-level bindings
@@ -4350,8 +4395,8 @@ const BrowseScreen = ({
       key.leftArrow || (key.tab && key.shift)
         ? -1
         : key.rightArrow || key.tab
-          ? 1
-          : 0
+        ? 1
+        : 0
     if (step !== 0)
       setTabIdx((i) => (i + step + localSections.length) % localSections.length)
     // Ink's exit, not process.exit: it unmounts and hands the terminal back
@@ -4632,7 +4677,7 @@ const BrowseScreen = ({
         (activeItem.kind === "pr" || activeItem.kind === "issue")
       ) {
         const { repo } = activeItem
-        const branch = activeItem.kind === "pr" ? (activeItem.branch ?? "") : ""
+        const branch = activeItem.kind === "pr" ? activeItem.branch ?? "" : ""
         showFlash(`⋯ Opening ${repo}…`)
         void jumpToRepo(repo, branch, login)
           .then(() => showFlash(`↗ Opened ${repo} in new tab`))
@@ -4701,41 +4746,42 @@ const BrowseScreen = ({
       // reach a row is worse than a short footer: it names a key that does
       // nothing where you are standing.
       [
-        ["↑↓", "initiative"],
+        ["↑↓", "row"],
         ["↵", "open"],
         ["o", "browser"],
+        ["c", "copy url"],
         ["⇥/esc", "back to list"],
         ["?", "help"],
         ["q", "quit"],
       ]
     : activeItem?.kind === "repo-header"
-      ? [
-          ["↑↓", "nav"],
-          ["←→", "tab"],
-          ["↵", "open repo"],
-          ["o", "browser"],
-          ["C", "copy group"],
-          ["?", "help"],
-          ["q", "quit"],
-        ]
-      : [
-          ["↑↓", "nav"],
-          ["←→", "tab"],
-          ["↵/d", "open"],
-          ["m", "actions"],
-          // Only where Jira is configured: without it the launcher can only say
-          // so, and a footer key that opens an apology is a broken feature.
-          ...(jiraBase ? ([["⌃K", "launch"]] as [string, string][]) : []),
-          // Advertised only where it does something, and named for what it
-          // shows rather than for the furniture: nobody wants "a sidebar".
-          ...(showRail
-            ? ([["⇥", sidebar!.title.toLowerCase()]] as [string, string][])
-            : sidebar
-              ? ([["i", sidebar.title.toLowerCase()]] as [string, string][])
-              : []),
-          ["?", "help"],
-          ["q", "quit"],
-        ]
+    ? [
+        ["↑↓", "nav"],
+        ["←→", "tab"],
+        ["↵", "open repo"],
+        ["o", "browser"],
+        ["C", "copy group"],
+        ["?", "help"],
+        ["q", "quit"],
+      ]
+    : [
+        ["↑↓", "nav"],
+        ["←→", "tab"],
+        ["↵/d", "open"],
+        ["m", "actions"],
+        // Only where Jira is configured: without it the launcher can only say
+        // so, and a footer key that opens an apology is a broken feature.
+        ...(jiraBase ? ([["⌃K", "launch"]] as [string, string][]) : []),
+        // Advertised only where it does something, and named for what it
+        // shows rather than for the furniture: nobody wants "a sidebar".
+        ...(showRail
+          ? ([["⇥", railTitle]] as [string, string][])
+          : hasRail
+          ? ([["i", railTitle]] as [string, string][])
+          : []),
+        ["?", "help"],
+        ["q", "quit"],
+      ]
   const matchCount = section.items.filter(
     (i) => i.kind !== "repo-header" && i.kind !== "subgroup-header",
   ).length
@@ -4818,8 +4864,8 @@ const BrowseScreen = ({
     const message = !jiraBase
       ? `Jira not configured${jiraSetupHint ? ` · ${jiraSetupHint}` : ""}`
       : query && !ticketKey
-        ? `no ticket matches "${query}"`
-        : undefined
+      ? `no ticket matches "${query}"`
+      : undefined
     const items: PaletteItem[] = commands.map((command) => ({
       id: command.id,
       title: command.title,
@@ -4882,7 +4928,11 @@ const BrowseScreen = ({
         cursor={Math.min(repoCursor, Math.max(0, allRepos.length - 1))}
       />
     ) : menu.actions && activeItem && activeItem.kind !== "repo-header" ? (
-      <ActionMenu item={activeItem} actions={menu.actions} cursor={menu.cursor} />
+      <ActionMenu
+        item={activeItem}
+        actions={menu.actions}
+        cursor={menu.cursor}
+      />
     ) : null
 
   return (
@@ -4910,6 +4960,13 @@ const BrowseScreen = ({
 
       {ciStatusState ? (
         <CiStatusLine state={ciStatusState} job={ciJob} />
+      ) : null}
+      {stripState ? (
+        <StatusStripLine
+          strip={stripState.kind === "ready" ? stripState.strip : undefined}
+          label={stripLabel}
+          width={COLS}
+        />
       ) : null}
 
       {/* Said out loud, because silence here is indistinguishable from a cockpit
@@ -5077,9 +5134,9 @@ const BrowseScreen = ({
             </Box>
           ) : null}
         </Box>
-        {showRail && sidebar ? (
+        {showRail ? (
           <SidePanel
-            sidebar={sidebar}
+            sidebar={rails}
             liveLabel={liveLabel}
             width={railCols}
             height={listHeight}
@@ -5206,6 +5263,9 @@ export const App = ({
   ciJob,
   ciFetcher,
   ciPollMs = 60_000,
+  stripFetcher,
+  stripLabel,
+  stripPollMs = 300_000,
   watchPath,
   watchDebounceMs = 400,
   // Zero by default, deliberately. A package that adds randomness to its own
@@ -5237,7 +5297,7 @@ export const App = ({
      * Part of the fetch result rather than a static prop because it is data, and
      * data that goes stale the same way the rows do.
      */
-    sidebar?: Sidebar
+    sidebar?: Rails
   }>
   cacheKey?: string
   /**
@@ -5284,6 +5344,18 @@ export const App = ({
   // it refreshes on its own timer rather than waiting for a full inbox refresh.
   ciFetcher?: () => Promise<CiStatus | null>
   ciPollMs?: number
+  /**
+   * A standing status strip under the CI line — one row of things and the
+   * state each is in, polled on its own timer like the CI line and for the
+   * same reason: it is a glance at something that moves on its own schedule.
+   * Wiring a fetcher reserves the row; leaving it out draws nothing. `null`
+   * from the fetcher means "nothing configured" and is drawn as such, while a
+   * rejected poll keeps the last strip up.
+   */
+  stripFetcher?: () => Promise<StatusStrip | null>
+  /** What to call the row before its first answer arrives with a title. */
+  stripLabel?: string
+  stripPollMs?: number
   /**
    * A file something else touches when it has changed GitHub on your behalf —
    * a Claude session closing an issue, a script merging a PR. Touching it makes
@@ -5386,6 +5458,19 @@ export const App = ({
     setCiStatusState((prev) => {
       const next = toCiStatusState(status)
       return sameCiStatusState(prev, next) ? prev : next
+    })
+  const hasStrip = !!stripFetcher
+  const [stripState, setStripState] = useState<StripStatusState>({
+    kind: "loading",
+  })
+  // Same bail-out as the CI line: a poll that says what the last one said is
+  // the common case and must not repaint the screen. Compared on the marks
+  // rather than the age, which drifts every poll by construction.
+  const applyStrip = (strip: StatusStrip | null) =>
+    setStripState((prev) => {
+      const next: StripStatusState = { kind: "ready", strip }
+      if (prev.kind !== "ready") return next
+      return stripSignature(prev.strip) === stripSignature(strip) ? prev : next
     })
   // Serialised sections currently on screen — so "is fresh different?" compares
   // against what the user is looking at, not against the (already-stale) cache.
@@ -5542,13 +5627,10 @@ export const App = ({
     const running = [...heldSince].filter(([tab]) => held.has(tab))
     if (running.length === 0) return
     const remaining = (at: number) => at + TRANSIT_HOLD_MS - Date.now()
-    const timer = setTimeout(
-      () => {
-        for (const [tab, at] of running)
-          if (remaining(at) <= 0) settleTab(tab, transients)
-      },
-      Math.max(0, Math.min(...running.map(([, at]) => remaining(at)))),
-    )
+    const timer = setTimeout(() => {
+      for (const [tab, at] of running)
+        if (remaining(at) <= 0) settleTab(tab, transients)
+    }, Math.max(0, Math.min(...running.map(([, at]) => remaining(at)))))
     return () => clearTimeout(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [transients, heldSince, state.phase])
@@ -5734,6 +5816,28 @@ export const App = ({
     }
   }, [hasCiStatus, ciFetcher, ciPollMs])
 
+  // The strip polls the same way, on its own (slower) clock — the host's
+  // provider is expected to cache behind this, so a poll that arrives inside
+  // its TTL costs one function call.
+  useEffect(() => {
+    if (!stripFetcher) return
+    let live = true
+    const poll = () => {
+      stripFetcher()
+        .then((strip) => {
+          if (!live) return
+          applyStrip(strip)
+        })
+        .catch(() => {})
+    }
+    poll()
+    const id = setInterval(poll, stripPollMs)
+    return () => {
+      live = false
+      clearInterval(id)
+    }
+  }, [stripFetcher, stripPollMs])
+
   /* The signal path, and where it deliberately stops.
    *
    * A poller asks "has anything changed?" on a fixed beat and is wrong twice:
@@ -5815,7 +5919,7 @@ export const App = ({
   // the one moment it has no response to read it from, and the moment a third
   // cockpit opening on an exhausted account does the most damage.
   const [budget, setBudget] = useState<InboxBudget | null>(() =>
-    cacheKey ? (readCache(cacheKey)?.budget ?? null) : null,
+    cacheKey ? readCache(cacheKey)?.budget ?? null : null,
   )
   // Its own state rather than a field on the browse phase: the rail is not rows.
   // It never enters the diff, never joins the union, and never waits on a tab's
@@ -5826,7 +5930,7 @@ export const App = ({
   // the apply knows it: by the time the header renders, the diff that produced it
   // has been folded into the marks and the counts are gone.
   const [appliedSummary, setAppliedSummary] = useState("")
-  const [sidebar, setSidebar] = useState<Sidebar | undefined>(undefined)
+  const [sidebar, setSidebar] = useState<Rails | undefined>(undefined)
   // An automatic refresh declined itself. Worth saying: silence here is
   // indistinguishable from a cockpit that simply has nothing new, and the reader
   // would keep waiting for rows that were never coming.
@@ -5909,6 +6013,13 @@ export const App = ({
         {hasCiStatus ? (
           <CiStatusLine state={ciStatusState} job={ciJob} />
         ) : null}
+        {hasStrip ? (
+          <StatusStripLine
+            strip={stripState.kind === "ready" ? stripState.strip : undefined}
+            label={stripLabel}
+            width={COLS}
+          />
+        ) : null}
         {/* Sized so the frame fills the alternate screen from the first paint,
             rather than hugging one line and snapping open when the fetch lands.
             On a cold launch this is the ONLY thing on screen.
@@ -5945,14 +6056,14 @@ export const App = ({
     state.phase === "pr"
       ? { kind: "pr" as const, item: state.item }
       : state.phase === "issue"
-        ? { kind: "issue" as const, item: state.item }
-        : state.phase === "ext"
-          ? {
-              kind: "ext" as const,
-              extId: state.extId,
-              target: state.target,
-            }
-          : null
+      ? { kind: "issue" as const, item: state.item }
+      : state.phase === "ext"
+      ? {
+          kind: "ext" as const,
+          extId: state.extId,
+          target: state.target,
+        }
+      : null
   const toBrowse = () =>
     setState({ phase: "browse", sections: state.sections, login: state.login })
 
@@ -6047,6 +6158,8 @@ export const App = ({
         liveLabel={liveLabel}
         ciStatusState={hasCiStatus ? ciStatusState : undefined}
         ciJob={ciJob}
+        stripState={hasStrip ? stripState : undefined}
+        stripLabel={stripLabel}
         tabHelp={tabHelp}
         onOpenPr={(item) =>
           setState({

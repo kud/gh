@@ -64,6 +64,8 @@ export {
   type JiraTransition,
   type CiStatus,
   type CiStatusState,
+  type StripStatusState,
+  stripSignature,
   type Action,
   type ExplainSection,
   type DetailContext,
@@ -80,8 +82,4 @@ export {
   type InboxConfig,
   type RepoProfile,
 } from "./config.js"
-export {
-  matchesFilter,
-  parsePatterns,
-  type RepoFilter,
-} from "./filter.js"
+export { matchesFilter, parsePatterns, type RepoFilter } from "./filter.js"

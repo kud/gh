@@ -3,7 +3,7 @@ import { homedir } from "node:os"
 import { join } from "node:path"
 import { useState, useEffect } from "react"
 import type { Section } from "./inbox.js"
-import type { Sidebar } from "../components/side-panel.js"
+import { railsOf, type Rails } from "../components/side-panel.js"
 import { inboxConfig } from "./config.js"
 
 // On-disk cache for the inbox glance, so launch renders instantly from the last
@@ -61,8 +61,13 @@ export const cacheTtlMs = (): number => inboxConfig().cacheTtlMs
  * rotated since would be reported as an arrival or a departure — one burst of
  * precisely the false marks this release exists to stop, landing on the first
  * refresh after installing it. One cold fetch is the cheaper trade.
+ *
+ * 5 — `sidebar` became a stack (`Rails`: one section or an array of them). A
+ * v4 entry's single object still reads as a one-section stack, so nothing
+ * would break — but the reader below now checks the stack's shape, and a
+ * bump is cheaper than a second code path kept alive for the old file.
  */
-const CACHE_VERSION = 4
+const CACHE_VERSION = 5
 
 /**
  * What the last fetch cost and what was left afterwards, as reported INSIDE the
@@ -101,7 +106,7 @@ export type CachedCockpit = {
    * rail left out of the file is a rail that does not exist until the next
    * refresh — `i` did nothing and the footer did not even offer it.
    */
-  sidebar?: Sidebar
+  sidebar?: Rails
 }
 
 const cacheDir = (): string =>
@@ -123,7 +128,10 @@ export const readCache = (key: string): CachedCockpit | null => {
       login: raw.login ?? "",
       at: raw.at ?? 0,
       budget: raw.budget,
-      ...(Array.isArray(raw.sidebar?.rows) ? { sidebar: raw.sidebar } : {}),
+      ...(railsOf(raw.sidebar).every((s) => Array.isArray(s?.rows)) &&
+      raw.sidebar !== undefined
+        ? { sidebar: raw.sidebar }
+        : {}),
     }
   } catch {
     return null
@@ -142,7 +150,7 @@ export const writeCache = (
     sections: Section[]
     login: string
     budget?: InboxBudget
-    sidebar?: Sidebar
+    sidebar?: Rails
   },
 ): void => {
   try {

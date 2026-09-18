@@ -50,6 +50,22 @@ describe("glance cache", () => {
     expect(readCache(KEY)?.sidebar).toEqual(sidebar)
   })
 
+  // v5 — `sidebar` became a stack: one section or an array of them.
+  it("round-trips a stacked rail of several sections", async () => {
+    const sidebar = [
+      {
+        title: "Initiatives",
+        rows: [{ key: "PROJ-1", label: "x", live: 2, done: 1, total: 3 }],
+      },
+      {
+        title: "Services",
+        rows: [{ key: "SVC-1", label: "y", live: 0 }],
+      },
+    ]
+    writeCache(KEY, { sections, login: "kud", sidebar })
+    expect(readCache(KEY)?.sidebar).toEqual(sidebar)
+  })
+
   it("reads an entry with no rail as one without a rail, not a broken one", async () => {
     writeCache(KEY, { sections, login: "kud" })
     expect(readCache(KEY)?.sidebar).toBeUndefined()

@@ -4,6 +4,7 @@ import { describe, it, expect } from "vitest"
 import {
   SidePanel,
   railCapacity,
+  railHeights,
   counts,
   truncateWords,
   railWidth,
@@ -224,10 +225,15 @@ describe("railWidth", () => {
   })
 
   it("gives a wider rail's columns to the label", () => {
-    const long = "Cloudsearch → OpenSearch migration: frontend-royalties & frontend-contract"
+    const long =
+      "Cloudsearch → OpenSearch migration: frontend-royalties & frontend-contract"
     const row = { key: "P-1", label: long, live: 1 }
-    const narrow = frameOf(<SidePanel sidebar={{ title: "Initiatives", rows: [row] }} width={52} />)
-    const wide = frameOf(<SidePanel sidebar={{ title: "Initiatives", rows: [row] }} width={64} />)
+    const narrow = frameOf(
+      <SidePanel sidebar={{ title: "Initiatives", rows: [row] }} width={52} />,
+    )
+    const wide = frameOf(
+      <SidePanel sidebar={{ title: "Initiatives", rows: [row] }} width={64} />,
+    )
     expect(narrow).toContain("Cloudsearch → OpenSearch migration…")
     expect(wide).toContain("migration: frontend-royalties")
   })
@@ -251,5 +257,76 @@ describe("the rail's marker", () => {
     const plain = lines.find((l) => l.includes("P-2")) ?? ""
     expect(marked).toMatch(/⇈ P-1/)
     expect(plain.indexOf("P-2")).toBe(marked.indexOf("P-1"))
+  })
+})
+
+describe("railHeights", () => {
+  // 2 sections, 20 lines, each needs 5 (2 heading + 1 row × 3). An even
+  // split gives each 10, but both take only what they need.
+  it("gives each section exactly what it needs when that fits inside an even share", () => {
+    expect(railHeights(20, [1, 1])).toEqual([5, 5])
+  })
+
+  // The first section needs only 5 of its even share of 10, so the 5 it
+  // never spent go to the second section rather than sitting blank.
+  it("hands a short section's surplus down to what follows", () => {
+    expect(railHeights(20, [1, 5])).toEqual([5, 15])
+  })
+
+  // The first section wants 29 lines (2 + 9 × 3) but is held to its even
+  // share of 10 — it never borrows AHEAD from a section not yet drawn.
+  it("caps a section at its even share rather than borrowing from what follows", () => {
+    expect(railHeights(20, [9, 1])).toEqual([10, 5])
+  })
+})
+
+describe("SidePanel with a stack", () => {
+  const two: Sidebar[] = [
+    {
+      title: "Initiatives",
+      rows: [
+        { key: "P-1", label: "alpha", live: 1 },
+        { key: "P-2", label: "beta", live: 0 },
+      ],
+    },
+    {
+      title: "Services",
+      rows: [{ key: "S-1", label: "gamma", live: 1 }],
+    },
+  ]
+
+  it("draws every section, each under its own heading", () => {
+    const frame = frameOf(<SidePanel sidebar={two} />)
+    expect(frame).toContain("Initiatives")
+    expect(frame).toContain("Services")
+    expect(frame).toContain("P-1")
+    expect(frame).toContain("S-1")
+  })
+
+  // The cursor is ONE number counted across the whole stack: 2 lands on the
+  // first row of the second section, and only that section may claim focus.
+  it("counts the cursor across the stack and focuses only the section it falls in", () => {
+    const frame = frameOf(<SidePanel sidebar={two} focused cursor={2} />)
+    const lines = frame.split("\n")
+    expect((frame.match(/● focus/g) ?? []).length).toBe(1)
+    const focusLine = lines.findIndex((l) => l.includes("● focus"))
+    const servicesHeading = lines.findIndex((l) => l.includes("Services"))
+    const initiativesHeading = lines.findIndex((l) => l.includes("Initiatives"))
+    expect(focusLine).toBe(servicesHeading)
+    expect(focusLine).not.toBe(initiativesHeading)
+    // The cursor mark sits on the label line itself, as it does for a single
+    // rail — see "keeps the arrow and the cursor in their own cells" above.
+    const gammaLine = lines.find((l) => l.includes("gamma")) ?? ""
+    expect(gammaLine).toContain("❯")
+    const alphaLine = lines.find((l) => l.includes("alpha")) ?? ""
+    expect(alphaLine).not.toContain("❯")
+  })
+
+  it("shares the rail's height across sections via railHeights", () => {
+    const frame = frameOf(<SidePanel sidebar={two} height={20} />)
+    expect(frame).toContain("alpha")
+    expect(frame).toContain("beta")
+    expect(frame).toContain("gamma")
+    expect(frame).not.toContain("more")
   })
 })

@@ -18,10 +18,23 @@ export {
   railWidth,
   type LiveLabel,
   railCapacity,
+  railHeights,
+  railsOf,
+  railRowsOf,
   counts,
+  type Rails,
   type Sidebar,
   type SidebarRow,
 } from "./components/side-panel.js"
+export {
+  StatusStripLine,
+  stripGlyph,
+  stripLayout,
+  ageLabel,
+  type StatusStrip,
+  type StripItem,
+  type StripState,
+} from "./components/status-strip.js"
 export { renderMarkdown } from "./lib/markdown.js"
 export {
   healthDisplay,

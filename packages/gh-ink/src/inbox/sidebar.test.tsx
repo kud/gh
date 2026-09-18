@@ -4,7 +4,7 @@ import React from "react"
 import { render } from "ink"
 import { App, COLS } from "./inbox.js"
 import type { Section, TaskRow } from "./inbox.js"
-import type { Sidebar } from "../components/side-panel.js"
+import type { Rails, Sidebar } from "../components/side-panel.js"
 import { mkdtempSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -14,6 +14,28 @@ import { writeCache } from "./cache.js"
 // rail row runs `open <url>`, and a spec that pressed it against the real zx
 // would open a browser tab on every test run.
 const shells: string[] = []
+// `c` on a rail row pipes the URL into pbcopy through node's own spawn, not
+// through zx — so it needs its own stub, or a test run would write to the
+// machine's clipboard. What was copied is read off the stub's stdin.
+const copied: string[] = []
+vi.mock("node:child_process", async (orig) => {
+  const actual = await orig<typeof import("node:child_process")>()
+  return {
+    ...actual,
+    spawn: (cmd: string, ...rest: unknown[]) =>
+      cmd === "pbcopy"
+        ? {
+            stdin: {
+              write: (text: string) => {
+                copied.push(text)
+              },
+              end: () => {},
+            },
+          }
+        : (actual.spawn as (...a: unknown[]) => unknown)(cmd, ...rest),
+  }
+})
+
 vi.mock("zx", () => {
   const tag = (pieces: TemplateStringsArray, ...values: unknown[]) => {
     shells.push(String.raw({ raw: pieces }, ...values))
@@ -302,6 +324,18 @@ describe("browsing the rail", () => {
     stop()
   })
 
+  // The same URL `o` opens, on the same key the list uses for it — a rail row
+  // is the list's vocabulary at a different distance, not a second one.
+  it("copies the row's URL on c, and names the key", async () => {
+    const { frame, press, stop } = await mountOpen()
+    copied.length = 0
+    await press(TAB)
+    await press("c")
+    expect(copied).toEqual(["https://example.invalid/PROJ-900"])
+    expect(frame()).toContain("✓ Copied URL for PROJ-900")
+    stop()
+  })
+
   // Focus left behind on a hidden rail is the one state where nothing on screen
   // says which region ↵ would act on.
   it("cannot be left focused on a rail that has been closed", async () => {
@@ -332,5 +366,123 @@ describe("the rail on a launch painted from the cache", () => {
     } finally {
       delete process.env.XDG_CACHE_HOME
     }
+  })
+})
+
+// A separate fixture rather than a change to `sidebar` above: two sections, so
+// the cursor and the open key both have a second section to cross INTO.
+const stack: Rails = [
+  {
+    title: "Initiatives",
+    rows: [
+      {
+        key: "PROJ-900",
+        label: "Transfer of earnings adjustments batch",
+        live: 3,
+        url: "https://example.invalid/PROJ-900",
+      },
+      { key: "PROJ-901", label: "Automate the accounting run", live: 0 },
+    ],
+  },
+  {
+    title: "Services",
+    rows: [
+      {
+        key: "SVC-1",
+        label: "royalty calculation engine",
+        live: 1,
+        url: "https://example.invalid/SVC-1",
+      },
+      { key: "SVC-2", label: "distribution pipeline", live: 0 },
+    ],
+  },
+]
+
+const mountStack = async (sidebarValue: Rails = stack, columns = 120) => {
+  const stdout = new FakeStdout(columns, 40)
+  const stdin = new FakeStdin()
+  const instance = render(
+    <App
+      fetcher={async () => ({
+        sections,
+        login: "kud",
+        sidebar: sidebarValue,
+      })}
+      title="cockpit"
+    />,
+    {
+      stdout: stdout as never,
+      stdin: stdin as never,
+      debug: true,
+      exitOnCtrlC: false,
+      patchConsole: false,
+    },
+  )
+  await settle()
+  await settle()
+  const press = async (k: string) => {
+    stdin.press(k)
+    await settle()
+    await settle()
+    await new Promise((r) => setTimeout(r, 20))
+    await settle()
+  }
+  return {
+    frame: () => stdout.lastFrame(),
+    rowOf: (key: string) => {
+      const lines = stdout.lastFrame().split("\n")
+      const at = lines.findIndex((l) => l.includes(key))
+      return at > 0 ? lines[at - 1]! : ""
+    },
+    press,
+    stop: () => {
+      instance.unmount()
+      instance.cleanup()
+    },
+  }
+}
+
+describe("a stack of rails", () => {
+  it("names both sections in the footer hint", async () => {
+    const { frame, stop } = await mountStack()
+    expect(frame()).toContain("i initiatives · services")
+    stop()
+  })
+
+  it("walks the cursor from the last row of the first section into the first row of the second", async () => {
+    const { rowOf, press, stop } = await mountStack()
+    await press("i")
+    await press(TAB)
+    expect(rowOf("PROJ-900")).toContain("❯")
+    await press(DOWN)
+    expect(rowOf("PROJ-901")).toContain("❯")
+    await press(DOWN)
+    expect(rowOf("SVC-1")).toContain("❯")
+    expect(rowOf("PROJ-901")).not.toContain("❯")
+    stop()
+  })
+
+  it("opens a row in the SECOND section on o", async () => {
+    const { press, frame, stop } = await mountStack()
+    shells.length = 0
+    await press("i")
+    await press(TAB)
+    await press(DOWN)
+    await press(DOWN)
+    await press("o")
+    expect(shells).toEqual(["open https://example.invalid/SVC-1"])
+    expect(frame()).toContain("↗ Opened SVC-1")
+    stop()
+  })
+
+  // `[]` is the same claim as leaving `sidebar` out entirely: no rail, no `i`
+  // hint, and the key does nothing.
+  it("treats an empty stack as no rail at all", async () => {
+    const { frame, press, stop } = await mountStack([])
+    expect(frame()).not.toContain("Initiatives")
+    expect(frame()).not.toContain("i initiatives")
+    await press("i")
+    expect(frame()).not.toContain("Initiatives")
+    stop()
   })
 })

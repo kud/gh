@@ -228,7 +228,49 @@ const Progress = ({ row }: { row: SidebarRow }) => {
 }
 
 /**
- * A right-hand rail of initiatives, standing beside the list.
+ * One rail, or several stacked in one column. A host with one thing to rail —
+ * initiatives — passes the one; a host with two kinds of container passes both,
+ * and the panel draws them in order under one rule, each with its own heading.
+ * A stack rather than a second prop because the second rail needs everything
+ * the first has — a heading, a window, a cursor — and nothing more.
+ */
+export type Rails = Sidebar | Sidebar[]
+
+/** The stack as an array, whichever shape the host chose. */
+export const railsOf = (rails: Rails | undefined): Sidebar[] =>
+  rails === undefined ? [] : Array.isArray(rails) ? rails : [rails]
+
+/** Every row of every section in order — the space the rail's cursor moves in. */
+export const railRowsOf = (rails: Rails | undefined): SidebarRow[] =>
+  railsOf(rails).flatMap((s) => s.rows)
+
+/** Lines a section needs to draw every one of its rows, heading included. */
+const linesFor = (rows: number): number =>
+  HEADING_LINES + Math.max(1, rows) * ROW_LINES
+
+/**
+ * How the rail's height is shared out down a stack. Each section takes what it
+ * needs while that fits inside an even share of what is left, so a short
+ * section hands its surplus down rather than sitting beside a stripe of blank
+ * lines while the section under it says `+4 more`. Even shares rather than
+ * first-come, because the FIRST section is the one most likely to be long, and
+ * letting it fill the column would leave the second with a heading and nothing
+ * under it — a section that is visibly there and unreadable.
+ */
+export const railHeights = (height: number, rowCounts: number[]): number[] => {
+  const out: number[] = []
+  let remaining = height
+  rowCounts.forEach((rows, i) => {
+    const share = Math.floor(remaining / (rowCounts.length - i))
+    const h = Math.min(share, linesFor(rows))
+    out.push(h)
+    remaining -= h
+  })
+  return out
+}
+
+/**
+ * One section of the rail: a heading, then rows.
  *
  * Label first, facts beneath, because a roadmap is read by name: nobody thinks
  * "ACC-11312", they think "the OpenSearch migration". So the label is the
@@ -236,31 +278,23 @@ const Progress = ({ row }: { row: SidebarRow }) => {
  * you follow, in the secondary tier. Two lines rather than one because both are
  * load-bearing and neither survives the other being cut: words with no key
  * cannot be opened, and a key with no words cannot be read at a glance.
- *
- * Presentational, like every other row renderer here: it DRAWS a cursor but does
- * not own one, and it never calls `useInput`. Where the cursor is, and whether
- * the arrows are pointed at this rail at all, are the host's state — which is
- * what lets a screen with two focus regions have exactly one of them lit.
  */
-export const SidePanel = ({
+const RailSection = ({
   sidebar,
-  liveLabel = defaultLiveLabel,
-  width = SIDEBAR_COLS,
+  liveLabel,
+  content,
   height,
-  focused = false,
-  cursor = 0,
+  focused,
+  cursor,
 }: {
   sidebar: Sidebar
-  liveLabel?: LiveLabel
-  /** From `railWidth`, so the list beside it can subtract the same number. */
-  width?: number
+  liveLabel: LiveLabel
+  content: number
   height?: number
-  /** The arrows are pointed here, so this rail draws the cursor. */
-  focused?: boolean
-  /** Which row the cursor is on. Only drawn while `focused`. */
-  cursor?: number
+  /** The cursor is inside THIS section, at `cursor`. */
+  focused: boolean
+  cursor: number
 }) => {
-  const content = contentOf(width)
   const labelCols = content - MARKS
   const liveCols = content - FACTS_FIXED
   const capacity =
@@ -286,24 +320,7 @@ export const SidePanel = ({
     Math.max(0, content - [...sidebar.title].length - focus.length - 1),
   )
   return (
-    // A rule down the left rather than a full box: the rail's other three edges
-    // already have the frame's border a column or two away, and a second
-    // rectangle inside the first reads as a nested panel — something you could
-    // focus and act on, which this cannot be. One line is the whole claim: what
-    // is left of it is the list, what is right of it is not. In the frame's own
-    // colour and not dimmed, so the two rules read as one hierarchy.
-    <Box
-      flexDirection="column"
-      width={width}
-      flexShrink={0}
-      height={height}
-      borderStyle="single"
-      borderColor={colors.muted}
-      borderTop={false}
-      borderRight={false}
-      borderBottom={false}
-      paddingLeft={PAD}
-    >
+    <Box flexDirection="column" height={height}>
       <Box marginBottom={1}>
         <Text bold>{sidebar.title}</Text>
         {/* A word, not a hue: which half of the screen the arrows drive is the
@@ -334,9 +351,7 @@ export const SidePanel = ({
                 </Text>
                 {/* The answer, so the brightest thing on the row; bold is the
                     cursor's, as `SelectableRow` does it. */}
-                <Text bold={active}>
-                  {truncateWords(row.label, labelCols)}
-                </Text>
+                <Text bold={active}>{truncateWords(row.label, labelCols)}</Text>
               </Box>
               <Box>
                 {/* The mark sits in the indent, in the cell the list draws it
@@ -366,6 +381,87 @@ export const SidePanel = ({
           <Text color={colors.muted}>{`+${hidden} more`}</Text>
         </Box>
       ) : null}
+    </Box>
+  )
+}
+
+/**
+ * A right-hand rail standing beside the list: one section, or a stack of them.
+ *
+ * Presentational, like every other row renderer here: it DRAWS a cursor but does
+ * not own one, and it never calls `useInput`. Where the cursor is, and whether
+ * the arrows are pointed at this rail at all, are the host's state — which is
+ * what lets a screen with two focus regions have exactly one of them lit. The
+ * cursor counts across the whole stack, in `railRowsOf` order, so the host
+ * moves one number and never learns where a section boundary falls.
+ */
+export const SidePanel = ({
+  sidebar,
+  liveLabel = defaultLiveLabel,
+  width = SIDEBAR_COLS,
+  height,
+  focused = false,
+  cursor = 0,
+}: {
+  sidebar: Rails
+  liveLabel?: LiveLabel
+  /** From `railWidth`, so the list beside it can subtract the same number. */
+  width?: number
+  height?: number
+  /** The arrows are pointed here, so this rail draws the cursor. */
+  focused?: boolean
+  /** Which row the cursor is on, counted across every section. Only drawn while `focused`. */
+  cursor?: number
+}) => {
+  const content = contentOf(width)
+  const sections = railsOf(sidebar)
+  const heights =
+    height === undefined
+      ? sections.map(() => undefined)
+      : railHeights(
+          height,
+          sections.map((s) => s.rows.length),
+        )
+  let offset = 0
+  return (
+    // A rule down the left rather than a full box: the rail's other three edges
+    // already have the frame's border a column or two away, and a second
+    // rectangle inside the first reads as a nested panel — something you could
+    // focus and act on, which this cannot be. One line is the whole claim: what
+    // is left of it is the list, what is right of it is not. In the frame's own
+    // colour and not dimmed, so the two rules read as one hierarchy.
+    <Box
+      flexDirection="column"
+      width={width}
+      flexShrink={0}
+      height={height}
+      borderStyle="single"
+      borderColor={colors.muted}
+      borderTop={false}
+      borderRight={false}
+      borderBottom={false}
+      paddingLeft={PAD}
+    >
+      {sections.map((section, i) => {
+        const first = offset
+        offset += section.rows.length
+        const inside = focused && cursor >= first && cursor < offset
+        // An empty section still owns the cursor when it is the only one there
+        // is: focus with nowhere to point is the host's problem to prevent, but
+        // a lone empty rail must still say "focus" or the word vanishes.
+        const owns = inside || (focused && sections.length === 1)
+        return (
+          <RailSection
+            key={section.title}
+            sidebar={section}
+            liveLabel={liveLabel}
+            content={content}
+            height={heights[i]}
+            focused={owns}
+            cursor={cursor - first}
+          />
+        )
+      })}
     </Box>
   )
 }
