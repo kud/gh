@@ -1,5 +1,11 @@
 # @kud/gh-webhook-replay
 
+## 0.1.28
+
+### Patch Changes
+
+- 095ccfd: `@kud/ink-ui` 0.29.0 → 0.30.0 on every package at once, which is what brings `CommandPalette` in. All five pins move together so npm keeps one deduped copy: two copies of a component library in one process is a module-level singleton configured in one instance and read from the other.
+
 ## 0.1.27
 
 ### Patch Changes
