@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest"
+import { describe, it, expect, vi } from "vitest"
 import { EventEmitter } from "node:events"
 import React from "react"
 import { render } from "ink"
@@ -9,6 +9,20 @@ import { mkdtempSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { writeCache } from "./cache.js"
+
+// Every shell the inbox spawns lands here instead of on the machine. `o` on a
+// rail row runs `open <url>`, and a spec that pressed it against the real zx
+// would open a browser tab on every test run.
+const shells: string[] = []
+vi.mock("zx", () => {
+  const tag = (pieces: TemplateStringsArray, ...values: unknown[]) => {
+    shells.push(String.raw({ raw: pieces }, ...values))
+    return Promise.resolve()
+  }
+  const $ = (...args: unknown[]) =>
+    Array.isArray(args[0]) ? tag(...(args as [TemplateStringsArray])) : $
+  return { $ }
+})
 
 /*
  * The rail answers a question the tabs cannot: a tab files a row by the stage it
@@ -24,10 +38,7 @@ import { writeCache } from "./cache.js"
  */
 class FakeStdout extends EventEmitter {
   frames: string[] = []
-  constructor(
-    public columns: number,
-    public rows: number,
-  ) {
+  constructor(public columns: number, public rows: number) {
     super()
   }
   write = (frame: string) => {
@@ -275,6 +286,19 @@ describe("browsing the rail", () => {
     await press(TAB)
     await press(TAB)
     expect(frame()).not.toContain("● focus")
+    stop()
+  })
+
+  // The URL and the key are interpolated into a template each, and both were
+  // once lost together (c02824c): `o` ran a bare `open` and flashed "Opened "
+  // with nothing after it, and nothing complained. Pinned at both ends.
+  it("opens the row's URL in the browser on o, and names the key", async () => {
+    const { frame, press, stop } = await mountOpen()
+    shells.length = 0
+    await press(TAB)
+    await press("o")
+    expect(shells).toEqual(["open https://example.invalid/PROJ-900"])
+    expect(frame()).toContain("↗ Opened PROJ-900")
     stop()
   })
 

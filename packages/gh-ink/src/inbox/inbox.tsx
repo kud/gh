@@ -4268,8 +4268,8 @@ const BrowseScreen = ({
         // rather than a failure the reader can act on, and a flash saying so
         // would be noise on every press.
         if (row.url) {
-          quietly`open `.catch(() => {})
-          showFlash(`↗ Opened `)
+          quietly`open ${row.url}`.catch(() => {})
+          showFlash(`↗ Opened ${row.key}`)
         }
         return
       }
