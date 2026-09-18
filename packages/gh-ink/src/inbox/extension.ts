@@ -39,6 +39,24 @@ export type ExtensionTarget = {
   // use, so an extension's feedback reads as part of the app rather than as
   // something a screen printed on its way out.
   showFlash?: (msg: string) => void
+  // What the launcher holds, when an extension is being asked for commands
+  // rather than a body. `query` is the text as typed; `ticketKey` is that text
+  // once the host has matched it against its own `jiraKeyRe` and normalised it.
+  // Handed down rather than re-derived so there is one regex site — an
+  // extension that parsed `query` itself would be the second rule for one key,
+  // and the two would disagree the first time the host's pattern moved.
+  query?: string
+  ticketKey?: string
+}
+
+// One row of the launcher, contributed by an extension. `run` is what Enter
+// does; the host closes the palette first, so a body that mounts something can
+// assume the list is the top layer again.
+export type Command = {
+  id: string
+  title: string
+  group?: string
+  run: () => void | Promise<void>
 }
 
 // An inbox extension — a domain's contribution to the host. `body` is the full
@@ -80,4 +98,11 @@ export interface InboxExtension {
   // `target` is the optional context the opener passes — the body decides what to
   // do with it, and ignores the parts it has no use for.
   body: (onExit: () => void, target?: ExtensionTarget) => ReactNode
+  // Rows this extension adds to the launcher (Ctrl+K) for the current target.
+  // Called on every keystroke, so it must be sync and pure — anything that
+  // resolves config does so once at extension init, not in here. The host
+  // draws its own rows first (open here, open in Jira) and appends these, so an
+  // extension can only add verbs, never reorder the built-ins. Returning `[]`
+  // adds nothing and draws nothing: an extension's silence is never a row.
+  commands?: (target: ExtensionTarget) => Command[]
 }

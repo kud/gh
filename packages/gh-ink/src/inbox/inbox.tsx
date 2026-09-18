@@ -12,7 +12,7 @@ import React, {
   type ReactNode,
 } from "react"
 import { Text as InkText, Box, useInput, useWindowSize } from "ink"
-import type { InboxExtension, ExtensionTarget } from "./extension.js"
+import type { Command, InboxExtension, ExtensionTarget } from "./extension.js"
 import {
   invalidateCache,
   isFresh,
@@ -41,6 +41,7 @@ import {
 } from "../components/side-panel.js"
 import {
   colors,
+  CommandPalette,
   FooterHints,
   LoadingScreen,
   Pill,
@@ -50,6 +51,7 @@ import {
   Switch,
   useAppKeys,
   useListCursor,
+  type PaletteItem,
 } from "@kud/ink-ui"
 import {
   type Health,
@@ -1284,6 +1286,20 @@ const unsubscribeFrom = async (item: GHItem): Promise<void> => {
   await quietly`gh api graphql -f query=${UNSUBSCRIBE_MUTATION} -f id=${id}`
 }
 
+// The one rule for turning a ticket key into a browser tab. The row menu (`t`)
+// and the launcher (Ctrl+K) both call it, so the two cannot drift: `jiraBase`
+// is host config and already ends in the browse path, and a second site that
+// rebuilt the URL from its own idea of the base would agree with this one only
+// by coincidence.
+export const openInJira = (
+  jiraBase: string,
+  key: string,
+  showFlash: (msg: string) => void,
+) => {
+  quietly`open ${jiraBase}/${key}`.catch(() => {})
+  showFlash(`↗ Opened ${key} in Jira`)
+}
+
 export const buildActions = (
   item: AnyItem,
   login: string,
@@ -1580,10 +1596,7 @@ export const buildActions = (
         actions.push({
           label: `Open ${jiraKey} in Jira`,
           hint: "t",
-          run: () => {
-            quietly`open ${jiraBase}/${jiraKey}`.catch(() => {})
-            showFlash(`↗ Opened ${jiraKey} in Jira`)
-          },
+          run: () => openInJira(jiraBase, jiraKey, showFlash),
         })
       }
     }
@@ -3275,7 +3288,10 @@ export const HelpModal = ({
     ["u", "unsubscribe from this item"],
     ["x", "remove yourself as reviewer"],
     ...(hasJira
-      ? ([["t", "Jira: move / open ticket"]] as [string, string][])
+      ? ([
+          ["t", "Jira: move / open ticket"],
+          ["⌃K", "launch · jump to a ticket by key"],
+        ] as [string, string][])
       : []),
     ["/", "search"],
     ["f", "filter by repo"],
@@ -3548,6 +3564,7 @@ const BrowseScreen = ({
   login,
   jiraBase,
   jiraKeyRe,
+  jiraSetupHint,
   jiraTransitions,
   onRefresh,
   onActed,
@@ -3625,6 +3642,10 @@ const BrowseScreen = ({
   tabHelp?: [string, string][]
   jiraBase?: string
   jiraKeyRe?: RegExp
+  // How to get Jira configured, in the host's own words (`jira config`), shown
+  // after "Jira not configured" in the launcher. The host owns the words because
+  // it owns the config; the shell only knows that `jiraBase` is absent.
+  jiraSetupHint?: string
   jiraTransitions?: JiraTransition[]
   onRefresh?: () => void
   /** A mutation landed: drop the cached glance now, refresh shortly. */
@@ -3714,6 +3735,10 @@ const BrowseScreen = ({
   const [helpScroll, setHelpScroll] = useState(0)
   const [helpRange, setHelpRange] = useState({ max: 0, page: 1 })
   const [explain, setExplain] = useState(false)
+  // The launcher (Ctrl+K). `null` is closed; a string is the query as typed,
+  // held here rather than in the palette because the rows are DERIVED from it
+  // — a ticket key becomes two verbs — and the derivation is this screen's.
+  const [palette, setPalette] = useState<string | null>(null)
   const filterActive = search != null || repoFilter.size > 0
   // The CI row occupies 2 rows (content + margin); reserve them out of the
   // list's height budget so the tree never grows taller than the terminal
@@ -3956,6 +3981,7 @@ const BrowseScreen = ({
    * changes constantly, and a stale peel closes the wrong layer.
    */
   const peel = (): boolean => {
+    if (palette !== null) return setPalette(null), true
     if (help) return setHelp(false), true
     if (explain) return setExplain(false), true
     if (repoPicker) return setRepoPicker(false), true
@@ -3976,9 +4002,11 @@ const BrowseScreen = ({
     }
   })
 
+  // The palette's query field owns the keyboard exactly as the search box does,
+  // so the root stands `q`/`esc`/`backspace` down for both.
   useEffect(() => {
-    onTyping?.(searchInput)
-  }, [searchInput, onTyping])
+    onTyping?.(searchInput || palette !== null)
+  }, [searchInput, palette, onTyping])
   // What the LIST has, which is the frame minus whatever the rail took. Computed
   // once here and handed down: a row cannot see the rail, and a budget that does
   // not know about it overflows by exactly the rail's width.
@@ -4133,6 +4161,13 @@ const BrowseScreen = ({
     if (idleFor >= PULSE_IDLE_MS && sparkKey) setPulseArm((n) => n + 1)
 
     if (hidden) return
+    // The one chord this screen answers, carved out ABOVE the guard below that
+    // swallows every other ctrl/meta press. Toggles: a second Ctrl+K with the
+    // launcher up closes it, the way `?` closes the legend.
+    if (key.ctrl && input === "k") {
+      setPalette((open) => (open === null ? "" : null))
+      return
+    }
     // Every shortcut below is a bare letter/arrow with no modifier — none of
     // them are meant to fire on a ctrl/meta chord. Without this, a Ctrl+<key>
     // press (e.g. the very common Ctrl+D shell reflex) is indistinguishable
@@ -4140,6 +4175,10 @@ const BrowseScreen = ({
     // same letter with key.ctrl set), so it'd silently trigger that letter's
     // action — including drilling into whatever row is active.
     if (key.ctrl || key.meta) return
+    // The launcher owns the keyboard while it is up: its own field takes the
+    // typing, its own cursor takes ↑↓, and `esc` reaches it through the root's
+    // peel. Nothing here may act on the list underneath.
+    if (palette !== null) return
 
     // Help legend is a pure overlay: any key dismisses it, and nothing else
     // is processed while it's up — bar the four that scroll it, and only while
@@ -4684,6 +4723,9 @@ const BrowseScreen = ({
           ["←→", "tab"],
           ["↵/d", "open"],
           ["m", "actions"],
+          // Only where Jira is configured: without it the launcher can only say
+          // so, and a footer key that opens an apology is a broken feature.
+          ...(jiraBase ? ([["⌃K", "launch"]] as [string, string][]) : []),
           // Advertised only where it does something, and named for what it
           // shows rather than for the furniture: nobody wants "a sidebar".
           ...(showRail
@@ -4698,33 +4740,150 @@ const BrowseScreen = ({
     (i) => i.kind !== "repo-header" && i.kind !== "subgroup-header",
   ).length
 
+  /*
+   * Above the `hidden` early return below because it is a hook: a drill that
+   * hides and un-hides the list would otherwise change the hook count between
+   * renders, and React blanks the tree rather than guess.
+   *
+   * THE LAUNCHER'S ROWS, derived from the query on every keystroke rather than
+   * filtered from a preset list: what you typed decides what the rows ARE. Host
+   * rows first, in a fixed order — open here, through the extension that drills
+   * `task` rows (the same door ↵ takes on a ticket row, so a host that has not
+   * claimed the kind gets no such row), then open in Jira, the row menu's own
+   * rule — then whatever each extension's `commands` adds, appended in
+   * declaration order. Extensions can add verbs; they cannot reorder these.
+   *
+   * The key is matched ONCE, here, and handed down normalised. Typing is
+   * case-insensitive because a key is shouted in Jira and muttered at a
+   * keyboard; the host's `jiraKeyRe` is what says which shape counts, so gh-ink
+   * still holds no idea of what a ticket looks like.
+   *
+   * The message is composed here too, because this screen holds both facts: no
+   * `jiraBase` means Jira is not configured, and the host says how to fix that
+   * in its own words; a query that matches nothing is "no ticket matches". An
+   * extension returning `[]` is never a row and never a message.
+   */
+  const launcher = useMemo(() => {
+    const run = new Map<string, () => void | Promise<void>>()
+    if (palette === null)
+      return { items: [] as PaletteItem[], run, message: undefined }
+    const query = palette.trim()
+    const ticketKey = jiraKeyRe
+      ? query.toUpperCase().match(jiraKeyRe)?.[0]
+      : undefined
+    const commands: Command[] = []
+    const rich = (key: string, where: string) => (
+      <Text>
+        Open <Text color={colors.accent}>{key}</Text>{" "}
+        <Text color={colors.info}>{where}</Text>
+      </Text>
+    )
+    const labels = new Map<string, ReactNode>()
+    if (ticketKey && jiraBase) {
+      const row: AnyItem = {
+        kind: "task",
+        key: ticketKey,
+        ticket: ticketKey,
+        summary: "",
+        url: `${jiraBase}/${ticketKey}`,
+        status: "",
+        age: "",
+      }
+      if (drillExtensionFor(row, extensions)) {
+        commands.push({
+          id: "launcher:here",
+          title: `Open ${ticketKey} here`,
+          run: () => void openDrillView(row),
+        })
+        labels.set("launcher:here", rich(ticketKey, "here"))
+      }
+      commands.push({
+        id: "launcher:jira",
+        title: `Open ${ticketKey} in Jira`,
+        run: () => openInJira(jiraBase, ticketKey, showFlash),
+      })
+      labels.set("launcher:jira", rich(ticketKey, "in Jira"))
+    }
+    const target: ExtensionTarget = {
+      ...extensionTargetFor(activeItem),
+      query: palette,
+      ticketKey,
+    }
+    for (const ext of extensions ?? []) {
+      for (const command of ext.commands?.(target) ?? []) {
+        commands.push({ ...command, id: `${ext.id}:${command.id}` })
+      }
+    }
+    for (const command of commands) run.set(command.id, command.run)
+    const message = !jiraBase
+      ? `Jira not configured${jiraSetupHint ? ` · ${jiraSetupHint}` : ""}`
+      : query && !ticketKey
+        ? `no ticket matches "${query}"`
+        : undefined
+    const items: PaletteItem[] = commands.map((command) => ({
+      id: command.id,
+      title: command.title,
+      group: command.group,
+      label: labels.get(command.id),
+    }))
+    return { items, run, message }
+    // `extensionTargetFor`, `openDrillView` and `showFlash` are re-created every
+    // render and deliberately not listed: the query changes on every keystroke,
+    // so the memo already recomputes at least as often as they do.
+  }, [palette, activeItem, extensions, jiraBase, jiraKeyRe, jiraSetupHint])
+
   if (hidden) return null
 
   // The four overlays are mutually exclusive and now FLOAT over the browse list
   // instead of replacing it, so pressing `?` no longer blanks the app to show its
   // own legend — the list stays put underneath, dimmed, the way a modal reads.
-  const overlay = help ? (
-    <HelpModal
-      extensions={extensions}
-      hasJira={!!jiraBase}
-      tabHelp={tabHelp}
-      maxRows={listHeight}
-      scroll={helpScroll}
-      onScrollRange={(max, page) => setHelpRange({ max, page })}
-    />
-  ) : explain &&
-    activeItem &&
-    (activeItem.kind === "pr" || activeItem.kind === "issue") ? (
-    <ExplainModal item={activeItem} login={login} />
-  ) : repoPicker ? (
-    <RepoPicker
-      repos={allRepos}
-      selected={repoFilter}
-      cursor={Math.min(repoCursor, Math.max(0, allRepos.length - 1))}
-    />
-  ) : menu.actions && activeItem && activeItem.kind !== "repo-header" ? (
-    <ActionMenu item={activeItem} actions={menu.actions} cursor={menu.cursor} />
-  ) : null
+  const overlay =
+    palette !== null ? (
+      <CommandPalette
+        items={launcher.items}
+        query={palette}
+        onQueryChange={setPalette}
+        onSelect={(id) => {
+          // Close first, then run: a command that mounts a drill wants the list
+          // to be the top layer again, and one that opens a browser tab wants
+          // the palette gone before the flash lands under it.
+          const run = launcher.run.get(id)
+          setPalette(null)
+          void run?.()
+        }}
+        onClose={() => setPalette(null)}
+        message={launcher.message}
+        placeholder="ticket key…"
+        width={Math.min(60, Math.max(30, listCols - 2))}
+        maxRows={Math.max(3, listHeight - 6)}
+        hints={[
+          ["↑↓", "move"],
+          ["⏎", "open"],
+          ["esc", "close"],
+        ]}
+      />
+    ) : help ? (
+      <HelpModal
+        extensions={extensions}
+        hasJira={!!jiraBase}
+        tabHelp={tabHelp}
+        maxRows={listHeight}
+        scroll={helpScroll}
+        onScrollRange={(max, page) => setHelpRange({ max, page })}
+      />
+    ) : explain &&
+      activeItem &&
+      (activeItem.kind === "pr" || activeItem.kind === "issue") ? (
+      <ExplainModal item={activeItem} login={login} />
+    ) : repoPicker ? (
+      <RepoPicker
+        repos={allRepos}
+        selected={repoFilter}
+        cursor={Math.min(repoCursor, Math.max(0, allRepos.length - 1))}
+      />
+    ) : menu.actions && activeItem && activeItem.kind !== "repo-header" ? (
+      <ActionMenu item={activeItem} actions={menu.actions} cursor={menu.cursor} />
+    ) : null
 
   return (
     <Box
@@ -5041,6 +5200,7 @@ export const App = ({
   origin,
   jiraBase,
   jiraKeyRe,
+  jiraSetupHint,
   jiraTransitions,
   hasCiStatus,
   ciJob,
@@ -5107,6 +5267,10 @@ export const App = ({
   emptyHint?: string
   jiraBase?: string
   jiraKeyRe?: RegExp
+  // How to get Jira configured, in the host's own words (`jira config`), shown
+  // after "Jira not configured" in the launcher. The host owns the words because
+  // it owns the config; the shell only knows that `jiraBase` is absent.
+  jiraSetupHint?: string
   jiraTransitions?: JiraTransition[]
   // Reserves a standing CI status row above everything else — loading until
   // the first fetch resolves, then ready/error — so callers that don't wire a
@@ -5851,6 +6015,7 @@ export const App = ({
         login={state.login}
         jiraBase={jiraBase}
         jiraKeyRe={jiraKeyRe}
+        jiraSetupHint={jiraSetupHint}
         jiraTransitions={jiraTransitions}
         onRefresh={applyOrRefresh}
         onActed={onActed}
