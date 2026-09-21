@@ -1,5 +1,15 @@
 # @kud/gh-ink
 
+## 0.60.0
+
+### Minor Changes
+
+- 9a13a32: The status strip's marks now say what they mean, and its brightness follows what matters.
+
+  `✓ ! ✗ ○` and the `▲` alarm are replaced. `!` was wrong twice over — it is "urgent" in the glyph lexicon and "merge conflict" in the health map drawn one row beneath the strip, so a warning read as either — and a plain `✓` is a hairline at terminal size, which is what made a row of thirteen look like a list rather than a status. The three measured states are now Nerd Font's check, warning and times, the same `check` / `warning` / `cross` shui and ink-ui's status variants draw, so the cockpit stops inventing a vocabulary of its own; the cost is the one `merged` and `closed` already pay, a box on a terminal with no Nerd Font. `unknown` becomes a plain `?` — "no reading", where the hollow `○` said "open", "pending" or "bullet" depending on what sat beside it, and a misconfigured service tag produces exactly the eleven-bullets row where it said the last one. The alarm becomes Nerd Font's fire, moved from the name's tail (`royalties▲`, a stray superscript) into the mark cluster beside the state, where the two facts about one service sit together; `▲` would in any case have become a second triangle the moment `warn` took one.
+
+  The name carries the state's weight as well as the mark: a fire or a failure lights its name bold in the error colour, an unmeasured thing dims to the weight of its `?`, and everything fine rests. On a row that is mostly fine, the two that are not are the first thing seen; on a row that is mostly unknown, the row reads as a quiet grey line with the fires standing out of it, rather than thirteen names at full brightness competing with two crosses. Only the marks that ask for something are bold now — a bold tick twelve times over was the loudest thing on the row for the least reason. `stripGlyph` keeps its shape, so a host drawing the same marks in a rail row picks the new ones up unchanged.
+
 ## 0.59.1
 
 ### Patch Changes
