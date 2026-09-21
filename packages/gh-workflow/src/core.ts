@@ -819,8 +819,10 @@ const BAND_LABEL: Record<Band, string> = {
  * `Your move (7)` header was true and told the reader nothing about which —
  * two were green, one red, three were drafts sitting at the top because
  * `sortItems` sinks drafts only within their repo. So on that standing alone
- * the two ends peel off, ordered by cost to clear: one keypress first, not yet
- * asked last, and `whoseMove` unchanged for everything between.
+ * the two ends peel off — one keypress first, drafts directly after your
+ * move (both are yours to advance; see `layoutGHItems` for why they no
+ * longer sink to the bottom) — and `whoseMove` unchanged for everything
+ * between.
  *
  * `approved` is already the conjunction: `computeHealth` ranks every failure,
  * conflict, open thread and running check above it, so a row carrying it is
@@ -898,9 +900,15 @@ export const layoutGHItems = (
   // priority and sinks drafts. The band says what is known about a row; how rows
   // rank among themselves is a separate claim and re-ranking here would smuggle
   // it in.
-  // Ordered by cost to clear: one keypress, then work, then a verdict we
-  // could not reach, then waiting, then not yet asked.
-  const bands = (["merge", "you", "unknown", "them", "draft"] as const).map(
+  // Ordered by WHO CAN ACT, not by urgency: one keypress, then the two bands
+  // only the viewer can advance, then a verdict we could not reach, then the
+  // one band nobody here can advance. Drafts sat last until 2026-09-21, on the
+  // argument that "not yet asked" is the cheapest claim on attention — which
+  // put six drafts under Their move, a band whose rows move THEMSELVES the
+  // moment a maintainer acts and so never need re-reading. A draft is the
+  // opposite: the one row only the author can advance, and when Your move is
+  // empty it is where the next piece of work is. Yours, then theirs.
+  const bands = (["merge", "you", "draft", "unknown", "them"] as const).map(
     (side) => ({
       side,
       rows: sorted.filter(

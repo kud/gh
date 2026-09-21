@@ -413,8 +413,10 @@ describe("the authored bands", () => {
   // is three: merge it, work on it, finish writing it. Seven PRs of yours under
   // one "Your move (7)" was true and said nothing about which, with three
   // drafts at the top because sortItems sinks them only within their repo. So
-  // the two ends peel off, ordered by cost to clear.
-  it("resolves your own PRs into ready · yours · theirs · drafts", () => {
+  // the two ends peel off. Drafts follow Your move rather than trailing Their
+  // move: both are bands only the author can advance, and Their move is the
+  // one band that clears itself.
+  it("resolves your own PRs into ready · yours · drafts · theirs", () => {
     const rows = [
       item({ repo: "acme/a", number: 1, health: "draft" }),
       item({ repo: "acme/a", number: 2, health: "approved" }),
@@ -426,10 +428,10 @@ describe("the authored bands", () => {
     expect(labels(laid)).toEqual([
       "Ready to merge (1)",
       "Your move (1)",
-      "Their move (2)",
       "Drafts (1)",
+      "Their move (2)",
     ])
-    expect(numbers(laid)).toEqual([2, 3, 4, 5, 1])
+    expect(numbers(laid)).toEqual([2, 3, 1, 4, 5])
   })
 
   // `approved` is already the conjunction: computeHealth ranks every failure,
