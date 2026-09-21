@@ -1,5 +1,13 @@
 # @kud/gh-cockpit
 
+## 0.7.1
+
+### Patch Changes
+
+- Updated dependencies [d6c99c9]
+  - @kud/gh-workflow@0.13.0
+  - @kud/gh-ink@0.59.1
+
 ## 0.7.0
 
 ### Minor Changes
