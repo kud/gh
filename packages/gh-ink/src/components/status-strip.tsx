@@ -36,27 +36,48 @@ export type StatusStrip = {
   at?: number
 }
 
-// Shape and colour together, never colour alone. The tick, the bang and the
-// cross survive a monochrome terminal and a reader who cannot tell red from
-// green; the hue is reinforcement. `○` for unknown is hollow on purpose — an
-// empty shape for an empty reading.
+// Shape and colour together, never colour alone. The tick, the triangle, the
+// cross and the question mark survive a monochrome terminal and a reader who
+// cannot tell red from green; the hue is reinforcement.
+//
+// The three measured states are Nerd Font's check / warning / times — the same
+// `check`, `warning` and `cross` names shui and ink-ui's status variants draw,
+// written as escapes because raw PUA bytes get mangled by editors and diffs.
+// They replaced `✓ ! ✗` on 2026-09-21, and two of the three were wrong rather
+// than merely thin: `!` is "urgent" in kud's glyph lexicon and "merge conflict"
+// in the health map one row below this strip, so a warning read as either; and
+// a plain `✓` is a hairline at terminal size, which is what made thirteen of
+// them look like a list rather than a status. The cost is the one this package
+// already pays for `merged` and `closed` in health-display.ts — a terminal
+// without a Nerd Font draws boxes here — and it is taken for the same reason.
+//
+// `unknown` is a plain `?`, and deliberately the lightest mark on the row. It
+// says what it means ("no reading") where the hollow `○` it replaced said
+// "open" in the lexicon, "pending" in half the tools on this machine, and
+// "bullet" whenever eleven of them sat in a row — which is exactly the shape a
+// misconfigured service tag produces. It takes no Nerd glyph on purpose: the
+// catalogue's `question` is a filled disc heavier than the tick, and the state
+// the row should be quietest about must not outweigh the one it is loud about.
 export const stripGlyph = (state: StripState): [string, string] => {
   switch (state) {
     case "ok":
-      return ["✓", colors.success]
+      return ["\u{f00c}", colors.success]
     case "warn":
-      return ["!", colors.warning]
+      return ["\u{f071}", colors.warning]
     case "fail":
-      return ["✗", colors.error]
+      return ["\u{f00d}", colors.error]
     case "unknown":
-      return ["○", colors.muted]
+      return ["?", colors.muted]
   }
 }
 
 // One mark for the alarm, kept to a single cell so it never widens an item by
-// more than it says. `▲` rather than an emoji: emoji are two cells in some
+// more than it says. Nerd Font's fire, because the alarm IS the fire the host's
+// header asks about, and because the `▲` it replaced became a second triangle
+// the moment `warn` took one — two states one silhouette apart is the thing
+// this file exists to prevent. Not an emoji: emoji are two cells in some
 // terminals and one in others, and this row is laid out by counting.
-const ALARM = "▲"
+const ALARM = "\u{f06d}"
 
 // The rank of a state when the strip has to choose what to name and what to
 // count. Worst first, because a narrow row has room for exactly one story.
@@ -76,8 +97,13 @@ export const ageLabel = (at: number | undefined, now = Date.now()): string => {
   return `${Math.round(m / 60)}h`
 }
 
+// Marks first, then the name — the same grammar the narrow layout's `3 ✗`
+// counts use, so a reader learns one order. The alarm sits in the mark
+// cluster beside the state rather than glued to the name's tail, where
+// `royalties▲` read as a stray superscript and put the two facts about one
+// service a word apart.
 const itemText = (item: StripItem): string =>
-  `${stripGlyph(item.state)[0]} ${item.key}${item.alarm ? ALARM : ""}`
+  `${stripGlyph(item.state)[0]}${item.alarm ? ` ${ALARM}` : ""} ${item.key}`
 
 /**
  * The strip as plain text, at the width it has to fit. Exported so a test — or a
@@ -125,6 +151,24 @@ export const stripLayout = (
   return { parts: null, summary: text, age }
 }
 
+// Brightness follows importance, and the name carries it as well as the mark:
+// a fire or a failure lights its name in the error colour and bold, an
+// unmeasured thing dims to the same weight as its `?`, and everything fine
+// stays at the row's resting weight. On a row of thirteen this is what makes
+// the two that matter the first thing seen — and when most of the row is
+// unknown, what makes it read as a quiet grey line with the fires standing out
+// of it, rather than thirteen names at full brightness competing with two
+// crosses. Only the marks that ask for something are bold; a bold tick twelve
+// times over was the loudest thing on the row for the least reason.
+const nameStyle = (
+  item: StripItem,
+): { color?: string; bold?: boolean; dimColor?: boolean } => {
+  if (item.state === "fail" || item.alarm)
+    return { color: colors.error, bold: true }
+  if (item.state === "unknown") return { dimColor: true }
+  return {}
+}
+
 /**
  * A standing single-line row, the same height across loading / absent / ready
  * so the content below it never jumps — the same contract `CiStatusLine` keeps,
@@ -151,10 +195,12 @@ export const StatusStripLine = ({
         <Text dimColor>{`${label}  loading…`}</Text>
       </Box>
     )
+  // The "no reading" mark, so the row with no strip at all and an item with no
+  // reading say it with the same shape.
   if (strip === null)
     return (
       <Box marginBottom={1}>
-        <Text dimColor>{"  ○ "}</Text>
+        <Text dimColor>{`  ${stripGlyph("unknown")[0]} `}</Text>
         <Text dimColor>{`${label}  no signal / not configured`}</Text>
       </Box>
     )
@@ -166,18 +212,23 @@ export const StatusStripLine = ({
       {parts ? (
         parts.map((item, i) => {
           const [glyph, color] = stripGlyph(item.state)
+          const asking = item.state === "fail" || item.state === "warn"
           return (
             <React.Fragment key={item.key}>
               {i > 0 ? <Text>{"  "}</Text> : null}
-              <Text color={color} bold>
+              <Text
+                color={item.state === "unknown" ? undefined : color}
+                dimColor={item.state === "unknown"}
+                bold={asking}
+              >
                 {glyph}
               </Text>
-              <Text> {item.key}</Text>
               {item.alarm ? (
                 <Text color={colors.error} bold>
-                  {ALARM}
+                  {` ${ALARM}`}
                 </Text>
               ) : null}
+              <Text {...nameStyle(item)}> {item.key}</Text>
             </React.Fragment>
           )
         })

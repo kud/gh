@@ -12,11 +12,26 @@ import {
 const frameOf = (node: React.ReactElement) => render(node).lastFrame() ?? ""
 
 describe("stripGlyph", () => {
+  // Nerd Font check / warning / times, one UTF-16 unit each so the width
+  // arithmetic in stripLayout counts them as the single cell they draw.
   it("gives every state its own shape, not only its own colour", () => {
-    expect(stripGlyph("ok")[0]).toBe("✓")
-    expect(stripGlyph("warn")[0]).toBe("!")
-    expect(stripGlyph("fail")[0]).toBe("✗")
-    expect(stripGlyph("unknown")[0]).toBe("○")
+    expect(stripGlyph("ok")[0]).toBe("\u{f00c}")
+    expect(stripGlyph("warn")[0]).toBe("\u{f071}")
+    expect(stripGlyph("fail")[0]).toBe("\u{f00d}")
+    expect(stripGlyph("unknown")[0]).toBe("?")
+  })
+
+  it("never lets two states, or a state and the alarm, share a silhouette", () => {
+    const states = ["ok", "warn", "fail", "unknown"] as const
+    const shapes = states.map((s) => stripGlyph(s)[0])
+    expect(new Set(shapes).size).toBe(states.length)
+    for (const shape of shapes) expect(shape).toHaveLength(1)
+    const { summary } = stripLayout(
+      { title: "x", items: [{ key: "a", state: "ok", alarm: true }] },
+      200,
+    )
+    const alarm = summary.split(" ")[1]
+    expect(shapes).not.toContain(alarm)
   })
 })
 
@@ -51,14 +66,14 @@ describe("stripLayout", () => {
     ],
   }
 
-  // "✓ api  ✗ db  ! queue" is 20 chars; fixed is 12 ("  services  "). The
+  // "<ok> api  <fail> db  <warn> queue" is 20 chars; fixed is 12 ("  services  "). The
   // switch happens exactly at 32 — pin both sides of it.
   it("names every item, with its own glyph, once the row has room", () => {
     const { parts, summary } = stripLayout(wideEnough, 32)
     expect(parts).toEqual(wideEnough.items)
-    expect(summary).toContain("✓ api")
-    expect(summary).toContain("✗ db")
-    expect(summary).toContain("! queue")
+    expect(summary).toContain("\u{f00c} api")
+    expect(summary).toContain("\u{f00d} db")
+    expect(summary).toContain("\u{f071} queue")
   })
 
   it("drops to counts one column short of the same row", () => {
@@ -70,11 +85,11 @@ describe("stripLayout", () => {
     const { parts, summary } = stripLayout(wideEnough, 31)
     expect(parts).toBeNull()
     // The one fail is still named; the ok and the warn are only counted.
-    expect(summary).toContain("✗ db")
-    expect(summary).toContain("1 ✓")
-    expect(summary).toContain("1 !")
-    expect(summary).not.toContain("✓ api")
-    expect(summary).not.toContain("! queue")
+    expect(summary).toContain("\u{f00d} db")
+    expect(summary).toContain("1 \u{f00c}")
+    expect(summary).toContain("1 \u{f071}")
+    expect(summary).not.toContain("\u{f00c} api")
+    expect(summary).not.toContain("\u{f071} queue")
   })
 
   // Four bad items and a row too narrow even for the worst one alone: only
@@ -92,19 +107,19 @@ describe("stripLayout", () => {
     }
     const { parts, summary } = stripLayout(crowded, 24)
     expect(parts).toBeNull()
-    expect(summary).toBe("1 ✗ · 2 ! · ✗ aaa")
+    expect(summary).toBe("1 \u{f00d} · 2 \u{f071} · \u{f00d} aaa")
   })
 
-  it("carries the alarm mark on an item that has one", () => {
+  it("carries the alarm mark in the mark cluster, before the name", () => {
     const alarmed: StatusStrip = {
       title: "x",
       items: [{ key: "payments", state: "ok", alarm: true }],
     }
     const { summary } = stripLayout(alarmed, 200)
-    expect(summary).toContain("✓ payments▲")
+    expect(summary).toContain("\u{f00c} \u{f06d} payments")
   })
 
-  it("draws unknown as its own hollow mark and never counts it as ok", () => {
+  it("draws unknown as its own mark and never counts it as ok", () => {
     const mixed: StatusStrip = {
       title: "x",
       items: [
@@ -113,7 +128,7 @@ describe("stripLayout", () => {
       ],
     }
     const { summary } = stripLayout(mixed, 5)
-    expect(summary).toBe("1 ✓ · 1 ○")
+    expect(summary).toBe("1 \u{f00c} · 1 ?")
   })
 
   it("appends the age once a snapshot time is given", () => {
