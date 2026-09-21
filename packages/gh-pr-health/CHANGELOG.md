@@ -1,5 +1,11 @@
 # @kud/gh-pr-health
 
+## 0.1.113
+
+### Patch Changes
+
+- @kud/gh-ink@0.59.1
+
 ## 0.1.112
 
 ### Patch Changes
