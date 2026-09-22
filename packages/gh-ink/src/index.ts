@@ -27,6 +27,12 @@ export {
   type SidebarRow,
 } from "./components/side-panel.js"
 export {
+  PrRow,
+  type PrRowProps,
+  type RowAnnouncement,
+  type RowMotion,
+} from "./components/pr-row.js"
+export {
   StatusStripLine,
   stripGlyph,
   stripLayout,

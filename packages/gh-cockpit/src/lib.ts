@@ -69,6 +69,7 @@ export {
   openInTab,
   parsePatterns,
   PIN_MARK,
+  PrRow,
   profileOf,
   readCache,
   relativeTime,

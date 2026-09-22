@@ -7,11 +7,26 @@ import React, {
   useEffect,
   useRef,
   useMemo,
-  createContext,
-  useContext,
   type ReactNode,
 } from "react"
-import { Text as InkText, Box, useInput, useWindowSize } from "ink"
+import { Box, useInput, useWindowSize } from "ink"
+// The backdrop's `Text` shadows Ink's on purpose — see backdrop.tsx. Importing
+// it here rather than Ink's is what makes every `<Text>` below overlay-aware
+// without a single call site saying so.
+import { Backdrop, backdropStyle, Text, useBackdropped } from "./backdrop.js"
+// `backdropStyle` and `truncate` both moved out of this file and are re-exported
+// from it unchanged. Neither line is tidiness to be swept: `./inbox.js` is the
+// specifier `inbox/index.ts`, `backdrop.test.tsx` and cockpit's `lib.ts` all
+// name, so dropping one moves a published export to a new address without
+// anything failing to compile.
+export { backdropStyle }
+import { truncate } from "../lib/truncate.js"
+export { truncate }
+import {
+  PrRow,
+  type RowAnnouncement,
+  type RowMotion,
+} from "../components/pr-row.js"
 import type { Command, InboxExtension, ExtensionTarget } from "./extension.js"
 import {
   invalidateCache,
@@ -104,8 +119,6 @@ import {
   filterByOrigin,
   filterBySearch,
   filterByRepos,
-  sizeOf,
-  sizePartsOf,
 } from "@kud/gh-workflow"
 import type {
   GHDetail,
@@ -727,16 +740,16 @@ export const maxViewStart = (items: AnyItem[], budget: number): number => {
  */
 export const rowKey = (item: AnyItem): string =>
   item.kind === "task"
-    ? item.instanceKey ?? item.key
+    ? (item.instanceKey ?? item.key)
     : item.kind === "repo-header"
-    ? `header:${item.repo}`
-    : item.kind === "subgroup-header"
-    ? `subgroup:${item.label}`
-    : item.kind === "show-more"
-    ? `show-more:${item.hidden[0]?.repo ?? ""}`
-    : item.kind === "show-less"
-    ? `show-less:${item.toHide[0]?.repo ?? ""}`
-    : `${item.repo}/${item.number}`
+      ? `header:${item.repo}`
+      : item.kind === "subgroup-header"
+        ? `subgroup:${item.label}`
+        : item.kind === "show-more"
+          ? `show-more:${item.hidden[0]?.repo ?? ""}`
+          : item.kind === "show-less"
+            ? `show-less:${item.toHide[0]?.repo ?? ""}`
+            : `${item.repo}/${item.number}`
 
 const firstSelectable = (section: Section): number =>
   Math.max(
@@ -755,12 +768,6 @@ export const withHeaders = (items: AnyItem[], idx: number): number => {
   )
     start--
   return start
-}
-
-export const truncate = (str: string, max: number): string => {
-  if (str.length <= max) return str
-  const half = Math.floor((max - 1) / 2)
-  return `${str.slice(0, half)}…${str.slice(-half)}`
 }
 
 export const clipboard = (text: string) => {
@@ -997,136 +1004,6 @@ const MODAL_CHROME_COLS = 2 /* border */ + 1 * 2 /* paddingX */
 // panel. A shade lighter than a dark terminal on purpose, so it reads as raised
 // against the dimmed backdrop rather than as a hole cut in it.
 const OVERLAY_BG = "#22222e"
-
-// Ink has no cascade — every Text carries its own colour — so a subtree cannot be
-// dimmed from above. The flag travels by context and the wrapper below applies
-// it, which is why this module imports Ink's Text as `InkText` and shadows the
-// name: every existing `<Text>` in the file became backdrop-aware without a
-// single call site changing.
-const DimContext = createContext(false)
-
-/*
- * Two planes for the list to fall back to, both in `OVERLAY_BG`'s barely-blue
- * hue family so the scene reads as one temperature rather than a grey list
- * behind a slate panel.
- *
- * Two rather than one because a single tone collapses the list to a mat, and
- * the point of a backdrop is that something structured is behind the panel: the
- * repo headers still read as headers and the ages as a right-hand column, at a
- * contrast where you can see the list's shape without being able to read it.
- */
-const BACKDROP_FG = "#5a5a68"
-const BACKDROP_FG_RECESSED = "#3a3a46"
-
-/*
- * The backdrop REPLACES colour rather than attenuating it, and drops SGR 2 on
- * the way out.
- *
- * `dimColor` was the whole mechanism and it does not survive contact with a real
- * terminal. Faint is a single binary attribute whose meaning is the terminal's
- * to decide, and measured on iTerm2 it barely moves a 24-bit foreground: the
- * escape codes for a row were byte-identical either side of the overlay —
- * `[38;2;255;135;0]` both times — so the list's orange came through at full
- * strength with the panel over it. There is no "more dim" available. Anything
- * that actually recedes has to change the colour that gets emitted.
- *
- * Both would be worse than either. Set a flat colour AND leave faint on and the
- * two planes stop being the values chosen here and become whatever this
- * terminal does with SGR 2 — the exact failure being fixed, one layer along.
- *
- * `dimColor` at the call site is reused as the plane selector rather than
- * re-encoded, which is the same trick as the shadow itself one turn further:
- * every element that already declared itself furniture — prefixes, repo, age,
- * author, a departing title — says so again here, one step further back, and
- * not one call site changes. Bold and italic go with it, being texture rather
- * than emphasis at this contrast. `strikethrough` stays: it is shape.
- *
- * The health glyphs and the turn arrows lose their hues for as long as an
- * overlay is up, and that is `health-display.ts`'s contract being SPENT rather
- * than broken — the glyph is what distinguishes a state and colour only ever
- * reinforced it, and every one of those glyphs passes a silhouette test by
- * construction. The backdrop is also not being read: nobody diagnoses a PR
- * through the list behind a dialog they are operating, so what goes is a
- * scanning aid during the one moment nothing is being scanned. It returns with
- * the next frame.
- */
-type TextProps = React.ComponentProps<typeof InkText>
-
-/**
- * The style a `Text` takes when it is behind an overlay.
- *
- * Exported as a function so it can be asserted without rendering. Colour only
- * reaches a frame if chalk decides to emit it, and chalk decides from the
- * runner's TTY — so a spec that mounts the app and greps the frame for escape
- * codes passes vacuously wherever the output is piped, which is a check that
- * cannot fail sitting in the count beside ones that can. Forcing colour on for
- * the whole package is not the answer either: ten existing specs measure raw
- * frame widths and break the moment codes appear in them. The decision is pure,
- * so pin the decision.
- */
-export const backdropStyle = (props: TextProps): Partial<TextProps> => ({
-  color: props.dimColor ? BACKDROP_FG_RECESSED : BACKDROP_FG,
-  dimColor: false,
-  bold: false,
-  italic: false,
-  inverse: false,
-  backgroundColor: undefined,
-})
-
-const Text = ({ children, ...props }: TextProps) => {
-  const dimmed = useContext(DimContext)
-  return dimmed ? (
-    <InkText {...props} {...backdropStyle(props)}>
-      {children}
-    </InkText>
-  ) : (
-    <InkText {...props}>{children}</InkText>
-  )
-}
-
-/**
- * Whether this subtree is currently behind an overlay.
- *
- * Exists for the one thing the shadow above cannot reach: `Pill` comes from
- * `@kud/ink-ui` and renders that package's `Text`, so it never sees the context
- * and keeps its fill. Harmless while the backdrop merely lost its bold; once the
- * list flattens to a single recessive tone a filled pill becomes the most
- * saturated thing on the screen, behind a panel that is supposed to be in front.
- */
-const useBackdropped = (): boolean => useContext(DimContext)
-
-// The list, dimmed and lifted out of the flow so an overlay can be laid over it.
-// Ink paints in document order, so the backdrop has to come FIRST and the panel
-// second — the reverse (panel absolute, over a list in flow) reads more naturally
-// and is wrong twice: it paints under, and a panel taller than `height` is
-// centre-clipped, losing its border and its last line. In flow the panel simply
-// grows the row instead.
-const Backdrop = ({
-  dimmed,
-  absolute,
-  height,
-  children,
-}: {
-  dimmed: boolean
-  absolute: boolean
-  height: number
-  children: ReactNode
-}) => (
-  <DimContext.Provider value={dimmed}>
-    {absolute ? (
-      <Box
-        position="absolute"
-        flexDirection="column"
-        width="100%"
-        height={height}
-      >
-        {children}
-      </Box>
-    ) : (
-      children
-    )}
-  </DimContext.Provider>
-)
 
 /**
  * What the tab badge and the header total both count.
@@ -1736,8 +1613,8 @@ const InboxHeader = ({
   const countSeg = loading
     ? "      loading…  "
     : quiet
-    ? "  "
-    : `  ${String(total).padStart(3)} item${total !== 1 ? "s" : ""}  ·  `
+      ? "  "
+      : `  ${String(total).padStart(3)} item${total !== 1 ? "s" : ""}  ·  `
   const userSeg = loading || quiet ? "" : `@${login}  `
   // A LABEL, not a control, and the HOST'S WORD rather than one of ours. Which
   // side you are on is settled when the command starts, so a switch here would
@@ -1774,12 +1651,12 @@ const InboxHeader = ({
   const [statusText, statusColor] = hasPending
     ? [`● ${pendingSummary || "new"} · r apply`, colors.accent]
     : refreshing
-    ? ["↻ refreshing…", "cyan"]
-    : appliedSummary
-    ? [`◉ ${appliedSummary}`, colors.accent]
-    : fetchedAt
-    ? [`updated ${agoText(fetchedAt)}`, undefined]
-    : ["", undefined]
+      ? ["↻ refreshing…", "cyan"]
+      : appliedSummary
+        ? [`◉ ${appliedSummary}`, colors.accent]
+        : fetchedAt
+          ? [`updated ${agoText(fetchedAt)}`, undefined]
+          : ["", undefined]
   const statusSeg = statusText ? statusText + "  " : ""
 
   const fill = Math.max(
@@ -1824,17 +1701,14 @@ const InboxHeader = ({
 // A standing single-line row, always the same height (one line + marginBottom)
 // across loading/error/ready so the content below it never jumps.
 export type CiStatusState =
-  | { kind: "loading" }
-  | { kind: "error" }
-  | { kind: "ready"; status: CiStatus }
+  { kind: "loading" } | { kind: "error" } | { kind: "ready"; status: CiStatus }
 
 // The strip's poll state, the same three-way shape as the CI line's: out for
 // the first answer, or ready with what the host said — `null` being a real
 // answer ("nothing configured"), never a failed one, since a failed poll keeps
 // the last strip up rather than blanking the row.
 export type StripStatusState =
-  | { kind: "loading" }
-  | { kind: "ready"; strip: StatusStrip | null }
+  { kind: "loading" } | { kind: "ready"; strip: StatusStrip | null }
 
 /** What the strip SAYS, ignoring when it said it. */
 export const stripSignature = (strip: StatusStrip | null): string =>
@@ -2298,7 +2172,11 @@ export const TAB_MARK = "●"
  * level up. The trailing WORD on a row never got it, which is why a row gaining a
  * marker used to reflow — see the transit marks, which now live here instead.
  */
-export const tabMarker = (marked: Set<string>, id: string, frame = 0): string =>
+export const tabMarker = (
+  marked: Set<string>,
+  id: string,
+  frame = 0,
+): string =>
   marked.has(id) ? `${TAB_PULSE[frame % TAB_PULSE.length] as string} ` : "  "
 
 // The dot breathing rather than sitting still. A tab you are NOT looking at is
@@ -2481,10 +2359,10 @@ const ItemRow = ({
     const transitIcon = !transient
       ? " "
       : isDeparture(transient)
-      ? (TRANSIT_OUT_FRAMES[rampAt(TRANSIT_OUT_FRAMES.length)] as string)
-      : isArrival(transient)
-      ? (TRANSIT_IN_FRAMES[rampAt(TRANSIT_IN_FRAMES.length)] as string)
-      : "\u25C9"
+        ? (TRANSIT_OUT_FRAMES[rampAt(TRANSIT_OUT_FRAMES.length)] as string)
+        : isArrival(transient)
+          ? (TRANSIT_IN_FRAMES[rampAt(TRANSIT_IN_FRAMES.length)] as string)
+          : "\u25C9"
     // The prefix term is new here and easy to miss: a task row had no indent
     // to price until stories became tasks hanging under an epic, so this
     // budget never carried one and a depth-1 story overflowed by exactly its
@@ -2601,7 +2479,12 @@ const ItemRow = ({
     )
   }
 
-  const { glyph: healthIcon, color: healthColor } = displayFor(item.health)
+  // Everything from here is choreography — what the refresh, a merge or your own
+  // close is doing to this row THIS frame. The row itself is `PrRow`, which knows
+  // none of it: it is handed the conclusions (a glyph, how the title reads, what
+  // the row is announcing) and lays out a PR. Keeping the two apart is what lets
+  // a second surface draw the same row without inheriting a clock.
+  //
   // The sparkle replaces the health glyph rather than sitting beside it: the
   // health column is one cell wide and every row's title is aligned off it, so
   // an extra glyph here would shift the title of exactly the row you are
@@ -2611,424 +2494,63 @@ const ItemRow = ({
   // title on screen is aligned off it, so a marker anywhere else would shift the
   // title of exactly the row being watched. `changed` deliberately KEEPS its
   // health glyph - the health is usually the thing that changed, and hiding it
-  // to announce that it changed is the one substitution that costs information.
+  // to announce that it changed is the one substitution that costs information,
+  // which is why it names the health glyph explicitly rather than passing no
+  // override: it wants that glyph in the transit colour, not the health one.
   const icon = merged
-    ? (MERGED_FRAMES[sparkFrame % MERGED_FRAMES.length] as string)
-    : transient && isDeparture(transient)
-    ? (TRANSIT_OUT_FRAMES[rampAt(TRANSIT_OUT_FRAMES.length)] as string)
-    : transient && isArrival(transient)
-    ? (TRANSIT_IN_FRAMES[rampAt(TRANSIT_IN_FRAMES.length)] as string)
-    : healthIcon
-  const color = merged
-    ? MERGED_COLOUR
+    ? {
+        glyph: MERGED_FRAMES[sparkFrame % MERGED_FRAMES.length] as string,
+        color: MERGED_COLOUR,
+      }
     : transient
-    ? TRANSIT_COLOUR[transient]
-    : healthColor
-  // Whose turn it is, in its own fixed cell. Arrows rather than the nerd-font
-  // comment glyph because this column sits in the aligned zone left of the
-  // title: a PUA codepoint that renders double-width in some fonts would shift
-  // only the rows that carry one, and a fixed cell exists precisely so the
-  // title never moves. ← and → are already proven in this UI's footer hints.
-  const spokeLast = !!login && !!item.lastActor && item.lastActor === login
-  // A pinned row lands in Your move for a reason no arrow can carry: the arrows
-  // report who SPOKE last, and a pin is not a turn in the conversation. Left to
-  // the arrow alone it would sit under Your move wearing a grey → that says the
-  // opposite. So it gets its own mark, single-width ASCII because this cell is
-  // in the aligned zone where a codepoint that renders double-width anywhere
-  // would shift only the rows carrying one.
-  //
-  // NOT `!`, which was the first choice and was wrong: `!` is `conflict` in the
-  // health vocabulary, in this same orange, one cell to the left — so a PR that
-  // was both rendered `! !` twice in the same colour with nothing to tell the
-  // two apart. The colourblind invariant health-display.ts states for its own
-  // map has to hold ACROSS the adjacent cells too, not just within one, and
-  // `pinMarkIsUnambiguous` in health-display.test.ts now pins that.
-  // `→` IS A BLANK, and that is a silhouette ruling rather than a tidy-up.
-  //
-  // The cursor is `❯` at column 0 and this cell sits at column 4 on a top-level
-  // row. Both were small rightward points, so at scan speed — when the eye is
-  // asking "which row am I on" — a rightward mark four columns in, present on
-  // some rows and not others, was a second candidate answer to that question.
-  // The collision is not that two marks are close; it is that they POINT THE
-  // SAME WAY while only one of them is on every row.
-  //
-  // Substituting another rightward glyph (`▸`, `›`, `»`) patches the symptom and
-  // lands on a different neighbour — `▸` beside `◆` is two filled blobs in
-  // adjacent cells. Blanking separates by DIRECTION, which is a shape channel
-  // and therefore survives the colourblind invariant that a hue swap would not.
-  // `←` points left; nothing else on the row is a horizontal arrow (not the
-  // health map, the transit frames, the merge sparkle, `\u{f086}` or
-  // `\u{f02b}`), and the tree run `└─` is furniture two tiers down.
-  //
-  // Nothing is lost that this cell was carrying. `→` said "you spoke last,
-  // nothing is being asked of you" — the ABSENCE of a claim, and absence already
-  // draws as a blank here (`none` health is `" "`). The band header says it in
-  // words, the thread cell is already quiet on `spokeLast`, and the explain
-  // action has room for a sentence. What it buys is a sparse column whose only
-  // ink is `←`, the one state that is a claim on you.
-  //
-  // The accepted cost: "you spoke last" and "we never learned who spoke" now
-  // draw alike. The second is a FETCH fact rather than a domain one — the same
-  // distinction `UNREAD_DISPLAY` makes — and neither is actionable, so it is not
-  // worth a column in the aligned zone.
-  const [turnIcon, turnColor] = item.pinned
-    ? [PIN_MARK, colors.accent]
-    : !login || !item.lastActor || spokeLast
-    ? [" ", colors.muted]
-    : ["←", colors.accent]
-  const numStr = `#${item.number}`.padEnd(7)
-  // Hide "by me" — the author suffix is only signal when it's someone else.
-  const showAuthor = !!item.author && item.author !== login
-  // `+18 -4`, on every PR row that carries it. It was gated on `showAuthor`
-  // for one morning (2026-09-11) on the argument that you know the size of
-  // your own — and Erwann overruled it the same afternoon: the number is how
-  // a list of your own PRs is triaged too, and a cell that appears on the row
-  // above and not on yours reads as a column that failed to fill. Absent, not
-  // `+0 -0`, when the node never carried it.
-  const sizeLabel = sizeOf(item)
-  const sizeParts = sizePartsOf(item)
-  // Unresolved review threads — a comment glyph (nf-fa-comments) + count, keeping
-  // to the single-glyph health vocabulary instead of spelling out "unresolved".
-  const unresolvedLabel =
-    item.unresolved > 0 ? `\u{f086} ${item.unresolved}` : ""
-  // `3h (2d)` — active 3h ago, open for 2d. Collapsed to one value when they
-  // agree, so an untouched row does not read as `2d (2d)`.
-  //
-  // PARENTHESES, NOT A DIVIDER, and the argument this replaces was wrong in a
-  // way worth recording. It ran: the left value is by construction the smaller
-  // of the two (nothing can be touched before it exists), and that invariant
-  // teaches the order without a legend, a colour or a second glyph column.
-  //
-  // It fails twice. Knowing which value is SMALLER is not knowing which value is
-  // WHICH — monotonicity establishes that an ordering exists and says nothing
-  // about what the two quantities are. And it only reads as ordered inside one
-  // unit: `0m · 1d` is obviously ordered, while `6d · 1w` needs weeks converted
-  // to days before the ordering is even visible. Cross-unit pairs are the COMMON
-  // case here rather than the edge, because GitHub ages cross units within a
-  // fortnight — so the one worked example that would teach the pattern is the
-  // one almost never on screen.
-  //
-  // A parenthetical is read as subordinate to the number beside it by every
-  // reader who has ever read anything, which kills the "two peers separated by a
-  // dot" reading that was causing the confusion: the bare value is THE age, the
-  // parenthetical is the lifetime. It costs nothing — `6d · 1w` and `6d (1w)`
-  // are both seven columns, so the budget below is unchanged — and it frees the
-  // `·` to mean one thing everywhere else on the row.
-  //
-  // Kept as a pair as well as a string: the string is what the width budget
-  // measures (one cell, one number of columns), the pair is what the renderer
-  // needs to paint the two halves at different tiers. Deriving the split back
-  // out of the string would mean parsing punctuation the line above just wrote.
-  const agePair =
-    item.activityAge && item.activityAge !== item.age
-      ? { activity: item.activityAge, lifetime: item.age }
-      : null
-  const ageLabel = agePair
-    ? `${agePair.activity} (${agePair.lifetime})`
-    : item.age
-  const mergedLabel = merged ? "merged" : ""
+      ? {
+          glyph: isDeparture(transient)
+            ? (TRANSIT_OUT_FRAMES[rampAt(TRANSIT_OUT_FRAMES.length)] as string)
+            : isArrival(transient)
+              ? (TRANSIT_IN_FRAMES[rampAt(TRANSIT_IN_FRAMES.length)] as string)
+              : displayFor(item.health).glyph,
+          color: TRANSIT_COLOUR[transient],
+        }
+      : undefined
+  // `changed` is deliberately absent: the row changed, it did not arrive and it
+  // is not leaving, so its title reads exactly as it did before. The glyph above
+  // is what says something happened.
+  const motion: RowMotion | undefined =
+    transient === "out"
+      ? "withdrawn"
+      : transient && isDeparture(transient)
+        ? "departing"
+        : transient && isArrival(transient)
+          ? "arriving"
+          : undefined
   // Never both: a row merged from here is already being announced, and stacking
-  // GONE onto MERGED would report one departure twice.
-  // Two of these are pills, so the joined string under-prices them by exactly
-  // their caps — see the ticket row's budget for the same correction. Only one
-  // of the pair is ever non-empty (a merged row never also says GONE), but both
-  // are charged rather than one, because a budget that relies on that stays
-  // right only for as long as the invariant above `transitLabel` holds.
-  // Only MERGED is drawn on the row now, so only MERGED is charged. The transit
-  // words moved to the header — see the render below.
-  const pillCaps = [mergedLabel, farewellLabel].filter(Boolean).length * 2
-  // The boolean was doing two jobs here. This one is "this row hangs under
-  // something, so say which repo it belongs to" — unchanged in meaning.
-  const repoLabel = depthOf(item) > 0 ? item.repo : ""
-  /*
-   * At most two labels, best first by the host's ranking and by name after
-   * that. Two because the cap is the whole design: a row that shows every label
-   * has stopped being a row and become a paragraph, and the title is what it
-   * came for.
-   *
-   * Sorted on a copy — `item.labels` is the caller's array and sorting in place
-   * would reorder it under them.
-   *
-   * The repo's implied labels go first, before the rank and the slice: a label
-   * every issue in the repo carries is the group header repeated, and a row
-   * whose only label was implied draws no cell at all — a bare glyph would say
-   * "classified" with no classification behind it. Filtered after the slice it
-   * would take a slot and then vanish.
-   */
-  // Two axes of "says nothing", unioned: the repo's own convention, and
-  // whatever this SECTION happens to make uniform. See `uniformLabels` above
-  // for why the second exists — a `label:plan` view spanning five repos is
-  // uniform by construction while only one of them is in the config.
-  const implied = [...impliedLabels(item.repo), ...uniformLabels]
-  const labelNames = (item.labels ?? [])
-    .filter((l) => !implied.includes(l))
-    .sort((a, b) => labelPriority(a) - labelPriority(b) || a.localeCompare(b))
-    .slice(0, 2)
-
-  /*
-   * Everything after the title is CONTEXT, and context that costs you the thing
-   * it contextualises is a bad trade — so when the row cannot have it all, the
-   * trailing furniture is given up in order rather than the title being floored.
-   *
-   * The floor was the bug. `Math.max(20, cols - fixedWidth)` is fine while the
-   * frame is wide and fatal the moment something takes forty columns away: a PR
-   * carrying a long repo name and two ages has nothing left, takes the floor
-   * anyway, and overflows by exactly the difference. Ink's answer to an
-   * overflowing row is not to clip it but to compress every flexible child in it,
-   * so the key, the number and the title all shrink together and wrap into a
-   * column of fragments — the list stops looking like a list, and anything beside
-   * it is pushed off the screen. One row too wide takes the whole frame with it.
-   *
-   * Order is least-valuable-first, and the two announcements are absent from it:
-   * MERGED and the transit labels are the news the row exists to carry that
-   * moment, and a row that drops its own headline to keep a repo name has the
-   * priority exactly backwards.
-   */
-  // `labels` is a COUNT, not a flag — how many of the (at most two) label names
-  // have been given up. It is the one participant that appears on two rungs of
-  // the ladder below, because the two labels are not worth the same: the second
-  // is speculative, the first is what the row IS. So it degrades two → one →
-  // none rather than vanishing whole.
-  const givingUp = {
-    author: false,
-    size: false,
-    threads: false,
-    age: false,
-    repo: false,
-    labels: 0,
-  }
-  /*
-   * `\u{f02b}` (nf-fa-tag) then the names, comma-separated — the same
-   * glyph-then-content shape `\u{f086} 2` already uses for unresolved threads,
-   * so the vocabulary is learned once. Not a Pill: a pill is drawn filled and
-   * means "the row belongs to this category", and two filled pills on the most
-   * contended row in the app out-shout the health glyph and the title both.
-   *
-   * 24 columns for the names is a design cap, not a width fallback — it holds on
-   * a 200-column frame too, because past it the cell stops being a marker and
-   * becomes a second title. Whole labels only: a clipped classification is a lie
-   * you cannot check, since `stat…` could be `status:blocked` or `status:done`,
-   * where a clipped title still carries its sense. The one exception is a lone
-   * first label longer than the cap, which is truncated rather than dropped —
-   * a clipped label still says the row is classified, and nothing says it isn't.
-   *
-   * Math.max around the subtraction because `slice(0, -1)` drops from the TAIL:
-   * a single-label row on the second rung would otherwise keep the very label it
-   * was told to give up.
-   */
-  const LABEL_CELL_MAX = 24
-  const labelCell = () => {
-    const shown = labelNames.slice(
-      0,
-      Math.max(0, labelNames.length - givingUp.labels),
-    )
-    if (shown.length === 0) return ""
-    const fitted: string[] = []
-    for (const name of shown) {
-      const next = [...fitted, name].join(", ")
-      if (next.length <= LABEL_CELL_MAX) fitted.push(name)
-    }
-    if (fitted.length === 0) {
-      return `\u{f02b} ${truncate(shown[0], LABEL_CELL_MAX)}`
-    }
-    return `\u{f02b} ${fitted.join(", ")}`
-  }
-  const widthOf = () => {
-    const suffix = [
-      givingUp.age ? "" : ageLabel || "",
-      // ASCII only, so no PUA double-width correction — see the label cell.
-      givingUp.size ? "" : sizeLabel || "",
-      givingUp.threads ? "" : unresolvedLabel,
-      showAuthor && !givingUp.author ? `by ${item.author}` : "",
-      mergedLabel,
-    ]
-      .filter(Boolean)
-      .join("  ")
-    // Charged apart from the suffix array because it sits BETWEEN the title and
-    // the repo, not in the trailing group — same as repoLabel.
-    //
-    // The cell's own string counts its glyph as one character; it is charged as
-    // two. `\u{f02b}` is a PUA codepoint and this file's turn-arrow comment
-    // above already records that PUA can render double-width in some fonts.
-    // Tolerable here for exactly the reason it was not there: this cell sits
-    // right of the title, so a double-width render shifts trailing furniture
-    // rather than the aligned zone. But under-charge it by one and every row
-    // carrying a label overflows by one in those fonts — which is the class of
-    // bug this whole block exists to prevent. Two leading spaces, then the cell,
-    // then the glyph's second column.
-    const cell = labelCell()
-    return (
-      2 +
-      prefix.length +
-      2 /* health */ +
-      2 /* turn */ +
-      7 +
-      (cell ? 2 + cell.length + 1 : 0) +
-      (givingUp.repo ? 0 : repoLabel.length) +
-      suffix.length +
-      pillCaps +
-      6
-    )
-  }
-  // Short enough to still say something, long enough to be worth reading. Below
-  // this the row is better off shedding its context than its subject.
-  const MIN_TITLE = 24
+  // GONE onto MERGED would report one departure twice. Both are built anyway
+  // rather than one being chosen, because the budget on the other side charges
+  // for what it is given, and a list that relies on the invariant above is one
+  // edit away from being wrong about its own widths.
   //
-  // The label cell takes two of these rungs. The second label goes early — it is
-  // the most speculative thing on the row — and the first outlives both the
-  // thread count and the repo, because by then the row is down to what it IS.
-  //
-  // Assignment rather than `+= 1`, so each rung states the resulting count
-  // outright and reordering this array cannot silently produce the wrong one.
-  //
-  // Size outlives the author — on a review queue "by X" is the least
-  // discriminating thing on the row — and the speculative second label, and
-  // dies before the thread count: a thread is a claim on you NOW, a size is an
-  // aid to deciding WHETHER to engage, and the PR header still holds it.
-  for (const give of [
-    () => (givingUp.author = true),
-    () => (givingUp.labels = 1),
-    () => (givingUp.size = true),
-    () => (givingUp.threads = true),
-    () => (givingUp.labels = 2),
-    () => (givingUp.repo = true),
-    () => (givingUp.age = true),
-  ]) {
-    if (cols - widthOf() >= MIN_TITLE) break
-    give()
-  }
-  const labelLabel = labelCell()
-  // Never below 1: with everything given up the row is as short as it can be, and
-  // a negative budget would hand `truncate` nonsense. A frame that narrow has
-  // bigger problems than this row.
-  const titleMax = Math.max(1, cols - widthOf())
+  // Only these two. The refresh wording moved to the header, where a changing
+  // width costs nothing — on the row it cost columns the row did not have, so a
+  // row that gained one paid for it by squeezing the very title you were reading.
+  const announcements: RowAnnouncement[] = [
+    ...(merged ? [{ label: "merged", color: MERGED_COLOUR }] : []),
+    ...(farewellLabel
+      ? [{ label: farewellLabel, color: TRANSIT_COLOUR.out }]
+      : []),
+  ]
 
   return (
-    <Box>
-      <Text color={colors.info}>{active ? "❯ " : "  "}</Text>
-      <Text dimColor>{prefix}</Text>
-      <Text color={color as any} bold>
-        {icon + " "}
-      </Text>
-      <Text color={turnColor as any} bold={turnIcon === "←"}>
-        {turnIcon + " "}
-      </Text>
-      <Text color={colors.accent}>{numStr}</Text>
-      <Text
-        bold={active || (!!transient && isArrival(transient))}
-        dimColor={!!transient && isDeparture(transient)}
-        strikethrough={transient === "out"}
-      >
-        {truncate(item.title, titleMax) + "  "}
-      </Text>
-      {/* Straight after the title and before the repo, not out in the trailing
-          furniture: a label says what the row IS, so it is read as part of the
-          subject rather than scanned down a column — which is why `age` is
-          pinned right and this is not. Hueless on purpose, and one tier above the
-          furniture: `dimColor` is what the age renders in, and a middle tier
-          drawn in the bottom one is not quiet, it is absent — the labels were
-          measured at the same L* as the age and read as noise. `secondary` is
-          the same tone the turn arrow and the answered thread count wear, so
-          the row has three neutrals and no more. GitHub's own
-          per-label colour is authored in a repo with no knowledge of this
-          palette, and it would be the one place on the row where hue alone did
-          the discriminating, which is the failure health-display.ts exists to
-          prevent. Casing is verbatim: the string is what you would type back
-          into `gh --label`, and uppercase is already claimed here by the pills,
-          which are announcements rather than standing classifications. */}
-      {labelLabel ? (
-        <Text color={colors.secondary}>{labelLabel + "  "}</Text>
-      ) : null}
-      {repoLabel && !givingUp.repo ? <Text dimColor>{repoLabel}</Text> : null}
-      {/* Head of the trailing group: after the title the eye asks how big,
-          then how contested, then who, then when. Additions in `colors.success`,
-          deletions in `colors.error` — the same two tokens health-display.ts
-          spends on `✓` and `✗`, so no hue is new to the row — each painted on
-          sign and digits together, the shape git and GitHub already taught.
-          No bold (the cursor's), no dim, no banding by magnitude: a colour
-          that flips at 400 lines is a traffic light needing a legend, and width
-          already carries size — `+2140 -388` is longer than `+6 -1` before
-          anyone reads a digit.
-
-          This cell was plain until 2026-09-11, on the argument that a hue per
-          sign hands a colourblind reader two near-identical hues. That argument
-          assumed colour was doing the discriminating. It is not: the `+`/`-`
-          sign and the fixed `+`-first order are the channels, and colour only
-          echoes them — the exact contract health-display.ts is built on, and
-          the one it had been applying to every health glyph on the same row all
-          along. Keep the signs; the colour is not licensed to replace them.
-          Same treatment as the PR header's, one register down. One caveat, for
-          the reader rather than the UI: GitHub counts lockfiles and generated
-          files, so a six-line change that bumps `package-lock.json` reads as
-          large. The number is honest about what the diff view will show; it is
-          not a proxy for thought required. */}
-      {sizeParts && !givingUp.size ? (
-        <Text>
-          {"  "}
-          <Text color={colors.success}>{sizeParts.added}</Text>{" "}
-          <Text color={colors.error}>{sizeParts.removed}</Text>
-        </Text>
-      ) : null}
-      {/* Follows the turn arrow, because an unresolved thread is not by itself
-          a claim on you: GitHub keeps a thread open until someone clicks
-          Resolve conversation, so replying leaves the count exactly where it
-          was. Loud while the other side spoke last, quiet once you have
-          answered — otherwise this cell reads "your turn" in orange one column
-          from the arrow reading "not your turn" in grey. Never dimmed on an
-          unknown turn (no login, no lastActor): a count we cannot attribute is
-          still worth seeing. */}
-      {unresolvedLabel && !givingUp.threads ? (
-        <Text
-          bold={!spokeLast}
-          color={spokeLast ? colors.secondary : colors.accent}
-        >
-          {"  " + unresolvedLabel}
-        </Text>
-      ) : null}
-      {showAuthor && !givingUp.author ? (
-        <Text dimColor italic>
-          {"  by " + item.author}
-        </Text>
-      ) : null}
-      {/* Age last, so every row ends on the date — a consistent right edge.
-          Two tiers inside one cell, because the two halves are not equally
-          worth reading: last-activity is the live fact you scan for, lifetime is
-          background you consult. Painting both `dimColor` said "skip all of
-          this" about the half you came here for. Last-activity takes
-          `secondary` — the middle neutral the label cell already spends, no new
-          token and no hue — and the parenthetical stays in the furniture tier.
-          The parentheses carry the meaning on their own for a reader who sees no
-          colour at all; the tier only reinforces them. */}
-      {ageLabel && !givingUp.age ? (
-        agePair ? (
-          <>
-            <Text color={colors.secondary}>{"  " + agePair.activity}</Text>
-            <Text dimColor>{` (${agePair.lifetime})`}</Text>
-          </>
-        ) : (
-          <Text color={colors.secondary}>{"  " + ageLabel}</Text>
-        )
-      ) : null}
-      {/* Except for the three seconds a row is on its way out. */}
-      {/* Both suppressed behind an overlay — see the task row for why a pill
-          cannot simply be recoloured with the rest of the backdrop. */}
-      {mergedLabel && !backdropped ? (
-        <>
-          <Text>{"  "}</Text>
-          <Pill color={MERGED_COLOUR}>{mergedLabel}</Pill>
-        </>
-      ) : null}
-      {farewellLabel && !backdropped ? (
-        <>
-          <Text>{"  "}</Text>
-          <Pill color={TRANSIT_COLOUR.out}>{farewellLabel}</Pill>
-        </>
-      ) : null}
-      {/* See the ticket row: the refresh wording lives in the header now, not
-          here, because here it costs columns the row does not have. MERGED above
-          stays — it is your own action a second ago, on a row that is leaving
-          anyway, so its reflow is both expected and brief. */}
-    </Box>
+    <PrRow
+      item={item}
+      active={active}
+      login={login}
+      cols={cols}
+      prefix={prefix}
+      uniformLabels={uniformLabels}
+      icon={icon}
+      motion={motion}
+      announcements={announcements}
+    />
   )
 }
 
@@ -3086,8 +2608,8 @@ export const ActionMenu = ({
     item.kind === "task"
       ? item.key
       : item.kind === "pr" || item.kind === "issue"
-      ? `#${item.number}`
-      : ""
+        ? `#${item.number}`
+        : ""
   return (
     <Box
       flexDirection="column"
@@ -4016,17 +3538,17 @@ const BrowseScreen = ({
    * changes constantly, and a stale peel closes the wrong layer.
    */
   const peel = (): boolean => {
-    if (palette !== null) return setPalette(null), true
-    if (help) return setHelp(false), true
-    if (explain) return setExplain(false), true
-    if (repoPicker) return setRepoPicker(false), true
-    if (railActive) return setRailFocus(false), true
+    if (palette !== null) return (setPalette(null), true)
+    if (help) return (setHelp(false), true)
+    if (explain) return (setExplain(false), true)
+    if (repoPicker) return (setRepoPicker(false), true)
+    if (railActive) return (setRailFocus(false), true)
     // `menu.handleKey` keeps its own esc arm — it is exported and PrView mounts
     // it too, so this double-closes by one idempotent state update rather than
     // buying surgery on a two-caller hook.
-    if (menu.actions !== null) return menu.close(), true
-    if (search != null) return setSearch(null), true
-    if (repoFilter.size > 0) return setRepoFilter(new Set()), true
+    if (menu.actions !== null) return (menu.close(), true)
+    if (search != null) return (setSearch(null), true)
+    if (repoFilter.size > 0) return (setRepoFilter(new Set()), true)
     return false
   }
   useEffect(() => {
@@ -4395,8 +3917,8 @@ const BrowseScreen = ({
       key.leftArrow || (key.tab && key.shift)
         ? -1
         : key.rightArrow || key.tab
-        ? 1
-        : 0
+          ? 1
+          : 0
     if (step !== 0)
       setTabIdx((i) => (i + step + localSections.length) % localSections.length)
     // Ink's exit, not process.exit: it unmounts and hands the terminal back
@@ -4677,7 +4199,7 @@ const BrowseScreen = ({
         (activeItem.kind === "pr" || activeItem.kind === "issue")
       ) {
         const { repo } = activeItem
-        const branch = activeItem.kind === "pr" ? activeItem.branch ?? "" : ""
+        const branch = activeItem.kind === "pr" ? (activeItem.branch ?? "") : ""
         showFlash(`⋯ Opening ${repo}…`)
         void jumpToRepo(repo, branch, login)
           .then(() => showFlash(`↗ Opened ${repo} in new tab`))
@@ -4755,33 +4277,33 @@ const BrowseScreen = ({
         ["q", "quit"],
       ]
     : activeItem?.kind === "repo-header"
-    ? [
-        ["↑↓", "nav"],
-        ["←→", "tab"],
-        ["↵", "open repo"],
-        ["o", "browser"],
-        ["C", "copy group"],
-        ["?", "help"],
-        ["q", "quit"],
-      ]
-    : [
-        ["↑↓", "nav"],
-        ["←→", "tab"],
-        ["↵/d", "open"],
-        ["m", "actions"],
-        // Only where Jira is configured: without it the launcher can only say
-        // so, and a footer key that opens an apology is a broken feature.
-        ...(jiraBase ? ([["⌃K", "launch"]] as [string, string][]) : []),
-        // Advertised only where it does something, and named for what it
-        // shows rather than for the furniture: nobody wants "a sidebar".
-        ...(showRail
-          ? ([["⇥", railTitle]] as [string, string][])
-          : hasRail
-          ? ([["i", railTitle]] as [string, string][])
-          : []),
-        ["?", "help"],
-        ["q", "quit"],
-      ]
+      ? [
+          ["↑↓", "nav"],
+          ["←→", "tab"],
+          ["↵", "open repo"],
+          ["o", "browser"],
+          ["C", "copy group"],
+          ["?", "help"],
+          ["q", "quit"],
+        ]
+      : [
+          ["↑↓", "nav"],
+          ["←→", "tab"],
+          ["↵/d", "open"],
+          ["m", "actions"],
+          // Only where Jira is configured: without it the launcher can only say
+          // so, and a footer key that opens an apology is a broken feature.
+          ...(jiraBase ? ([["⌃K", "launch"]] as [string, string][]) : []),
+          // Advertised only where it does something, and named for what it
+          // shows rather than for the furniture: nobody wants "a sidebar".
+          ...(showRail
+            ? ([["⇥", railTitle]] as [string, string][])
+            : hasRail
+              ? ([["i", railTitle]] as [string, string][])
+              : []),
+          ["?", "help"],
+          ["q", "quit"],
+        ]
   const matchCount = section.items.filter(
     (i) => i.kind !== "repo-header" && i.kind !== "subgroup-header",
   ).length
@@ -4864,8 +4386,8 @@ const BrowseScreen = ({
     const message = !jiraBase
       ? `Jira not configured${jiraSetupHint ? ` · ${jiraSetupHint}` : ""}`
       : query && !ticketKey
-      ? `no ticket matches "${query}"`
-      : undefined
+        ? `no ticket matches "${query}"`
+        : undefined
     const items: PaletteItem[] = commands.map((command) => ({
       id: command.id,
       title: command.title,
@@ -5627,10 +5149,13 @@ export const App = ({
     const running = [...heldSince].filter(([tab]) => held.has(tab))
     if (running.length === 0) return
     const remaining = (at: number) => at + TRANSIT_HOLD_MS - Date.now()
-    const timer = setTimeout(() => {
-      for (const [tab, at] of running)
-        if (remaining(at) <= 0) settleTab(tab, transients)
-    }, Math.max(0, Math.min(...running.map(([, at]) => remaining(at)))))
+    const timer = setTimeout(
+      () => {
+        for (const [tab, at] of running)
+          if (remaining(at) <= 0) settleTab(tab, transients)
+      },
+      Math.max(0, Math.min(...running.map(([, at]) => remaining(at)))),
+    )
     return () => clearTimeout(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [transients, heldSince, state.phase])
@@ -5919,7 +5444,7 @@ export const App = ({
   // the one moment it has no response to read it from, and the moment a third
   // cockpit opening on an exhausted account does the most damage.
   const [budget, setBudget] = useState<InboxBudget | null>(() =>
-    cacheKey ? readCache(cacheKey)?.budget ?? null : null,
+    cacheKey ? (readCache(cacheKey)?.budget ?? null) : null,
   )
   // Its own state rather than a field on the browse phase: the rail is not rows.
   // It never enters the diff, never joins the union, and never waits on a tab's
@@ -6056,14 +5581,14 @@ export const App = ({
     state.phase === "pr"
       ? { kind: "pr" as const, item: state.item }
       : state.phase === "issue"
-      ? { kind: "issue" as const, item: state.item }
-      : state.phase === "ext"
-      ? {
-          kind: "ext" as const,
-          extId: state.extId,
-          target: state.target,
-        }
-      : null
+        ? { kind: "issue" as const, item: state.item }
+        : state.phase === "ext"
+          ? {
+              kind: "ext" as const,
+              extId: state.extId,
+              target: state.target,
+            }
+          : null
   const toBrowse = () =>
     setState({ phase: "browse", sections: state.sections, login: state.login })
 
