@@ -3304,11 +3304,6 @@ const BrowseScreen = ({
       (reserveStripRow ? 2 : 0),
   )
 
-  useEffect(() => {
-    setCursors((p) => ({ ...p, [activeId]: 0 }))
-    setViewStarts((p) => ({ ...p, [activeId]: 0 }))
-  }, [search])
-
   // Pull in fresh data when App applies it (no longer via a loading remount).
   useEffect(() => {
     setLocalSections(applyWork(sections))
@@ -3404,6 +3399,16 @@ const BrowseScreen = ({
   const section = filterActive
     ? { ...rawSection, items: filtered[0]?.items ?? [] }
     : rawSection
+
+  // A new query puts the cursor on the first MATCH, not on index 0. Index 0 of a
+  // filtered tab is the band header the matches landed under, which the arrows
+  // refuse to stand on, so resetting to it left no row selected at all: ↵ and
+  // every row binding went nowhere until an arrow nudged the cursor onto a row.
+  useEffect(() => {
+    setCursors((p) => ({ ...p, [activeId]: firstSelectable(section) }))
+    setViewStarts((p) => ({ ...p, [activeId]: 0 }))
+  }, [search])
+
   const allRepos = reposInSections(localSections)
 
   // The one cursor in this file useListCursor fits: a flat list with a uniform
@@ -3782,7 +3787,13 @@ const BrowseScreen = ({
       return
     }
 
-    if (searchInput) {
+    // ↑↓ are the one exception to the field owning the keyboard: they fall
+    // through to the list below, so you can walk the matches without leaving
+    // the query first. This branch used to swallow them with everything else,
+    // and the only way to pick the third match was ↵ out of the field, arrow,
+    // then `/` again to refine — retyping the query from scratch, since `/`
+    // clears it. Neither arrow can land in the query, so nothing typed is lost.
+    if (searchInput && !key.upArrow && !key.downArrow) {
       if (key.return) return setSearchInput(false)
       if (key.escape) {
         setSearch(null)
@@ -4545,7 +4556,7 @@ const BrowseScreen = ({
           {searchInput ? <Text color={colors.info}>▏</Text> : null}
           <Text dimColor>{`   ${matchCount} match${
             matchCount !== 1 ? "es" : ""
-          }${searchInput ? "  ↵ accept · esc clear" : "  esc clear"}`}</Text>
+          }${searchInput ? "  ↑↓ move · ↵ accept · esc clear" : "  esc clear"}`}</Text>
         </Box>
       ) : repoFilter.size > 0 ? (
         <Box marginBottom={1}>

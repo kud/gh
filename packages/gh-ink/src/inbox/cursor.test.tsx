@@ -212,3 +212,36 @@ describe("the cursor across an applied refresh", () => {
     stop()
   })
 })
+
+/*
+ * ↑↓ WHILE TYPING A SEARCH. The field used to swallow every key, arrows
+ * included, so walking the matches meant ↵ out of the field first — and `/`
+ * to refine afterwards starts the query over.
+ */
+describe("the cursor while the search field has focus", () => {
+  // The first assertion pins the second half of the fix: a new query used to
+  // reset the cursor to index 0, the band header, leaving no row selected.
+  it("moves between matches without leaving the field", async () => {
+    const items = sectionOf([
+      pr(1, "fix the parser"),
+      pr(2, "fix the lexer"),
+      pr(3, "unrelated"),
+    ])
+    const { frame, press, stop } = await mount(items, items)
+
+    await press("/")
+    for (const ch of "fix") await press(ch)
+    expect(cursorLine(frame())).toContain("fix the lexer")
+
+    await press(DOWN)
+    expect(cursorLine(frame())).toContain("fix the parser")
+    await press(UP)
+    expect(cursorLine(frame())).toContain("fix the lexer")
+
+    // Still in the field: the next character refines the query rather than
+    // firing a row binding.
+    await press("l")
+    expect(frame()).toContain("/ fixl")
+    stop()
+  })
+})
