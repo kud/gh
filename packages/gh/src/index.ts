@@ -13,6 +13,7 @@
 // porcelain.
 export * from "./gh.js"
 export * from "./inbox.js"
+export * from "./pulse.js"
 export * from "./pr.js"
 export * from "./pr-comments.js"
 export * from "./health.js"

@@ -549,6 +549,20 @@ const SOURCES: Record<InboxSource, (s: Selections, first: number) => string> = {
   }`,
 }
 
+/**
+ * The two scope qualifiers every search is built from, resolved from `repo`.
+ *
+ * Exported because the inbox is not the only reader of these scopes: `pulse.ts`
+ * asks "has anything moved?" over the same ground the inbox reads, and a pulse
+ * that watched a different set of repos would report calm while the board went
+ * stale. One function, so the two cannot drift into two spellings of the rule
+ * that `repo:` REPLACES `user:@me` (see `buildInboxQuery`).
+ */
+export const inboxScope = (repo?: string) => ({
+  scope: repo ? `repo:${repo} ` : "",
+  owned: repo ? "" : "user:@me ",
+})
+
 const selectionsFor = ({
   repo,
   doneWithinDays = 14,
@@ -558,8 +572,7 @@ const selectionsFor = ({
      two shapes cannot drift into two separately-maintained queries. */
   const full = shape === "full"
   return {
-    scope: repo ? `repo:${repo} ` : "",
-    owned: repo ? "" : "user:@me ",
+    ...inboxScope(repo),
     doneSince: sinceDay(doneWithinDays),
     health: full ? PR_HEALTH : "",
     size: PR_SIZE,
