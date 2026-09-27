@@ -17,6 +17,10 @@
     "./inbox": {
       "import": "./dist/inbox.js",
       "types": "./dist/inbox.d.ts"
+    },
+    "./pulse": {
+      "import": "./dist/pulse.js",
+      "types": "./dist/pulse.d.ts"
     }
   },
   "files": [
