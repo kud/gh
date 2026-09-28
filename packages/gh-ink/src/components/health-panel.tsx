@@ -1,4 +1,4 @@
-import React, { useState } from "react"
+import React, { useRef, useState } from "react"
 import { Box, Text, useInput } from "ink"
 import { colors } from "@kud/ink-ui"
 import {
@@ -127,9 +127,13 @@ export const HealthPanel = ({
       ? reviewers[safeCursor - checks.length]
       : undefined
 
+  // Same tempo as the inbox flash, and the same reason to clear the old timer:
+  // see showFlash in inbox.tsx.
+  const noteTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const flash = (msg: string) => {
     setNote(msg)
-    setTimeout(() => setNote(null), 2500)
+    if (noteTimer.current) clearTimeout(noteTimer.current)
+    noteTimer.current = setTimeout(() => setNote(null), 1500)
   }
 
   const act = async (

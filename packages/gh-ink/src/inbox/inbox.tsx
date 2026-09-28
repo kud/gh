@@ -1894,11 +1894,12 @@ const RepoHeaderRow = ({
 // MERGED is a word, not a colour: kud is colourblind, and purple here only
 // reinforces what the label already says — the same rule healthDisplay follows
 // for every other state in this list.
-// 3s, which is five full turns of the 600ms sparkle — long enough to read as a
-// repeating twinkle rather than a loop you can count. It shipped at 3000, drifted
-// to 5000, and the rationale on TRANSIT_FRAME_TICKS went on describing the
-// original the whole time. Restored rather than re-chosen.
-export const MERGED_HOLD_MS = 3000
+// 2.4s, which is four full turns of the 600ms sparkle, so it always comes to
+// rest on ✦ rather than mid-turn. It shipped at 3000, drifted to 5000, was
+// restored to 3000, and was then re-chosen at 2400 (kud/ink-ui#4): the flash has
+// already said "merged", so the fifth turn was the row standing in the way of the
+// next one. Whole turns is the rule; the count is not sacred, but a partial turn is.
+export const MERGED_HOLD_MS = 2400
 export const MERGED_FRAME_MS = 150
 const MERGED_FRAMES = ["✦", "✧", "✶", "✧"]
 const MERGED_COLOUR = "#A371F7"
@@ -2152,7 +2153,11 @@ const isArrival = (t: Transient) => t === "in" || t === "moved-in"
 // mark has to survive being NOTICED — it is reporting work that happened in
 // another window. This one only has to be seen: you pressed the key a second ago
 // and are looking at the row.
-export const LEAVING_HOLD_MS = 2500
+//
+// 1.5s: the 600ms dissolve plus 900ms resting on `·` with GONE beside it — and
+// the same length as the flash that names it, so the row and its "✓ Closed #412"
+// leave together and the one can still be checked against the other.
+export const LEAVING_HOLD_MS = 1500
 // A tab still holding marks wears a dot. Presence, not hue — Tabs dims every
 // inactive label to the same grey, so a coloured marker would be no marker at
 // all on exactly the tabs this exists to point at.
@@ -3477,9 +3482,16 @@ const BrowseScreen = ({
   const hasMore = viewStart + visibleCount < section.items.length
   const activeItem = section.items[cursor]
 
+  // The flash takes the footer hints' place, so every millisecond it stays is a
+  // millisecond the key map is hidden. 1.5s reads a short confirmation
+  // comfortably; health-panel's note uses the same number so one kind of message
+  // has one tempo. The previous timer is cleared first: without that, a second
+  // confirmation inside the window was wiped early by the first one's timer.
+  const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const showFlash = (msg: string) => {
     setFlash(msg)
-    setTimeout(() => setFlash(null), 2000)
+    if (flashTimer.current) clearTimeout(flashTimer.current)
+    flashTimer.current = setTimeout(() => setFlash(null), 1500)
   }
 
   // Which tabs are still holding news nobody has read. The marker itself lives
