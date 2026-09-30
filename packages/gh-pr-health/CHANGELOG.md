@@ -1,5 +1,16 @@
 # @kud/gh-pr-health
 
+## 0.1.119
+
+### Patch Changes
+
+- 6bbad1a: Every package moves to `@kud/ink-ui` 0.31.0 together, so the workspace still carries a single copy. The release adds `useFilterMode`, the shared list filter the inbox now runs on.
+- Updated dependencies [8a93ae5]
+- Updated dependencies [6bbad1a]
+- Updated dependencies [789375a]
+- Updated dependencies [14176ff]
+  - @kud/gh-ink@0.62.0
+
 ## 0.1.118
 
 ### Patch Changes

@@ -1,5 +1,20 @@
 # @kud/gh-cockpit
 
+## 0.9.0
+
+### Minor Changes
+
+- 789375a: A PR row's thread count, size and age now sit in columns pinned to the right edge instead of running straight on from the title. Before, they started somewhere different on every row, so finding which PR had open threads meant reading each line. Now each column is as wide as the widest value in its section, numbers are right-aligned so the digits line up, and a column no row uses takes no space at all. When a narrow terminal forces a column out, it goes from every row in the section at once, because a gap in one row would read as "nothing here". `trailingColumnsOf` and `sectionShedOf` are exported for any other surface that draws `PrRow`s in a list.
+
+### Patch Changes
+
+- 6bbad1a: Every package moves to `@kud/ink-ui` 0.31.0 together, so the workspace still carries a single copy. The release adds `useFilterMode`, the shared list filter the inbox now runs on.
+- Updated dependencies [8a93ae5]
+- Updated dependencies [6bbad1a]
+- Updated dependencies [789375a]
+- Updated dependencies [14176ff]
+  - @kud/gh-ink@0.62.0
+
 ## 0.8.3
 
 ### Patch Changes
