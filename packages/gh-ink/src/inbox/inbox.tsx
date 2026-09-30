@@ -75,6 +75,7 @@ import {
   Tabs,
   Switch,
   useAppKeys,
+  useFilterMode,
   useListCursor,
   type PaletteItem,
 } from "@kud/ink-ui"
@@ -3288,8 +3289,6 @@ const BrowseScreen = ({
   }, [activeId])
   const [flash, setFlash] = useState<string | null>(null)
   const menu = useActionMenu()
-  const [search, setSearch] = useState<string | null>(null)
-  const [searchInput, setSearchInput] = useState(false)
   const [repoFilter, setRepoFilter] = useState<Set<string>>(new Set())
   const [repoPicker, setRepoPicker] = useState(false)
   const [help, setHelp] = useState(false)
@@ -3302,6 +3301,23 @@ const BrowseScreen = ({
   // held here rather than in the palette because the rows are DERIVED from it
   // — a ticket key becomes two verbs — and the derivation is this screen's.
   const [palette, setPalette] = useState<string | null>(null)
+  // The search, as ink-ui's `useFilterMode`: `/` types, `↵` keeps the filter
+  // and hands the letter keys back as hotkeys, `/` again goes back into the
+  // term, `esc` clears it. Extracted from this screen on 2026-09-30 so every
+  // @kud TUI filters the same way. Stood down under every overlay, where `/`
+  // is not a search — the legend dismisses on any key, the repo picker and the
+  // launcher own their own keys.
+  const filter = useFilterMode({
+    isActive:
+      !hidden &&
+      palette === null &&
+      !help &&
+      !explain &&
+      !repoPicker &&
+      menu.actions === null,
+  })
+  const search = filter.term
+  const searchInput = filter.typing
   const filterActive = search != null || repoFilter.size > 0
   // The CI row occupies 2 rows (content + margin); reserve them out of the
   // list's height budget so the tree never grows taller than the terminal
@@ -3576,7 +3592,7 @@ const BrowseScreen = ({
     // it too, so this double-closes by one idempotent state update rather than
     // buying surgery on a two-caller hook.
     if (menu.actions !== null) return (menu.close(), true)
-    if (search != null) return (setSearch(null), true)
+    if (search != null) return (filter.clear(), true)
     if (repoFilter.size > 0) return (setRepoFilter(new Set()), true)
     return false
   }
@@ -3826,34 +3842,10 @@ const BrowseScreen = ({
       return
     }
 
-    // ↑↓ are the one exception to the field owning the keyboard: they fall
-    // through to the list below, so you can walk the matches without leaving
-    // the query first. This branch used to swallow them with everything else,
-    // and the only way to pick the third match was ↵ out of the field, arrow,
-    // then `/` again to refine — retyping the query from scratch, since `/`
-    // resumed with an empty field. Neither arrow can land in the query, so nothing
-    // typed is lost.
-    if (searchInput && !key.upArrow && !key.downArrow) {
-      if (key.return) return setSearchInput(false)
-      if (key.escape) {
-        setSearch(null)
-        return setSearchInput(false)
-      }
-      if (key.backspace || key.delete)
-        return setSearch((s) => (s ?? "").slice(0, -1))
-      if (input && !key.ctrl && !key.meta && !key.tab)
-        return setSearch((s) => (s ?? "") + input)
-      return
-    }
-    // `/` over a committed query goes back INTO it rather than starting over.
-    // ↵ is how you stop typing and keep the filter so the letter keys are hotkeys
-    // again (`c`, `C`, …); `/` used to clear on the way back in, so refining that
-    // query meant retyping it from scratch. A fresh search is esc, then `/`.
-    if (input === "/") {
-      setSearch((s) => s ?? "")
-      setSearchInput(true)
-      return
-    }
+    // While the field is open the hook owns every key but ↑↓, which fall
+    // through to the list below so you can walk the matches without leaving
+    // the query. `/` itself is the hook's too, in both modes.
+    if (searchInput && !key.upArrow && !key.downArrow) return
     if (input === "f" && allRepos.length > 0) {
       setRepoCursor(0)
       setRepoPicker(true)
@@ -4600,7 +4592,7 @@ const BrowseScreen = ({
           {searchInput ? <Text color={colors.info}>▏</Text> : null}
           <Text dimColor>{`   ${matchCount} match${
             matchCount !== 1 ? "es" : ""
-          }${searchInput ? "  ↑↓ move · ↵ accept · esc clear" : "  / edit · esc clear"}`}</Text>
+          }  ${filter.hints.map(([k, label]) => `${k} ${label}`).join(" · ")}`}</Text>
         </Box>
       ) : repoFilter.size > 0 ? (
         <Box marginBottom={1}>
