@@ -24,6 +24,10 @@ import { truncate } from "../lib/truncate.js"
 export { truncate }
 import {
   PrRow,
+  sectionShedOf,
+  trailingColumnsOf,
+  type TrailingColumns,
+  type TrailingShed,
   type RowAnnouncement,
   type RowMotion,
 } from "../components/pr-row.js"
@@ -2229,6 +2233,8 @@ const ItemRow = ({
   cols = COLS,
   markerCols = 0,
   uniformLabels = [],
+  columns,
+  shed,
 }: {
   item: AnyItem
   active: boolean
@@ -2243,6 +2249,10 @@ const ItemRow = ({
    * keeps exactly the behaviour it had.
    */
   uniformLabels?: readonly string[]
+  /** The section's trailing column widths — see `trailingColumnsOf`. */
+  columns?: TrailingColumns
+  /** Trailing columns the section gave up — see `sectionShedOf`. */
+  shed?: TrailingShed
   /**
    * Width of the task rows' marker cell in THIS list — the widest `marker`
    * any of them carries, measured once by the list so every row draws the
@@ -2552,6 +2562,8 @@ const ItemRow = ({
       cols={cols}
       prefix={prefix}
       uniformLabels={uniformLabels}
+      columns={columns}
+      shed={shed}
       icon={icon}
       motion={motion}
       announcements={announcements}
@@ -3586,6 +3598,21 @@ const BrowseScreen = ({
   // not know about it overflows by exactly the rail's width.
   const railCols = railWidth(COLS)
   const listCols = showRail ? COLS - railCols : COLS
+  /*
+   * The trailing block's column widths and drops, over the whole section for
+   * the reason `markerCols` gives: a column that widens as you scroll moves
+   * every number under the cursor. Drops are decided here, once, so a column
+   * is gone from every row or from none — see `sectionShedOf`.
+   */
+  const trailingColumns = trailingColumnsOf(labelBearing)
+  const trailingShed = sectionShedOf(
+    section.items.flatMap((item, i) =>
+      item.kind === "pr" || item.kind === "issue"
+        ? [{ item, prefix: treePrefix(section.items, i) }]
+        : [],
+    ),
+    { login, cols: listCols, uniformLabels, columns: trailingColumns },
+  )
 
   const [sparkFrame, setSparkFrame] = useState(0)
   const sparkling =
@@ -4659,6 +4686,8 @@ const BrowseScreen = ({
                   // markerCols and prefix above: uniformity is a property of the
                   // group, not of whatever the scroll happens to be showing.
                   uniformLabels={uniformLabels}
+                  columns={trailingColumns}
+                  shed={trailingShed}
                   // `i > 0` is window-relative and stays that way: the window's
                   // first row never draws its gap, and fitCount does not charge
                   // for one. The rule itself is gapsAbove, shared with fitCount so

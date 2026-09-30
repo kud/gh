@@ -70,6 +70,8 @@ export {
   parsePatterns,
   PIN_MARK,
   PrRow,
+  sectionShedOf,
+  trailingColumnsOf,
   profileOf,
   readCache,
   relativeTime,

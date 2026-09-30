@@ -73,6 +73,355 @@ export type PrRowProps = {
   motion?: RowMotion
   /** In order, left to right. Charged against the width budget either way. */
   announcements?: readonly RowAnnouncement[]
+  /**
+   * The trailing columns' widths across the section — see `trailingColumnsOf`.
+   * Absent, the row measures itself, which aligns nothing but draws the same
+   * cells a host that never measured always got.
+   */
+  columns?: TrailingColumns
+  /** Trailing columns the section has given up — see `sectionShedOf`. */
+  shed?: TrailingShed
+}
+
+// Unresolved review threads — a comment glyph (nf-fa-comments) + count, keeping
+// to the single-glyph health vocabulary instead of spelling out "unresolved".
+const threadsLabelOf = (item: GHItem): string =>
+  item.unresolved > 0 ? `\u{f086} ${item.unresolved}` : ""
+
+// `3h (2d)` — active 3h ago, open for 2d. Collapsed to one value when they
+// agree, so an untouched row does not read as `2d (2d)`.
+//
+// PARENTHESES, NOT A DIVIDER, and the argument this replaces was wrong in a
+// way worth recording. It ran: the left value is by construction the smaller
+// of the two (nothing can be touched before it exists), and that invariant
+// teaches the order without a legend, a colour or a second glyph column.
+//
+// It fails twice. Knowing which value is SMALLER is not knowing which value is
+// WHICH — monotonicity establishes that an ordering exists and says nothing
+// about what the two quantities are. And it only reads as ordered inside one
+// unit: `0m · 1d` is obviously ordered, while `6d · 1w` needs weeks converted
+// to days before the ordering is even visible. Cross-unit pairs are the COMMON
+// case here rather than the edge, because GitHub ages cross units within a
+// fortnight — so the one worked example that would teach the pattern is the
+// one almost never on screen.
+//
+// A parenthetical is read as subordinate to the number beside it by every
+// reader who has ever read anything, which kills the "two peers separated by a
+// dot" reading that was causing the confusion: the bare value is THE age, the
+// parenthetical is the lifetime. It costs nothing — `6d · 1w` and `6d (1w)`
+// are both seven columns, so the budget below is unchanged — and it frees the
+// `·` to mean one thing everywhere else on the row.
+//
+// Kept as a pair as well as a string: the string is what the width budget
+// measures (one cell, one number of columns), the pair is what the renderer
+// needs to paint the two halves at different tiers. Deriving the split back
+// out of the string would mean parsing punctuation the line above just wrote.
+const agePairOf = (item: GHItem) =>
+  item.activityAge && item.activityAge !== item.age
+    ? { activity: item.activityAge, lifetime: item.age }
+    : null
+const ageLabelOf = (item: GHItem): string => {
+  const pair = agePairOf(item)
+  return pair ? `${pair.activity} (${pair.lifetime})` : item.age
+}
+
+/**
+ * The trailing block, in reading order: how contested, how big, how recent.
+ * Threads lead because they are the one cell that makes a claim on you; age
+ * ends the row so every row ends on the date.
+ */
+const TRAILING = ["threads", "size", "age"] as const
+
+/** Width of each trailing column, in terminal cells. Zero draws no column. */
+export type TrailingColumns = Record<(typeof TRAILING)[number], number>
+
+/** Which trailing columns a whole section has given up. */
+export type TrailingShed = Partial<Record<(typeof TRAILING)[number], boolean>>
+
+const cellsOf = (s: string) => [...s].length
+
+/**
+ * The widest value each trailing column holds across these rows, measured once
+ * by the list — the same move as `uniformLabels` and `markerCols`. It is what
+ * makes the numbers line up: a column as wide as its widest value, right-
+ * aligned, so digits sit under digits and the eye can run straight down it.
+ * A column no row fills measures zero and is not drawn at all, which is what
+ * keeps this from becoming GitHub's grid of `—`.
+ *
+ * Code points rather than `.length`: every value here is ASCII or a single
+ * BMP glyph, so the two agree today, and a surrogate pair is the day they
+ * would not.
+ */
+export const trailingColumnsOf = (items: readonly GHItem[]): TrailingColumns =>
+  items.reduce(
+    (w, item) => ({
+      threads: Math.max(w.threads, cellsOf(threadsLabelOf(item))),
+      size: Math.max(w.size, cellsOf(sizeOf(item) ?? "")),
+      age: Math.max(w.age, cellsOf(ageLabelOf(item) ?? "")),
+    }),
+    { threads: 0, size: 0, age: 0 } as TrailingColumns,
+  )
+
+type LayoutInput = Pick<
+  PrRowProps,
+  | "item"
+  | "login"
+  | "cols"
+  | "prefix"
+  | "uniformLabels"
+  | "announcements"
+  | "columns"
+  | "shed"
+>
+
+/**
+ * Which trailing columns the section has to give up, so that every row gives up
+ * the same ones. Each row is laid out alone and the drops are unioned: if any
+ * row needs its size cell gone to keep a readable title, the size column goes
+ * for all of them.
+ *
+ * Forcing a drop on a row that did not need it only ever hands that row more
+ * room, so it can never push the row further down the ladder than it went on
+ * its own — the union is stable in one pass.
+ *
+ * Announcements are left out on purpose. A MERGED pill lives for three seconds
+ * on a row already leaving, and letting it reshape the whole section for those
+ * three seconds would move every row under the one you just acted on.
+ */
+export const sectionShedOf = (
+  rows: readonly Pick<LayoutInput, "item" | "prefix">[],
+  context: Omit<LayoutInput, "item" | "prefix" | "announcements" | "shed">,
+): TrailingShed =>
+  rows.reduce<TrailingShed>((shed, row) => {
+    const { givingUp } = layoutOf({ ...context, ...row })
+    return {
+      threads: shed.threads || givingUp.threads,
+      size: shed.size || givingUp.size,
+      age: shed.age || givingUp.age,
+    }
+  }, {})
+
+/**
+ * How one row spends its columns: which cells it draws, which it gives up, and
+ * what is left for the title. Pure and outside the component so the LIST can run
+ * it over a whole section too — see `sectionShedOf`, which is how the trailing
+ * block drops a column for every row at once rather than one row at a time.
+ */
+export const layoutOf = ({
+  item,
+  login,
+  cols,
+  prefix = "",
+  uniformLabels = [],
+  announcements = [],
+  columns,
+  shed = {},
+}: LayoutInput) => {
+  const numStr = `#${item.number}`.padEnd(7)
+  // Hide "by me" — the author suffix is only signal when it's someone else.
+  const showAuthor = !!item.author && item.author !== login
+  // `+18 -4`, on every PR row that carries it. It was gated on `showAuthor`
+  // for one morning (2026-09-11) on the argument that you know the size of
+  // your own — and Erwann overruled it the same afternoon: the number is how
+  // a list of your own PRs is triaged too, and a cell that appears on the row
+  // above and not on yours reads as a column that failed to fill. Absent, not
+  // `+0 -0`, when the node never carried it.
+  const sizeParts = sizePartsOf(item)
+  const unresolvedLabel = threadsLabelOf(item)
+  const agePair = agePairOf(item)
+  const ageLabel = ageLabelOf(item)
+  const own = columns ?? trailingColumnsOf([item])
+  // Each announcement is a pill, so its label length alone under-prices it by
+  // exactly its caps — see the ticket row's budget for the same correction.
+  // Charged for every announcement handed in rather than for the one that will
+  // actually be drawn: a budget that relies on only ever being given one stays
+  // right for precisely as long as that invariant holds upstream, and this row
+  // cannot see upstream.
+  const pillCaps = announcements.length * 2
+  // The boolean was doing two jobs here. This one is "this row hangs under
+  // something, so say which repo it belongs to" — unchanged in meaning.
+  const repoLabel = depthOf(item) > 0 ? item.repo : ""
+  /*
+   * At most two labels, best first by the host's ranking and by name after
+   * that. Two because the cap is the whole design: a row that shows every label
+   * has stopped being a row and become a paragraph, and the title is what it
+   * came for.
+   *
+   * Sorted on a copy — `item.labels` is the caller's array and sorting in place
+   * would reorder it under them.
+   *
+   * The repo's implied labels go first, before the rank and the slice: a label
+   * every issue in the repo carries is the group header repeated, and a row
+   * whose only label was implied draws no cell at all — a bare glyph would say
+   * "classified" with no classification behind it. Filtered after the slice it
+   * would take a slot and then vanish.
+   */
+  // Two axes of "says nothing", unioned: the repo's own convention, and
+  // whatever this SECTION happens to make uniform. See `uniformLabels` above
+  // for why the second exists — a `label:plan` view spanning five repos is
+  // uniform by construction while only one of them is in the config.
+  const implied = [...impliedLabels(item.repo), ...uniformLabels]
+  const labelNames = (item.labels ?? [])
+    .filter((l) => !implied.includes(l))
+    .sort((a, b) => labelPriority(a) - labelPriority(b) || a.localeCompare(b))
+    .slice(0, 2)
+
+  /*
+   * Everything after the title is CONTEXT, and context that costs you the thing
+   * it contextualises is a bad trade — so when the row cannot have it all, the
+   * trailing furniture is given up in order rather than the title being floored.
+   *
+   * The floor was the bug. `Math.max(20, cols - fixedWidth)` is fine while the
+   * frame is wide and fatal the moment something takes forty columns away: a PR
+   * carrying a long repo name and two ages has nothing left, takes the floor
+   * anyway, and overflows by exactly the difference. Ink's answer to an
+   * overflowing row is not to clip it but to compress every flexible child in it,
+   * so the key, the number and the title all shrink together and wrap into a
+   * column of fragments — the list stops looking like a list, and anything beside
+   * it is pushed off the screen. One row too wide takes the whole frame with it.
+   *
+   * Order is least-valuable-first, and the two announcements are absent from it:
+   * MERGED and the transit labels are the news the row exists to carry that
+   * moment, and a row that drops its own headline to keep a repo name has the
+   * priority exactly backwards.
+   */
+  // `labels` is a COUNT, not a flag — how many of the (at most two) label names
+  // have been given up. It is the one participant that appears on two rungs of
+  // the ladder below, because the two labels are not worth the same: the second
+  // is speculative, the first is what the row IS. So it degrades two → one →
+  // none rather than vanishing whole.
+  //
+  // The three trailing columns start from what the SECTION has already given up
+  // (`shed`), so a column the list dropped for one row is dropped for all of
+  // them — a hole in an aligned column reads as "none", which is a lie.
+  const givingUp = {
+    author: false,
+    size: !!shed.size,
+    threads: !!shed.threads,
+    age: !!shed.age,
+    repo: false,
+    labels: 0,
+  }
+  /*
+   * `\u{f02b}` (nf-fa-tag) then the names, comma-separated — the same
+   * glyph-then-content shape `\u{f086} 2` already uses for unresolved threads,
+   * so the vocabulary is learned once. Not a Pill: a pill is drawn filled and
+   * means "the row belongs to this category", and two filled pills on the most
+   * contended row in the app out-shout the health glyph and the title both.
+   *
+   * 24 columns for the names is a design cap, not a width fallback — it holds on
+   * a 200-column frame too, because past it the cell stops being a marker and
+   * becomes a second title. Whole labels only: a clipped classification is a lie
+   * you cannot check, since `stat…` could be `status:blocked` or `status:done`,
+   * where a clipped title still carries its sense. The one exception is a lone
+   * first label longer than the cap, which is truncated rather than dropped —
+   * a clipped label still says the row is classified, and nothing says it isn't.
+   *
+   * Math.max around the subtraction because `slice(0, -1)` drops from the TAIL:
+   * a single-label row on the second rung would otherwise keep the very label it
+   * was told to give up.
+   */
+  const LABEL_CELL_MAX = 24
+  const labelCell = () => {
+    const shown = labelNames.slice(
+      0,
+      Math.max(0, labelNames.length - givingUp.labels),
+    )
+    if (shown.length === 0) return ""
+    const fitted: string[] = []
+    for (const name of shown) {
+      const next = [...fitted, name].join(", ")
+      if (next.length <= LABEL_CELL_MAX) fitted.push(name)
+    }
+    if (fitted.length === 0) {
+      return `\u{f02b} ${truncate(shown[0], LABEL_CELL_MAX)}`
+    }
+    return `\u{f02b} ${fitted.join(", ")}`
+  }
+  const widthOf = () => {
+    // The trailing block is charged at the SECTION's column widths, not at this
+    // row's own values: a row with no threads still pays for the column, because
+    // the column is drawn on it too — blank, which is how absence reads here.
+    const block = TRAILING.reduce(
+      (w, k) => (givingUp[k] || own[k] === 0 ? w : w + 2 + own[k]),
+      0,
+    )
+    const author =
+      showAuthor && !givingUp.author ? `  by ${item.author}`.length : 0
+    const pills = announcements.reduce((w, a) => w + 2 + a.label.length, 0)
+    // Charged apart from the block because it sits BETWEEN the title and the
+    // repo, not in the trailing group — same as repoLabel.
+    //
+    // The cell's own string counts its glyph as one character; it is charged as
+    // two. `\u{f02b}` is a PUA codepoint and this file's turn-arrow comment
+    // above already records that PUA can render double-width in some fonts.
+    // Tolerable here for exactly the reason it was not there: this cell sits
+    // right of the title, so a double-width render shifts trailing furniture
+    // rather than the aligned zone. But under-charge it by one and every row
+    // carrying a label overflows by one in those fonts — which is the class of
+    // bug this whole block exists to prevent. Two leading spaces, then the cell,
+    // then the glyph's second column.
+    const cell = labelCell()
+    return (
+      2 +
+      prefix.length +
+      2 /* health */ +
+      2 /* turn */ +
+      7 +
+      (cell ? 2 + cell.length + 1 : 0) +
+      (givingUp.repo ? 0 : repoLabel.length) +
+      author +
+      block +
+      pills +
+      pillCaps +
+      4
+    )
+  }
+  // Short enough to still say something, long enough to be worth reading. Below
+  // this the row is better off shedding its context than its subject.
+  const MIN_TITLE = 24
+  //
+  // The label cell takes two of these rungs. The second label goes early — it is
+  // the most speculative thing on the row — and the first outlives both the
+  // thread count and the repo, because by then the row is down to what it IS.
+  //
+  // Assignment rather than `+= 1`, so each rung states the resulting count
+  // outright and reordering this array cannot silently produce the wrong one.
+  //
+  // Size outlives the author — on a review queue "by X" is the least
+  // discriminating thing on the row — and the speculative second label, and
+  // dies before the thread count: a thread is a claim on you NOW, a size is an
+  // aid to deciding WHETHER to engage, and the PR header still holds it.
+  for (const give of [
+    () => (givingUp.author = true),
+    () => (givingUp.labels = 1),
+    () => (givingUp.size = true),
+    () => (givingUp.threads = true),
+    () => (givingUp.labels = 2),
+    () => (givingUp.repo = true),
+    () => (givingUp.age = true),
+  ]) {
+    if (cols - widthOf() >= MIN_TITLE) break
+    give()
+  }
+  const labelLabel = labelCell()
+  // Never below 1: with everything given up the row is as short as it can be, and
+  // a negative budget would hand `truncate` nonsense. A frame that narrow has
+  // bigger problems than this row.
+  const titleMax = Math.max(1, cols - widthOf())
+  return {
+    numStr,
+    showAuthor,
+    sizeParts,
+    unresolvedLabel,
+    agePair,
+    ageLabel,
+    repoLabel,
+    givingUp,
+    labelLabel,
+    titleMax,
+    columns: own,
+  }
 }
 
 /**
@@ -95,6 +444,8 @@ export const PrRow = ({
   uniformLabels = [],
   motion,
   announcements = [],
+  columns,
+  shed,
 }: PrRowProps) => {
   // Read once for the row rather than at each of the pill sites — a hook, so it
   // cannot sit inside a branch.
@@ -166,231 +517,31 @@ export const PrRow = ({
     : !login || !item.lastActor || spokeLast
       ? [" ", colors.muted]
       : ["←", colors.accent]
-  const numStr = `#${item.number}`.padEnd(7)
-  // Hide "by me" — the author suffix is only signal when it's someone else.
-  const showAuthor = !!item.author && item.author !== login
-  // `+18 -4`, on every PR row that carries it. It was gated on `showAuthor`
-  // for one morning (2026-09-11) on the argument that you know the size of
-  // your own — and Erwann overruled it the same afternoon: the number is how
-  // a list of your own PRs is triaged too, and a cell that appears on the row
-  // above and not on yours reads as a column that failed to fill. Absent, not
-  // `+0 -0`, when the node never carried it.
-  const sizeLabel = sizeOf(item)
-  const sizeParts = sizePartsOf(item)
-  // Unresolved review threads — a comment glyph (nf-fa-comments) + count, keeping
-  // to the single-glyph health vocabulary instead of spelling out "unresolved".
-  const unresolvedLabel =
-    item.unresolved > 0 ? `\u{f086} ${item.unresolved}` : ""
-  // `3h (2d)` — active 3h ago, open for 2d. Collapsed to one value when they
-  // agree, so an untouched row does not read as `2d (2d)`.
-  //
-  // PARENTHESES, NOT A DIVIDER, and the argument this replaces was wrong in a
-  // way worth recording. It ran: the left value is by construction the smaller
-  // of the two (nothing can be touched before it exists), and that invariant
-  // teaches the order without a legend, a colour or a second glyph column.
-  //
-  // It fails twice. Knowing which value is SMALLER is not knowing which value is
-  // WHICH — monotonicity establishes that an ordering exists and says nothing
-  // about what the two quantities are. And it only reads as ordered inside one
-  // unit: `0m · 1d` is obviously ordered, while `6d · 1w` needs weeks converted
-  // to days before the ordering is even visible. Cross-unit pairs are the COMMON
-  // case here rather than the edge, because GitHub ages cross units within a
-  // fortnight — so the one worked example that would teach the pattern is the
-  // one almost never on screen.
-  //
-  // A parenthetical is read as subordinate to the number beside it by every
-  // reader who has ever read anything, which kills the "two peers separated by a
-  // dot" reading that was causing the confusion: the bare value is THE age, the
-  // parenthetical is the lifetime. It costs nothing — `6d · 1w` and `6d (1w)`
-  // are both seven columns, so the budget below is unchanged — and it frees the
-  // `·` to mean one thing everywhere else on the row.
-  //
-  // Kept as a pair as well as a string: the string is what the width budget
-  // measures (one cell, one number of columns), the pair is what the renderer
-  // needs to paint the two halves at different tiers. Deriving the split back
-  // out of the string would mean parsing punctuation the line above just wrote.
-  const agePair =
-    item.activityAge && item.activityAge !== item.age
-      ? { activity: item.activityAge, lifetime: item.age }
-      : null
-  const ageLabel = agePair
-    ? `${agePair.activity} (${agePair.lifetime})`
-    : item.age
-  // Each announcement is a pill, so the joined suffix below under-prices it by
-  // exactly its caps — see the ticket row's budget for the same correction.
-  // Charged for every announcement handed in rather than for the one that will
-  // actually be drawn: a budget that relies on only ever being given one stays
-  // right for precisely as long as that invariant holds upstream, and this row
-  // cannot see upstream.
-  const pillCaps = announcements.length * 2
-  // The boolean was doing two jobs here. This one is "this row hangs under
-  // something, so say which repo it belongs to" — unchanged in meaning.
-  const repoLabel = depthOf(item) > 0 ? item.repo : ""
-  /*
-   * At most two labels, best first by the host's ranking and by name after
-   * that. Two because the cap is the whole design: a row that shows every label
-   * has stopped being a row and become a paragraph, and the title is what it
-   * came for.
-   *
-   * Sorted on a copy — `item.labels` is the caller's array and sorting in place
-   * would reorder it under them.
-   *
-   * The repo's implied labels go first, before the rank and the slice: a label
-   * every issue in the repo carries is the group header repeated, and a row
-   * whose only label was implied draws no cell at all — a bare glyph would say
-   * "classified" with no classification behind it. Filtered after the slice it
-   * would take a slot and then vanish.
-   */
-  // Two axes of "says nothing", unioned: the repo's own convention, and
-  // whatever this SECTION happens to make uniform. See `uniformLabels` above
-  // for why the second exists — a `label:plan` view spanning five repos is
-  // uniform by construction while only one of them is in the config.
-  const implied = [...impliedLabels(item.repo), ...uniformLabels]
-  const labelNames = (item.labels ?? [])
-    .filter((l) => !implied.includes(l))
-    .sort((a, b) => labelPriority(a) - labelPriority(b) || a.localeCompare(b))
-    .slice(0, 2)
-
-  /*
-   * Everything after the title is CONTEXT, and context that costs you the thing
-   * it contextualises is a bad trade — so when the row cannot have it all, the
-   * trailing furniture is given up in order rather than the title being floored.
-   *
-   * The floor was the bug. `Math.max(20, cols - fixedWidth)` is fine while the
-   * frame is wide and fatal the moment something takes forty columns away: a PR
-   * carrying a long repo name and two ages has nothing left, takes the floor
-   * anyway, and overflows by exactly the difference. Ink's answer to an
-   * overflowing row is not to clip it but to compress every flexible child in it,
-   * so the key, the number and the title all shrink together and wrap into a
-   * column of fragments — the list stops looking like a list, and anything beside
-   * it is pushed off the screen. One row too wide takes the whole frame with it.
-   *
-   * Order is least-valuable-first, and the two announcements are absent from it:
-   * MERGED and the transit labels are the news the row exists to carry that
-   * moment, and a row that drops its own headline to keep a repo name has the
-   * priority exactly backwards.
-   */
-  // `labels` is a COUNT, not a flag — how many of the (at most two) label names
-  // have been given up. It is the one participant that appears on two rungs of
-  // the ladder below, because the two labels are not worth the same: the second
-  // is speculative, the first is what the row IS. So it degrades two → one →
-  // none rather than vanishing whole.
-  const givingUp = {
-    author: false,
-    size: false,
-    threads: false,
-    age: false,
-    repo: false,
-    labels: 0,
-  }
-  /*
-   * `\u{f02b}` (nf-fa-tag) then the names, comma-separated — the same
-   * glyph-then-content shape `\u{f086} 2` already uses for unresolved threads,
-   * so the vocabulary is learned once. Not a Pill: a pill is drawn filled and
-   * means "the row belongs to this category", and two filled pills on the most
-   * contended row in the app out-shout the health glyph and the title both.
-   *
-   * 24 columns for the names is a design cap, not a width fallback — it holds on
-   * a 200-column frame too, because past it the cell stops being a marker and
-   * becomes a second title. Whole labels only: a clipped classification is a lie
-   * you cannot check, since `stat…` could be `status:blocked` or `status:done`,
-   * where a clipped title still carries its sense. The one exception is a lone
-   * first label longer than the cap, which is truncated rather than dropped —
-   * a clipped label still says the row is classified, and nothing says it isn't.
-   *
-   * Math.max around the subtraction because `slice(0, -1)` drops from the TAIL:
-   * a single-label row on the second rung would otherwise keep the very label it
-   * was told to give up.
-   */
-  const LABEL_CELL_MAX = 24
-  const labelCell = () => {
-    const shown = labelNames.slice(
-      0,
-      Math.max(0, labelNames.length - givingUp.labels),
-    )
-    if (shown.length === 0) return ""
-    const fitted: string[] = []
-    for (const name of shown) {
-      const next = [...fitted, name].join(", ")
-      if (next.length <= LABEL_CELL_MAX) fitted.push(name)
-    }
-    if (fitted.length === 0) {
-      return `\u{f02b} ${truncate(shown[0], LABEL_CELL_MAX)}`
-    }
-    return `\u{f02b} ${fitted.join(", ")}`
-  }
-  const widthOf = () => {
-    const suffix = [
-      givingUp.age ? "" : ageLabel || "",
-      // ASCII only, so no PUA double-width correction — see the label cell.
-      givingUp.size ? "" : sizeLabel || "",
-      givingUp.threads ? "" : unresolvedLabel,
-      showAuthor && !givingUp.author ? `by ${item.author}` : "",
-      ...announcements.map((a) => a.label),
-    ]
-      .filter(Boolean)
-      .join("  ")
-    // Charged apart from the suffix array because it sits BETWEEN the title and
-    // the repo, not in the trailing group — same as repoLabel.
-    //
-    // The cell's own string counts its glyph as one character; it is charged as
-    // two. `\u{f02b}` is a PUA codepoint and this file's turn-arrow comment
-    // above already records that PUA can render double-width in some fonts.
-    // Tolerable here for exactly the reason it was not there: this cell sits
-    // right of the title, so a double-width render shifts trailing furniture
-    // rather than the aligned zone. But under-charge it by one and every row
-    // carrying a label overflows by one in those fonts — which is the class of
-    // bug this whole block exists to prevent. Two leading spaces, then the cell,
-    // then the glyph's second column.
-    const cell = labelCell()
-    return (
-      2 +
-      prefix.length +
-      2 /* health */ +
-      2 /* turn */ +
-      7 +
-      (cell ? 2 + cell.length + 1 : 0) +
-      (givingUp.repo ? 0 : repoLabel.length) +
-      suffix.length +
-      pillCaps +
-      6
-    )
-  }
-  // Short enough to still say something, long enough to be worth reading. Below
-  // this the row is better off shedding its context than its subject.
-  const MIN_TITLE = 24
-  //
-  // The label cell takes two of these rungs. The second label goes early — it is
-  // the most speculative thing on the row — and the first outlives both the
-  // thread count and the repo, because by then the row is down to what it IS.
-  //
-  // Assignment rather than `+= 1`, so each rung states the resulting count
-  // outright and reordering this array cannot silently produce the wrong one.
-  //
-  // Size outlives the author — on a review queue "by X" is the least
-  // discriminating thing on the row — and the speculative second label, and
-  // dies before the thread count: a thread is a claim on you NOW, a size is an
-  // aid to deciding WHETHER to engage, and the PR header still holds it.
-  for (const give of [
-    () => (givingUp.author = true),
-    () => (givingUp.labels = 1),
-    () => (givingUp.size = true),
-    () => (givingUp.threads = true),
-    () => (givingUp.labels = 2),
-    () => (givingUp.repo = true),
-    () => (givingUp.age = true),
-  ]) {
-    if (cols - widthOf() >= MIN_TITLE) break
-    give()
-  }
-  const labelLabel = labelCell()
-  // Never below 1: with everything given up the row is as short as it can be, and
-  // a negative budget would hand `truncate` nonsense. A frame that narrow has
-  // bigger problems than this row.
-  const titleMax = Math.max(1, cols - widthOf())
+  const {
+    numStr,
+    showAuthor,
+    sizeParts,
+    unresolvedLabel,
+    agePair,
+    ageLabel,
+    repoLabel,
+    givingUp,
+    labelLabel,
+    titleMax,
+    columns: block,
+  } = layoutOf({
+    item,
+    login,
+    cols,
+    prefix,
+    uniformLabels,
+    announcements,
+    columns,
+    shed,
+  })
 
   return (
-    <Box>
+    <Box width={cols}>
       <Text color={colors.info}>{active ? "❯ " : "  "}</Text>
       <Text dimColor>{prefix}</Text>
       <Text color={color as any} bold>
@@ -431,8 +582,51 @@ export const PrRow = ({
         <Text color={colors.secondary}>{labelLabel + "  "}</Text>
       ) : null}
       {repoLabel && !givingUp.repo ? <Text dimColor>{repoLabel}</Text> : null}
-      {/* Head of the trailing group: after the title the eye asks how big,
-          then how contested, then who, then when. Additions in `colors.success`,
+      {showAuthor && !givingUp.author ? (
+        <Text dimColor italic>
+          {"  by " + item.author}
+        </Text>
+      ) : null}
+      {/* THE TRAILING BLOCK, pinned to the right edge: threads, size, age, each
+          in a column as wide as the section's widest value. Before 2026-09-30
+          these cells ran straight on from the title, so they started somewhere
+          different on every row and finding "which PR has threads" meant reading
+          each line. Aligned, the eye runs down a column instead.
+
+          Box widths rather than padStart: padStart counts UTF-16 units, Ink lays
+          out in terminal cells, and the Box is sized by the same measure Ink
+          draws with. flexShrink={0} because a shrinkable cell is the first thing
+          Ink compresses when a row overflows, and a squeezed column is not a
+          column. A row with nothing for a column still draws it — blank, the
+          way absence reads everywhere on this row — so the columns stay
+          aligned. */}
+      <Box flexGrow={1} />
+      {/* Follows the turn arrow, because an unresolved thread is not by itself
+          a claim on you: GitHub keeps a thread open until someone clicks
+          Resolve conversation, so replying leaves the count exactly where it
+          was. Loud while the other side spoke last, quiet once you have
+          answered — otherwise this cell reads "your turn" in orange one column
+          from the arrow reading "not your turn" in grey. Never dimmed on an
+          unknown turn (no login, no lastActor): a count we cannot attribute is
+          still worth seeing. */}
+      {block.threads > 0 && !givingUp.threads ? (
+        <Box
+          marginLeft={2}
+          width={block.threads}
+          justifyContent="flex-end"
+          flexShrink={0}
+        >
+          {unresolvedLabel ? (
+            <Text
+              bold={!spokeLast}
+              color={spokeLast ? colors.secondary : colors.accent}
+            >
+              {unresolvedLabel}
+            </Text>
+          ) : null}
+        </Box>
+      ) : null}
+      {/* Additions in `colors.success`,
           deletions in `colors.error` — the same two tokens health-display.ts
           spends on `✓` and `✗`, so no hue is new to the row — each painted on
           sign and digits together, the shape git and GitHub already taught.
@@ -453,35 +647,24 @@ export const PrRow = ({
           files, so a six-line change that bumps `package-lock.json` reads as
           large. The number is honest about what the diff view will show; it is
           not a proxy for thought required. */}
-      {sizeParts && !givingUp.size ? (
-        <Text>
-          {"  "}
-          <Text color={colors.success}>{sizeParts.added}</Text>{" "}
-          <Text color={colors.error}>{sizeParts.removed}</Text>
-        </Text>
-      ) : null}
-      {/* Follows the turn arrow, because an unresolved thread is not by itself
-          a claim on you: GitHub keeps a thread open until someone clicks
-          Resolve conversation, so replying leaves the count exactly where it
-          was. Loud while the other side spoke last, quiet once you have
-          answered — otherwise this cell reads "your turn" in orange one column
-          from the arrow reading "not your turn" in grey. Never dimmed on an
-          unknown turn (no login, no lastActor): a count we cannot attribute is
-          still worth seeing. */}
-      {unresolvedLabel && !givingUp.threads ? (
-        <Text
-          bold={!spokeLast}
-          color={spokeLast ? colors.secondary : colors.accent}
+      {block.size > 0 && !givingUp.size ? (
+        <Box
+          marginLeft={2}
+          width={block.size}
+          justifyContent="flex-end"
+          flexShrink={0}
         >
-          {"  " + unresolvedLabel}
-        </Text>
+          {sizeParts ? (
+            <Text>
+              <Text color={colors.success}>{sizeParts.added}</Text>{" "}
+              <Text color={colors.error}>{sizeParts.removed}</Text>
+            </Text>
+          ) : null}
+        </Box>
       ) : null}
-      {showAuthor && !givingUp.author ? (
-        <Text dimColor italic>
-          {"  by " + item.author}
-        </Text>
-      ) : null}
-      {/* Age last, so every row ends on the date — a consistent right edge.
+      {/* Age last, so every row ends on the date. Left-aligned inside its column,
+          unlike the two numbers: the activity value is what you scan for, so
+          it is the part that lines up, and the lifetime trails after it.
           Two tiers inside one cell, because the two halves are not equally
           worth reading: last-activity is the live fact you scan for, lifetime is
           background you consult. Painting both `dimColor` said "skip all of
@@ -490,15 +673,17 @@ export const PrRow = ({
           token and no hue — and the parenthetical stays in the furniture tier.
           The parentheses carry the meaning on their own for a reader who sees no
           colour at all; the tier only reinforces them. */}
-      {ageLabel && !givingUp.age ? (
-        agePair ? (
-          <>
-            <Text color={colors.secondary}>{"  " + agePair.activity}</Text>
-            <Text dimColor>{` (${agePair.lifetime})`}</Text>
-          </>
-        ) : (
-          <Text color={colors.secondary}>{"  " + ageLabel}</Text>
-        )
+      {block.age > 0 && !givingUp.age ? (
+        <Box marginLeft={2} width={block.age} flexShrink={0}>
+          {agePair ? (
+            <Text>
+              <Text color={colors.secondary}>{agePair.activity}</Text>
+              <Text dimColor>{` (${agePair.lifetime})`}</Text>
+            </Text>
+          ) : ageLabel ? (
+            <Text color={colors.secondary}>{ageLabel}</Text>
+          ) : null}
+        </Box>
       ) : null}
       {/* Except for the three seconds a row is on its way out. */}
       {/* Suppressed behind an overlay — see the task row for why a pill cannot

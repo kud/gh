@@ -29,6 +29,10 @@ export {
 export {
   PrRow,
   type PrRowProps,
+  sectionShedOf,
+  trailingColumnsOf,
+  type TrailingColumns,
+  type TrailingShed,
   type RowAnnouncement,
   type RowMotion,
 } from "./components/pr-row.js"

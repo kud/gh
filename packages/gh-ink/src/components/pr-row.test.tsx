@@ -2,7 +2,7 @@ import React from "react"
 import { render } from "ink-testing-library"
 import { describe, it, expect } from "vitest"
 import type { GHItem } from "@kud/gh-workflow"
-import { PrRow } from "./pr-row.js"
+import { PrRow, sectionShedOf, trailingColumnsOf } from "./pr-row.js"
 
 /*
  * `PrRow` is the row the inbox draws and the row any other surface with a
@@ -117,5 +117,64 @@ describe("PrRow", () => {
       />,
     )
     expect(frame).toContain("merged")
+  })
+  /*
+   * THE POINT OF THE TRAILING BLOCK. Measured once over the section and handed
+   * to every row, the numbers land in the same columns whatever the title is
+   * called — so a thread count can be found by running down one column rather
+   * than by reading each line. A row with no threads draws the column blank, and
+   * the size beside it still lines up with its neighbours'.
+   */
+  it("lines up threads, size and age across rows of one section", () => {
+    const rows = [
+      pr({ title: "short", unresolved: 3, additions: 84, deletions: 12 }),
+      pr({
+        number: 88,
+        title: "a rather longer title that runs on",
+        unresolved: 0,
+        additions: 6,
+        deletions: 1,
+      }),
+    ]
+    const columns = trailingColumnsOf(rows)
+    const [a, b] = rows.map((item) =>
+      frameOf(
+        <PrRow item={item} active={false} cols={100} columns={columns} />,
+      ),
+    )
+    // Right-aligned numbers: the removal count ends in the same column.
+    expect(a.indexOf("-12") + 3).toBe(b.indexOf("-1") + 2)
+    // And both rows end on the date at the same edge.
+    expect(a.lastIndexOf("2d")).toBe(b.lastIndexOf("2d"))
+  })
+
+  /*
+   * A hole in an aligned column reads as "none". So when one row needs its size
+   * cell gone to keep a readable title, the section gives the column up for
+   * every row, and a row that had room draws no size either.
+   */
+  it("gives a trailing column up for the whole section, not one row", () => {
+    const roomy = pr({ additions: 84, deletions: 12 })
+    const cramped = pr({
+      number: 9,
+      repo: "acme/a-repository-with-a-very-long-name-indeed",
+      additions: 2140,
+      deletions: 388,
+      labels: ["needs-review", "backend"],
+    })
+    const columns = trailingColumnsOf([roomy, cramped])
+    const context = { cols: 70, columns }
+    const shed = sectionShedOf(
+      [
+        { item: roomy, prefix: "" },
+        { item: cramped, prefix: "└─ " },
+      ],
+      context,
+    )
+    expect(shed.size).toBe(true)
+    const frame = frameOf(
+      <PrRow item={roomy} active={false} {...context} shed={shed} />,
+    )
+    expect(frame).not.toContain("+84")
   })
 })
