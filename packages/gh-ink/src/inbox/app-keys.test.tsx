@@ -163,4 +163,29 @@ describe("the app's own keys", () => {
     expect(after).not.toContain("Filter by repo")
     expect(after).toContain("pull request number 1")
   })
+
+  /*
+   * ↵ LEAVES THE FIELD AND KEEPS THE FILTER, `/` GOES BACK INTO IT. The two are
+   * what let a search sit there as a filter while the letter keys act as
+   * hotkeys, and still be refined afterwards. `/` used to reopen an empty field,
+   * so the only way to tweak a committed query was to type it again.
+   */
+  it("resumes the committed query on / instead of clearing it", async () => {
+    const { press, frame, done } = mount()
+    await settle()
+    await settle()
+
+    await press("/")
+    await press("p")
+    await press("\r")
+    const committed = frame()
+
+    await press("/")
+    await press("u")
+    const after = frame()
+    done()
+
+    expect(committed).toContain("/ edit")
+    expect(after).toContain("/ pu")
+  })
 })

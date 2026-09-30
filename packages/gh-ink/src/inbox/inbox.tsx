@@ -3804,7 +3804,8 @@ const BrowseScreen = ({
     // the query first. This branch used to swallow them with everything else,
     // and the only way to pick the third match was ↵ out of the field, arrow,
     // then `/` again to refine — retyping the query from scratch, since `/`
-    // clears it. Neither arrow can land in the query, so nothing typed is lost.
+    // resumed with an empty field. Neither arrow can land in the query, so nothing
+    // typed is lost.
     if (searchInput && !key.upArrow && !key.downArrow) {
       if (key.return) return setSearchInput(false)
       if (key.escape) {
@@ -3817,8 +3818,12 @@ const BrowseScreen = ({
         return setSearch((s) => (s ?? "") + input)
       return
     }
+    // `/` over a committed query goes back INTO it rather than starting over.
+    // ↵ is how you stop typing and keep the filter so the letter keys are hotkeys
+    // again (`c`, `C`, …); `/` used to clear on the way back in, so refining that
+    // query meant retyping it from scratch. A fresh search is esc, then `/`.
     if (input === "/") {
-      setSearch("")
+      setSearch((s) => s ?? "")
       setSearchInput(true)
       return
     }
@@ -4568,7 +4573,7 @@ const BrowseScreen = ({
           {searchInput ? <Text color={colors.info}>▏</Text> : null}
           <Text dimColor>{`   ${matchCount} match${
             matchCount !== 1 ? "es" : ""
-          }${searchInput ? "  ↑↓ move · ↵ accept · esc clear" : "  esc clear"}`}</Text>
+          }${searchInput ? "  ↑↓ move · ↵ accept · esc clear" : "  / edit · esc clear"}`}</Text>
         </Box>
       ) : repoFilter.size > 0 ? (
         <Box marginBottom={1}>
