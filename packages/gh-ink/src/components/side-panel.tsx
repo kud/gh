@@ -273,7 +273,7 @@ export const railHeights = (height: number, rowCounts: number[]): number[] => {
  * One section of the rail: a heading, then rows.
  *
  * Label first, facts beneath, because a roadmap is read by name: nobody thinks
- * "ACC-11312", they think "the OpenSearch migration". So the label is the
+ * "SHOP-1234", they think "the search migration". So the label is the
  * bright line and the key drops to the facts line as what it is — a reference
  * you follow, in the secondary tier. Two lines rather than one because both are
  * load-bearing and neither survives the other being cut: words with no key

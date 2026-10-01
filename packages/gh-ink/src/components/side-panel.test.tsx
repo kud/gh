@@ -151,7 +151,7 @@ describe("truncateWords", () => {
   it("cuts at a word boundary and says so", () => {
     expect(
       truncateWords(
-        "Cloudsearch → OpenSearch migration: frontend-royalties & frontend-contract",
+        "Cloudsearch → OpenSearch migration: storefront-web & storefront-api",
         45,
       ),
     ).toBe("Cloudsearch → OpenSearch migration…")
@@ -160,7 +160,7 @@ describe("truncateWords", () => {
   // `batch (…` reads as a typo where `batch…` reads as a cut.
   it("drops the punctuation a boundary cut leaves dangling", () => {
     expect(
-      truncateWords("Transfer of Earnings adjustments batch (Abacus)", 40),
+      truncateWords("Transfer of Earnings adjustments batch (Acme)", 40),
     ).toBe("Transfer of Earnings adjustments batch…")
     expect(
       truncateWords("Product analytics — Segment event tracking, funnels", 44),
@@ -226,7 +226,7 @@ describe("railWidth", () => {
 
   it("gives a wider rail's columns to the label", () => {
     const long =
-      "Cloudsearch → OpenSearch migration: frontend-royalties & frontend-contract"
+      "Cloudsearch → OpenSearch migration: storefront-web & storefront-api"
     const row = { key: "P-1", label: long, live: 1 }
     const narrow = frameOf(
       <SidePanel sidebar={{ title: "Initiatives", rows: [row] }} width={52} />,
@@ -235,7 +235,7 @@ describe("railWidth", () => {
       <SidePanel sidebar={{ title: "Initiatives", rows: [row] }} width={64} />,
     )
     expect(narrow).toContain("Cloudsearch → OpenSearch migration…")
-    expect(wide).toContain("migration: frontend-royalties")
+    expect(wide).toContain("migration: storefront-web")
   })
 })
 
