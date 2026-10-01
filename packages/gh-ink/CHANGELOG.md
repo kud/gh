@@ -1,5 +1,17 @@
 # @kud/gh-ink
 
+## 0.62.0
+
+### Minor Changes
+
+- 789375a: A PR row's thread count, size and age now sit in columns pinned to the right edge instead of running straight on from the title. Before, they started somewhere different on every row, so finding which PR had open threads meant reading each line. Now each column is as wide as the widest value in its section, numbers are right-aligned so the digits line up, and a column no row uses takes no space at all. When a narrow terminal forces a column out, it goes from every row in the section at once, because a gap in one row would read as "nothing here". `trailingColumnsOf` and `sectionShedOf` are exported for any other surface that draws `PrRow`s in a list.
+
+### Patch Changes
+
+- 8a93ae5: The inbox search now runs on ink-ui's `useFilterMode`, the filter every @kud TUI is moving to, so it behaves the same as theirs. Nothing you'd notice changes, with two small exceptions: pressing `↵` on an empty search now drops the filter instead of leaving a blank one that needed `esc`, and `/` no longer opens a search underneath an open action menu.
+- 6bbad1a: Every package moves to `@kud/ink-ui` 0.31.0 together, so the workspace still carries a single copy. The release adds `useFilterMode`, the shared list filter the inbox now runs on.
+- 14176ff: Pressing `/` over a committed search now goes back into the query instead of wiping it. `↵` already left the field with the filter still applied, so the letter keys worked as hotkeys again, but the only way back in was a blank field and the whole term typed out again. Now `/` resumes where you left off, `esc` while typing clears it, and the hint under a committed search reads `/ edit · esc clear`.
+
 ## 0.61.3
 
 ### Patch Changes

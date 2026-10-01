@@ -1,5 +1,11 @@
 # @kud/gh-webhook-replay
 
+## 0.1.30
+
+### Patch Changes
+
+- 6bbad1a: Every package moves to `@kud/ink-ui` 0.31.0 together, so the workspace still carries a single copy. The release adds `useFilterMode`, the shared list filter the inbox now runs on.
+
 ## 0.1.29
 
 ### Patch Changes
