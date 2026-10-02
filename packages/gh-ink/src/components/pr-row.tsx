@@ -81,6 +81,12 @@ export type PrRowProps = {
   columns?: TrailingColumns
   /** Trailing columns the section has given up — see `sectionShedOf`. */
   shed?: TrailingShed
+  /**
+   * Width of the number cell across the section — see `numberColumnsOf`.
+   * Absent, the row measures itself, which aligns nothing but never runs the
+   * number into the title.
+   */
+  numberCols?: number
 }
 
 // Unresolved review threads — a comment glyph (nf-fa-comments) + count, keeping
@@ -162,6 +168,20 @@ export const trailingColumnsOf = (items: readonly GHItem[]): TrailingColumns =>
     { threads: 0, size: 0, age: 0 } as TrailingColumns,
   )
 
+/**
+ * Width of the `#n` cell across these rows: the widest number plus a two-cell
+ * gutter, left-aligned. Measured once by the list over the whole section, the
+ * same move as `markerCols` and `trailingColumnsOf`, so the titles start on one
+ * column and that column does not move as you scroll.
+ *
+ * It replaced `padEnd(7)`, a constant that fitted the repos it was written
+ * against and nothing else: `#31805` left a one-cell gutter where `#172` left
+ * three, and a six-digit number would have run straight into its title. A
+ * section of short numbers no longer pays for a long one it does not hold.
+ */
+export const numberColumnsOf = (items: readonly GHItem[]): number =>
+  items.reduce((w, item) => Math.max(w, cellsOf(`#${item.number}`)), 0) + 2
+
 type LayoutInput = Pick<
   PrRowProps,
   | "item"
@@ -172,6 +192,7 @@ type LayoutInput = Pick<
   | "announcements"
   | "columns"
   | "shed"
+  | "numberCols"
 >
 
 /**
@@ -216,8 +237,10 @@ export const layoutOf = ({
   announcements = [],
   columns,
   shed = {},
+  numberCols,
 }: LayoutInput) => {
-  const numStr = `#${item.number}`.padEnd(7)
+  const numCols = numberCols ?? numberColumnsOf([item])
+  const numStr = `#${item.number}`.padEnd(numCols)
   // Hide "by me" — the author suffix is only signal when it's someone else.
   const showAuthor = !!item.author && item.author !== login
   // `+18 -4`, on every PR row that carries it. It was gated on `showAuthor`
@@ -367,7 +390,7 @@ export const layoutOf = ({
       prefix.length +
       2 /* health */ +
       2 /* turn */ +
-      7 +
+      numCols +
       (cell ? 2 + cell.length + 1 : 0) +
       (givingUp.repo ? 0 : repoLabel.length) +
       author +
@@ -446,6 +469,7 @@ export const PrRow = ({
   announcements = [],
   columns,
   shed,
+  numberCols,
 }: PrRowProps) => {
   // Read once for the row rather than at each of the pill sites — a hook, so it
   // cannot sit inside a branch.
@@ -538,6 +562,7 @@ export const PrRow = ({
     announcements,
     columns,
     shed,
+    numberCols,
   })
 
   return (

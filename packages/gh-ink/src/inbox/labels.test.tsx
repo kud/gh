@@ -199,10 +199,7 @@ const frameOfSection = async (items: GHItem[]) => {
   const stdout = new FakeStdout(COLS + 4, 30)
   const stdin = new FakeStdin()
   const instance = render(
-    <App
-      fetcher={async () => ({ sections, login: "kud" })}
-      title="cockpit"
-    />,
+    <App fetcher={async () => ({ sections, login: "kud" })} title="cockpit" />,
     {
       stdout: stdout as never,
       stdin: stdin as never,
@@ -384,8 +381,11 @@ describe("a row carrying labels", () => {
     expect(roomy).toContain(`${TAG} plan`)
     expect(tight).not.toContain(TAG)
     // The title is elided in the MIDDLE, so assert its head rather than a span
-    // truncation would cut through.
-    expect(tight).toContain("PROJ-1125: Wire")
+    // truncation would cut through. Only the ticket key: since the number cell
+    // became section-sized (2026-10-02) this two-digit row keeps two more cells,
+    // stops a rung earlier on the ladder, and spends them on its repo — so the
+    // head that survives is shorter than it was, and still the subject.
+    expect(tight).toContain("PROJ-1125")
     expect(tight).toContain("6d (1w)")
   })
 })

@@ -23,6 +23,7 @@ export { backdropStyle }
 import { truncate } from "../lib/truncate.js"
 export { truncate }
 import {
+  numberColumnsOf,
   PrRow,
   sectionShedOf,
   trailingColumnsOf,
@@ -1004,6 +1005,20 @@ const FRAME_PAD_X = 1
 const FRAME_CHROME_COLS = 2 /* border */ + FRAME_PAD_X * 2 /* padding */
 export const COLS = (process.stdout.columns ?? 120) - FRAME_CHROME_COLS
 const MODAL_CHROME_COLS = 2 /* border */ + 1 * 2 /* paddingX */
+/*
+ * The widest a PR row is ever drawn. Until 2026-10-02 the row took the whole
+ * list width, and its trailing block (threads, size, age) is pinned right — so
+ * on a 220-column window the age sat a hundred cells from the end of the title
+ * it dated, and the eye had to cross a desert of blank to join them. Capped,
+ * the block right-aligns to a line a reader can hold in one sweep.
+ *
+ * A fixed constant, not something measured off the rows: nothing on a row may
+ * depend on what else happens to be beside it, and a cap that tracked the
+ * longest title would move every age in the section when that title left.
+ * Only the PR rows take it. The header's dotted rule and the tab strip still
+ * span the frame, and a window narrower than this is untouched.
+ */
+const ROW_MAX_COLS = 140
 
 // An overlay floats over the list rather than replacing it, which only works
 // because a Box with a background paints every cell it covers — without one Ink
@@ -1161,8 +1176,7 @@ export const explainGhAction = (e: unknown): string => {
 /** First non-empty line of an error-ish value, trimmed. */
 const firstLine = (e: unknown): string => {
   const err = e as { stderr?: string; message?: string; stdout?: string }
-  const raw =
-    (err.stderr ?? err.message ?? err.stdout ?? String(e)).trim()
+  const raw = (err.stderr ?? err.message ?? err.stdout ?? String(e)).trim()
   const line = raw.split("\n").find((l) => l.trim().length > 0)
   return (line?.trim() ?? "failed").slice(0, 200)
 }
@@ -1372,19 +1386,21 @@ export const buildActions = (
         // one that lingers for a round trip reads as a broken keypress.
         onRemove?.(item as GHItem)
         showFlash(`⋯ Removing you from #${item.number}…`)
-        void quietly`gh pr edit ${item.number} --repo ${item.repo} --remove-reviewer ${login}`
-          .then(
-            () => {
-              showFlash(`✓ Removed you as reviewer on #${item.number}`)
-              ext?.onActed?.()
-              ext?.onSettled?.(item as GHItem, { ok: true })
-            },
-            (e) => {
-              showFlash(`✗ #${item.number}: ${explainGhAction(e)}`)
-              onRefresh?.()
-              ext?.onSettled?.(item as GHItem, { ok: false, reason: firstLine(e) })
-            },
-          )
+        void quietly`gh pr edit ${item.number} --repo ${item.repo} --remove-reviewer ${login}`.then(
+          () => {
+            showFlash(`✓ Removed you as reviewer on #${item.number}`)
+            ext?.onActed?.()
+            ext?.onSettled?.(item as GHItem, { ok: true })
+          },
+          (e) => {
+            showFlash(`✗ #${item.number}: ${explainGhAction(e)}`)
+            onRefresh?.()
+            ext?.onSettled?.(item as GHItem, {
+              ok: false,
+              reason: firstLine(e),
+            })
+          },
+        )
       },
     })
   }
@@ -1473,7 +1489,10 @@ export const buildActions = (
               (e) => {
                 showFlash(`✗ Close failed — restoring #${item.number}`)
                 onRefresh?.()
-                ext?.onSettled?.(item as GHItem, { ok: false, reason: firstLine(e) })
+                ext?.onSettled?.(item as GHItem, {
+                  ok: false,
+                  reason: firstLine(e),
+                })
               },
             )
           },
@@ -1537,7 +1556,10 @@ export const buildActions = (
               (e) => {
                 showFlash(`✗ Close failed — restoring #${item.number}`)
                 onRefresh?.()
-                ext?.onSettled?.(item as GHItem, { ok: false, reason: firstLine(e) })
+                ext?.onSettled?.(item as GHItem, {
+                  ok: false,
+                  reason: firstLine(e),
+                })
               },
             )
           },
@@ -2272,11 +2294,14 @@ const ItemRow = ({
   uniformLabels = [],
   columns,
   shed,
+  numberCols,
 }: {
   item: AnyItem
   active: boolean
   gap?: boolean
   login?: string
+  /** The section's `#n` cell width — see `numberColumnsOf`. */
+  numberCols?: number
   /**
    * Labels carried by EVERY label-bearing row in this section, measured once by
    * the list. Suppressed here for the same reason `impliedLabels` suppresses a
@@ -2601,6 +2626,7 @@ const ItemRow = ({
       uniformLabels={uniformLabels}
       columns={columns}
       shed={shed}
+      numberCols={numberCols}
       icon={icon}
       motion={motion}
       announcements={announcements}
@@ -3677,13 +3703,24 @@ const BrowseScreen = ({
    * is gone from every row or from none — see `sectionShedOf`.
    */
   const trailingColumns = trailingColumnsOf(labelBearing)
+  const numberCols = numberColumnsOf(labelBearing)
+  // What a PR row gets of `listCols`: all of it on a narrow frame, never more
+  // than `ROW_MAX_COLS` on a wide one. The shed ladder budgets against this too,
+  // so a column is given up for the line the row is actually drawn on.
+  const rowCols = Math.min(listCols, ROW_MAX_COLS)
   const trailingShed = sectionShedOf(
     section.items.flatMap((item, i) =>
       item.kind === "pr" || item.kind === "issue"
         ? [{ item, prefix: treePrefix(section.items, i) }]
         : [],
     ),
-    { login, cols: listCols, uniformLabels, columns: trailingColumns },
+    {
+      login,
+      cols: rowCols,
+      uniformLabels,
+      columns: trailingColumns,
+      numberCols,
+    },
   )
 
   const [sparkFrame, setSparkFrame] = useState(0)
@@ -4264,19 +4301,18 @@ const BrowseScreen = ({
     ) {
       dismissItem(activeItem)
       showFlash(`⋯ Removing you from #${activeItem.number}…`)
-      void quietly`gh pr edit ${activeItem.number} --repo ${activeItem.repo} --remove-reviewer ${login}`
-        .then(
-          () => {
-            showFlash(`✓ Removed you as reviewer on #${activeItem.number}`)
-            onActed?.()
-            onSettled?.(activeItem, { ok: true })
-          },
-          (e) => {
-            showFlash(`✗ #${activeItem.number}: ${explainGhAction(e)}`)
-            onRefresh?.()
-            onSettled?.(activeItem, { ok: false, reason: firstLine(e) })
-          },
-        )
+      void quietly`gh pr edit ${activeItem.number} --repo ${activeItem.repo} --remove-reviewer ${login}`.then(
+        () => {
+          showFlash(`✓ Removed you as reviewer on #${activeItem.number}`)
+          onActed?.()
+          onSettled?.(activeItem, { ok: true })
+        },
+        (e) => {
+          showFlash(`✗ #${activeItem.number}: ${explainGhAction(e)}`)
+          onRefresh?.()
+          onSettled?.(activeItem, { ok: false, reason: firstLine(e) })
+        },
+      )
       return
     }
     if (input === "b" && activeItem.kind === "pr" && activeItem.branch) {
@@ -4732,7 +4768,13 @@ const BrowseScreen = ({
                     depthOf(section.items[viewStart + i + 1]) > depthOf(item)
                   }
                   sparkFrame={sparkFrame}
-                  cols={listCols}
+                  // The PR rows end at `ROW_MAX_COLS`; everything else keeps the
+                  // list's full width — see `rowCols`.
+                  cols={
+                    item.kind === "pr" || item.kind === "issue"
+                      ? rowCols
+                      : listCols
+                  }
                   markerCols={markerCols}
                   // Computed against section.items for the same reason as
                   // markerCols and prefix above: uniformity is a property of the
@@ -4740,6 +4782,7 @@ const BrowseScreen = ({
                   uniformLabels={uniformLabels}
                   columns={trailingColumns}
                   shed={trailingShed}
+                  numberCols={numberCols}
                   // `i > 0` is window-relative and stays that way: the window's
                   // first row never draws its gap, and fitCount does not charge
                   // for one. The rule itself is gapsAbove, shared with fitCount so

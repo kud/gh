@@ -2,7 +2,12 @@ import React from "react"
 import { render } from "ink-testing-library"
 import { describe, it, expect } from "vitest"
 import type { GHItem } from "@kud/gh-workflow"
-import { PrRow, sectionShedOf, trailingColumnsOf } from "./pr-row.js"
+import {
+  numberColumnsOf,
+  PrRow,
+  sectionShedOf,
+  trailingColumnsOf,
+} from "./pr-row.js"
 
 /*
  * `PrRow` is the row the inbox draws and the row any other surface with a
@@ -163,7 +168,10 @@ describe("PrRow", () => {
       labels: ["needs-review", "backend"],
     })
     const columns = trailingColumnsOf([roomy, cramped])
-    const context = { cols: 70, columns }
+    // 69, not 70: the number cell is the section's `#214` plus its gutter, one
+    // cell narrower than the old fixed seven, so the same pressure sits one lower.
+    const numberCols = numberColumnsOf([roomy, cramped])
+    const context = { cols: 69, columns, numberCols }
     const shed = sectionShedOf(
       [
         { item: roomy, prefix: "" },
@@ -176,5 +184,42 @@ describe("PrRow", () => {
       <PrRow item={roomy} active={false} {...context} shed={shed} />,
     )
     expect(frame).not.toContain("+84")
+  })
+
+  /*
+   * The number cell is as wide as the section's widest `#n` plus a two-cell
+   * gutter. It was `padEnd(7)` until 2026-10-02, which left `#31805` one cell
+   * from its title and would have left a six-digit number none at all.
+   */
+  it("sizes the number cell to the widest number in the section", () => {
+    const rows = [172, 464, 31805, 2005].map((number) =>
+      pr({ number, repo: "acme/api-gateway", title: `title of ${number}` }),
+    )
+    expect(numberColumnsOf(rows)).toBe("#31805".length + 2)
+    expect(numberColumnsOf([pr({ number: 172 })])).toBe("#172".length + 2)
+    expect(numberColumnsOf([pr({ number: 123456 })])).toBe(9)
+
+    const numberCols = numberColumnsOf(rows)
+    const frames = rows.map((item) =>
+      frameOf(
+        <PrRow item={item} active={false} cols={120} numberCols={numberCols} />,
+      ),
+    )
+    // Every title starts on the same column, two cells past the widest number.
+    const starts = frames.map((f) => f.indexOf("title of"))
+    expect(new Set(starts).size).toBe(1)
+    const widest = frames[2]
+    expect(starts[2] - (widest.indexOf("#31805") + "#31805".length)).toBe(2)
+  })
+
+  it("never runs a number into its title when the host does not measure", () => {
+    const frame = frameOf(
+      <PrRow
+        item={pr({ number: 123456, title: "six digits" })}
+        active={false}
+        cols={120}
+      />,
+    )
+    expect(frame).toContain("#123456  six digits")
   })
 })

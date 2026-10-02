@@ -27,6 +27,7 @@ export {
   type SidebarRow,
 } from "./components/side-panel.js"
 export {
+  numberColumnsOf,
   PrRow,
   type PrRowProps,
   sectionShedOf,

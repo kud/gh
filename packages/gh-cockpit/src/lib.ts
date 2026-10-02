@@ -69,6 +69,7 @@ export {
   openInTab,
   parsePatterns,
   PIN_MARK,
+  numberColumnsOf,
   PrRow,
   sectionShedOf,
   trailingColumnsOf,
