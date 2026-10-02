@@ -70,6 +70,7 @@ export {
   type ExplainSection,
   type DetailContext,
   type OriginSplit,
+  type SettledResult,
 } from "./inbox.js"
 export type { Command, InboxExtension, ExtensionTarget } from "./extension.js"
 export { readCache, writeCache, type InboxBudget } from "./cache.js"

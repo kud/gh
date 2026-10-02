@@ -210,6 +210,8 @@ export type DetailContext = {
   onTyping?: (typing: boolean) => void
 }
 
+export type SettledResult = { ok: true } | { ok: false; reason: string }
+
 export type Action = {
   label: string
   hint: string
@@ -1156,6 +1158,15 @@ export const explainGhAction = (e: unknown): string => {
   return human ? `${human} (${raw})` : raw
 }
 
+/** First non-empty line of an error-ish value, trimmed. */
+const firstLine = (e: unknown): string => {
+  const err = e as { stderr?: string; message?: string; stdout?: string }
+  const raw =
+    (err.stderr ?? err.message ?? err.stdout ?? String(e)).trim()
+  const line = raw.split("\n").find((l) => l.trim().length > 0)
+  return (line?.trim() ?? "failed").slice(0, 200)
+}
+
 const unsubscribeFrom = async (item: GHItem): Promise<void> => {
   // REST for the node id, GraphQL only for the mutation that needs it.
   // `gh pr view --json` is GraphQL, so the old form spent the scarcer of the two
@@ -1209,6 +1220,19 @@ export const buildActions = (
      * the drop stops the pre-action cache outliving a quit inside that window.
      */
     onActed?: () => void
+    /**
+     * A mutation settled (succeeded or failed). Called exactly once per
+     * invocation of the three optimistic actions: "Remove me as reviewer",
+     * "Close issue" → "Close #N", and "Close PR" → "Close #N".
+     *
+     * On success: `{ ok: true }`. On failure: `{ ok: false; reason }` where
+     * `reason` is the first line of the error message/stderr, trimmed and
+     * non-empty.
+     *
+     * When absent, behaviour is identical — the host simply does not receive
+     * the settlement signal.
+     */
+    onSettled?: (item: GHItem, result: SettledResult) => void
   },
 ): Action[] => {
   if (
@@ -1349,14 +1373,18 @@ export const buildActions = (
         onRemove?.(item as GHItem)
         showFlash(`⋯ Removing you from #${item.number}…`)
         void quietly`gh pr edit ${item.number} --repo ${item.repo} --remove-reviewer ${login}`
-          .then(() => {
-            showFlash(`✓ Removed you as reviewer on #${item.number}`)
-            ext?.onActed?.()
-          })
-          .catch((e) => {
-            showFlash(`✗ #${item.number}: ${explainGhAction(e)}`)
-            onRefresh?.()
-          })
+          .then(
+            () => {
+              showFlash(`✓ Removed you as reviewer on #${item.number}`)
+              ext?.onActed?.()
+              ext?.onSettled?.(item as GHItem, { ok: true })
+            },
+            (e) => {
+              showFlash(`✗ #${item.number}: ${explainGhAction(e)}`)
+              onRefresh?.()
+              ext?.onSettled?.(item as GHItem, { ok: false, reason: firstLine(e) })
+            },
+          )
       },
     })
   }
@@ -1438,10 +1466,14 @@ export const buildActions = (
           run: () => {
             onRemove?.(item as GHItem)
             showFlash(`✓ Closed #${item.number}`)
-            void quietly`gh issue close ${item.number} --repo ${item.repo}`.catch(
+            void quietly`gh issue close ${item.number} --repo ${item.repo}`.then(
               () => {
+                ext?.onSettled?.(item as GHItem, { ok: true })
+              },
+              (e) => {
                 showFlash(`✗ Close failed — restoring #${item.number}`)
                 onRefresh?.()
+                ext?.onSettled?.(item as GHItem, { ok: false, reason: firstLine(e) })
               },
             )
           },
@@ -1498,10 +1530,14 @@ export const buildActions = (
           run: () => {
             onRemove?.(item as GHItem)
             showFlash(`✓ Closed #${item.number}`)
-            void quietly`gh pr close ${item.number} --repo ${item.repo}`.catch(
+            void quietly`gh pr close ${item.number} --repo ${item.repo}`.then(
               () => {
+                ext?.onSettled?.(item as GHItem, { ok: true })
+              },
+              (e) => {
                 showFlash(`✗ Close failed — restoring #${item.number}`)
                 onRefresh?.()
+                ext?.onSettled?.(item as GHItem, { ok: false, reason: firstLine(e) })
               },
             )
           },
@@ -3132,6 +3168,7 @@ const BrowseScreen = ({
   jiraTransitions,
   onRefresh,
   onActed,
+  onSettled,
   refreshing,
   hasPending,
   pendingSummary,
@@ -3216,6 +3253,19 @@ const BrowseScreen = ({
   onRefresh?: () => void
   /** A mutation landed: drop the cached glance now, refresh shortly. */
   onActed?: () => void
+  /**
+   * A mutation settled (succeeded or failed). Called exactly once per
+   * invocation of the three optimistic actions: "Remove me as reviewer",
+   * "Close issue" → "Close #N", and "Close PR" → "Close #N".
+   *
+   * On success: `{ ok: true }`. On failure: `{ ok: false; reason }` where
+   * `reason` is the first line of the error message/stderr, trimmed and
+   * non-empty.
+   *
+   * When absent, behaviour is identical — the host simply does not receive
+   * the settlement signal.
+   */
+  onSettled?: (item: GHItem, result: SettledResult) => void
   refreshing?: boolean
   hasPending?: boolean
   pendingSummary?: string
@@ -3768,7 +3818,7 @@ const BrowseScreen = ({
       onRefresh,
       dismissItem,
       openDrillView,
-      { extensions, onOpenExt, onActed },
+      { extensions, onOpenExt, onActed, onSettled },
     )
     menu.open(actions)
   }
@@ -4215,14 +4265,18 @@ const BrowseScreen = ({
       dismissItem(activeItem)
       showFlash(`⋯ Removing you from #${activeItem.number}…`)
       void quietly`gh pr edit ${activeItem.number} --repo ${activeItem.repo} --remove-reviewer ${login}`
-        .then(() => {
-          showFlash(`✓ Removed you as reviewer on #${activeItem.number}`)
-          onActed?.()
-        })
-        .catch((e) => {
-          showFlash(`✗ #${activeItem.number}: ${explainGhAction(e)}`)
-          onRefresh?.()
-        })
+        .then(
+          () => {
+            showFlash(`✓ Removed you as reviewer on #${activeItem.number}`)
+            onActed?.()
+            onSettled?.(activeItem, { ok: true })
+          },
+          (e) => {
+            showFlash(`✗ #${activeItem.number}: ${explainGhAction(e)}`)
+            onRefresh?.()
+            onSettled?.(activeItem, { ok: false, reason: firstLine(e) })
+          },
+        )
       return
     }
     if (input === "b" && activeItem.kind === "pr" && activeItem.branch) {
@@ -4854,6 +4908,7 @@ export const App = ({
   tabHelp,
   emptyHint,
   liveLabel,
+  onSettled,
 }: {
   fetcher: () => Promise<{
     sections: Section[]
@@ -4953,6 +5008,19 @@ export const App = ({
   // Domain extensions the host can mount as full-screen overlays (their -ink
   // assembled bodies). Proven with Jenkins; the browse glances follow.
   extensions?: InboxExtension[]
+  /**
+   * A mutation settled (succeeded or failed). Called exactly once per
+   * invocation of the three optimistic actions: "Remove me as reviewer",
+   * "Close issue" → "Close #N", and "Close PR" → "Close #N".
+   *
+   * On success: `{ ok: true }`. On failure: `{ ok: false; reason }` where
+   * `reason` is the first line of the error message/stderr, trimmed and
+   * non-empty.
+   *
+   * When absent, behaviour is identical — the host simply does not receive
+   * the settlement signal.
+   */
+  onSettled?: (item: GHItem, result: SettledResult) => void
 }) => {
   // App's own, because the loading and empty frames render HERE rather than in
   // BrowseScreen and need the same height budget it uses — otherwise the frame
@@ -5710,6 +5778,7 @@ export const App = ({
         jiraTransitions={jiraTransitions}
         onRefresh={applyOrRefresh}
         onActed={onActed}
+        onSettled={onSettled}
         refreshing={refreshing}
         hasPending={pending !== null}
         pendingSummary={pendingSummary}
