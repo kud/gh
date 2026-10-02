@@ -2628,9 +2628,15 @@ export const ActionMenu = ({
       : item.kind === "pr" || item.kind === "issue"
         ? `#${item.number}`
         : ""
+  // Never shrinks. Hosts draw the menu in flow under a board that already fills
+  // a fixed-height Page, and Yoga took the missing rows out of the menu: on
+  // 2026-10-02 its rows collapsed onto one line, an action vanished under
+  // another and left stale glyphs such as `cew` behind. Shrinking is the
+  // board's job, not the menu's.
   return (
     <Box
       flexDirection="column"
+      flexShrink={0}
       borderStyle="round"
       borderColor={colors.info}
       backgroundColor={OVERLAY_BG}
