@@ -1,5 +1,21 @@
 # @kud/gh-cockpit
 
+## 0.10.0
+
+### Minor Changes
+
+- 9e6b595: A host can now grow a first tab that answers "what needs you". The inbox query selects labels on every pull request source, exactly as it already did on issues, so a host reading a decision label off a PR row no longer pays a round trip per row to learn what the row already knew. Rows carry an optional host-supplied `needsYou` marker — the package never derives it — and the needs-you section lays itself out around it in two bands, Decide then Merge, with the decision line drawn in place of the title so the tab reads as a list of questions rather than a list of branches. Drilling in pins a Decision block under the summary, and the drill views grow the keys the moment calls for: answer posts a comment and hands follow-through to the host's `answered` hook, diff pages the PR in the viewer's pager, merge and close ask first and then do it, and ready marks a draft for review. Typing a search still finds the decision's own words.
+
+### Patch Changes
+
+- 8767c43: PR rows line up better on both ends. The `#n` cell was a fixed seven cells, so `#31805` sat one cell from its title while `#172` sat three, and a six-digit number would have run straight into its title; it is now as wide as the section's widest number plus a two-cell gutter, so every title starts on one column (exported as `numberColumnsOf`, with a matching `numberCols` prop on `PrRow`). On a wide window the inbox also stops each PR row at 140 cells, so threads, size and age right-align to a line you can read across rather than to the far edge of the terminal; the header rule and tab strip still span the frame, and narrower windows are unchanged.
+- Updated dependencies [86e66de]
+- Updated dependencies [9e6b595]
+- Updated dependencies [8767c43]
+  - @kud/gh@0.19.0
+  - @kud/gh-workflow@0.14.0
+  - @kud/gh-ink@0.64.0
+
 ## 0.9.2
 
 ### Patch Changes
