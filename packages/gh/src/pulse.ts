@@ -16,6 +16,8 @@ import { MY_PRS_LIMIT, inboxScope } from "./inbox.js"
 export type PulseQueryOptions = {
   /** `owner/name`. Watches one repository, exactly as a scoped inbox reads it. */
   repo?: string
+  /** `owner/name` repositories the pulse must not watch, as the inbox hides them. */
+  excludeRepos?: readonly string[]
 }
 
 /**
@@ -44,7 +46,7 @@ export type PulseQueryOptions = {
  * pulse down before the budget runs dry rather than after.
  */
 export const buildPulseQuery = (options: PulseQueryOptions = {}) => {
-  const { scope, owned } = inboxScope(options.repo)
+  const { scope, owned } = inboxScope(options.repo, options.excludeRepos)
   const latest = (alias: string, qualifiers: string) =>
     `  ${alias}: search(query: "${scope}${qualifiers} sort:updated-desc", type: ISSUE, first: 1) {
     nodes { ... on Issue { updatedAt } ... on PullRequest { updatedAt } }

@@ -133,6 +133,12 @@ export const INBOX_SOURCES: readonly InboxSource[] = [
 export type InboxQueryOptions = {
   /** `owner/name`. Scopes every search to one repository. */
   repo?: string
+  /**
+   * `owner/name` repositories no search may return, applied as `-repo:`
+   * qualifiers on every source. See `inboxScope` for why it lives in the query
+   * rather than in a filter over the rows.
+   */
+  excludeRepos?: readonly string[]
   /** How far back `recentlyDone` looks. Defaults to 14 days. */
   doneWithinDays?: number
   /**
@@ -577,6 +583,8 @@ const SOURCES: Record<InboxSource, (s: Selections, first: number) => string> = {
   }`,
 }
 
+const REPO_SLUG = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/
+
 /**
  * The two scope qualifiers every search is built from, resolved from `repo`.
  *
@@ -585,14 +593,36 @@ const SOURCES: Record<InboxSource, (s: Selections, first: number) => string> = {
  * that watched a different set of repos would report calm while the board went
  * stale. One function, so the two cannot drift into two spellings of the rule
  * that `repo:` REPLACES `user:@me` (see `buildInboxQuery`).
+ *
+ * `excludeRepos` rides in `scope` because `scope` is the one prefix EVERY
+ * source and every pulse alias already carries, so a repo hidden here is hidden
+ * from all of them at once. It is a query qualifier rather than a filter over
+ * the returned rows on purpose: a row filter leaves `issueCount` counting the
+ * hidden repo, so a capped tab's fraction claims rows nobody can see, and the
+ * hidden rows still occupy slots in the window and push real ones out of it.
+ *
+ * Names are checked rather than trusted, because they are interpolated into a
+ * quoted GraphQL string: one stray `"` costs the whole document. A bad name
+ * throws instead of being dropped, since a repo that silently stays visible is
+ * exactly the failure this option exists to prevent.
  */
-export const inboxScope = (repo?: string) => ({
-  scope: repo ? `repo:${repo} ` : "",
-  owned: repo ? "" : "user:@me ",
-})
+export const inboxScope = (
+  repo?: string,
+  excludeRepos: readonly string[] = [],
+) => {
+  const bad = excludeRepos.find((r) => !REPO_SLUG.test(r))
+  if (bad !== undefined)
+    throw new Error(`excludeRepos: "${bad}" is not an owner/name slug`)
+  const hidden = excludeRepos.map((r) => `-repo:${r} `).join("")
+  return {
+    scope: `${repo ? `repo:${repo} ` : ""}${hidden}`,
+    owned: repo ? "" : "user:@me ",
+  }
+}
 
 const selectionsFor = ({
   repo,
+  excludeRepos,
   doneWithinDays = 14,
   shape = "full",
 }: InboxQueryOptions): Selections => {
@@ -600,7 +630,7 @@ const selectionsFor = ({
      two shapes cannot drift into two separately-maintained queries. */
   const full = shape === "full"
   return {
-    ...inboxScope(repo),
+    ...inboxScope(repo, excludeRepos),
     doneSince: sinceDay(doneWithinDays),
     health: full ? PR_HEALTH : "",
     size: PR_SIZE,

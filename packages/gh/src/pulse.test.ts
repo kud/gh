@@ -63,6 +63,15 @@ describe("buildPulseQuery", () => {
     )
     expect(query).not.toContain("user:@me")
   })
+
+  it("stops watching a hidden repo, on every alias the inbox hides it from", () => {
+    const query = buildPulseQuery({ excludeRepos: ["acme/scratch"] })
+    expect(searchFor(query, "owned")).toBe(
+      "-repo:acme/scratch user:@me archived:false sort:updated-desc",
+    )
+    for (const alias of ["involved", "reviewRequests", "myPRs"])
+      expect(searchFor(query, alias)).toContain("-repo:acme/scratch")
+  })
 })
 
 describe("pulseFingerprint", () => {

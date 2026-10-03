@@ -65,6 +65,45 @@ describe("buildInboxQuery", () => {
     }
   })
 
+  describe("excludeRepos", () => {
+    it("hides a repo from every source, account-wide", () => {
+      const query = buildInboxQuery({ excludeRepos: ["acme/scratch"] })
+      for (const alias of INBOX_SOURCES)
+        expect(searchFor(query, alias)).toContain("-repo:acme/scratch")
+    })
+
+    it("still hides it under a repo scope, beside the repo: qualifier", () => {
+      const query = buildInboxQuery({
+        repo: "acme/api",
+        excludeRepos: ["acme/scratch"],
+      })
+      expect(searchFor(query, "repoPRs")).toContain(
+        "repo:acme/api -repo:acme/scratch",
+      )
+    })
+
+    it("reaches every part of a split inbox", () => {
+      for (const part of buildInboxQueries({ excludeRepos: ["acme/scratch"] }))
+        expect(part.match(/search\(query: "/g)?.length).toBe(
+          part.match(/-repo:acme\/scratch /g)?.length,
+        )
+    })
+
+    it("adds nothing when absent, so an existing caller keeps its query", () => {
+      expect(buildInboxQuery({ excludeRepos: [] })).toBe(buildInboxQuery())
+      expect(buildInboxQuery()).not.toContain("-repo:")
+    })
+
+    // Interpolated into a quoted GraphQL string: a quote would break the whole
+    // document, and a dropped name would leave the repo silently visible.
+    it("refuses anything that is not an owner/name slug", () => {
+      for (const bad of ['acme/x" OR "', "acme", "acme/x y", ""])
+        expect(() => buildInboxQuery({ excludeRepos: [bad] })).toThrow(
+          /excludeRepos/,
+        )
+    })
+  })
+
   it("scopes every source, not only the owned ones", () => {
     const query = buildInboxQuery({ repo: "kud/ambre" })
     for (const alias of ["myPRs", "reviewRequests", "assigned", "recentlyDone"])
