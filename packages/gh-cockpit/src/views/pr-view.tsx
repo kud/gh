@@ -1,11 +1,12 @@
 import { $ } from "zx"
+import { spawnSync } from "node:child_process"
 import React, { useEffect, useRef, useState } from "react"
-import { Box, Text, useInput } from "ink"
-import { colors, Tabs, useTabs, type TabItem } from "@kud/ink-ui"
+import { Box, Text, useInput, useStdin } from "ink"
+import { colors, Tabs, TextInput, useTabs, type TabItem } from "@kud/ink-ui"
 import { DrillView } from "./drill-view.js"
 import { ActionMenu, buildActions, useActionMenu, type GHItem } from "../lib.js"
 import { HealthPanel } from "@kud/gh-ink"
-import { fetchDefaultBranch, fetchHealth, type PrCheck } from "@kud/gh"
+import { fetchDefaultBranch, fetchHealth, mergePr, type PrCheck } from "@kud/gh"
 import { CommentsPanel, fetchComments } from "./comments-panel.js"
 import {
   separatorBefore,
@@ -15,6 +16,8 @@ import {
 } from "./pr-summary.js"
 import { CheckLogView, jobIdOf } from "./check-log-view.js"
 import { checkDrillFor } from "./check-drill.js"
+import { DecisionBlock } from "./decision-block.js"
+import { decisionHooks } from "../decision.js"
 import { AiLauncher, CopyPromptNotice } from "./ai-panel.js"
 import { seedPromptFor } from "../prompts.js"
 import { FilePicker } from "./file-picker.js"
@@ -67,6 +70,14 @@ export const PrView = ({
   const [files, setFiles] = useState(false)
   const [copy, setCopy] = useState(false)
   const [replying, setReplying] = useState(false)
+  // Decision keys (`c`/`m`/`X`/`R`/`d`), live only while `item.needsYou` is
+  // set — see the keymap below. `confirm` holds a pending merge/close until a
+  // human answers it; `note` is the one-line status for everything the keys do.
+  const [answering, setAnswering] = useState(false)
+  const [confirm, setConfirm] = useState<"merge" | "close" | null>(null)
+  const [note, setNote] = useState<string | null>(null)
+  const [paging, setPaging] = useState(false)
+  const { setRawMode } = useStdin()
   const menu = useActionMenu()
 
   // The fetch lives here (not in CommentsPanel) so the Comments tab label can
@@ -94,7 +105,8 @@ export const PrView = ({
 
   // Focus gate shared by useTabs and the view's own keymap, so Tab can't switch
   // tabs underneath a mounted sub-view.
-  const inputActive = log === null && !ai && !files && !replying && !copy
+  const inputActive =
+    log === null && !ai && !files && !replying && !copy && !answering
   // The menu replaces the active panel rather than floating over it, so the
   // panel is unmounted and cannot compete for arrow keys while it is up. Tab
   // switching is suspended for the same reason.
@@ -164,12 +176,14 @@ export const PrView = ({
    */
   const aiPeel = useRef<(() => boolean) | null>(null)
   const peel = (): boolean => {
-    if (menu.actions !== null) return menu.close(), true
+    if (answering) return (setAnswering(false), true)
+    if (confirm !== null) return (setConfirm(null), true)
+    if (menu.actions !== null) return (menu.close(), true)
     if (replying) return true
-    if (log !== null) return setLog(null), true
-    if (files) return setFiles(false), true
+    if (log !== null) return (setLog(null), true)
+    if (files) return (setFiles(false), true)
     if (ai) return aiPeel.current?.() ?? (setAi(false), true)
-    if (copy) return setCopy(false), true
+    if (copy) return (setCopy(false), true)
     return false
   }
   useEffect(() => {
@@ -177,8 +191,8 @@ export const PrView = ({
     return () => registerPeel?.(null)
   })
   useEffect(() => {
-    onTyping?.(replying)
-  }, [replying, onTyping])
+    onTyping?.(replying || answering)
+  }, [replying, answering, onTyping])
 
   const checkLabel = (c: PrCheck) =>
     c.workflowName
@@ -198,9 +212,160 @@ export const PrView = ({
     else if (url) $`open ${url}`.catch(() => {})
   }
 
+  // The decision keys below are human keypresses only: no auto-trigger
+  // anywhere. Each shells out through zx's `$` with `.quiet()` — never a raw
+  // gh stderr line printed outside the frame — and reports on the `note` line.
+  const doMerge = async () => {
+    setNote("⋯ merging…")
+    try {
+      await mergePr(item.repo, item.number)
+      setNote(null)
+      if (onMerged) onMerged(item)
+      else onRefresh?.()
+    } catch (e) {
+      setNote(`✗ merge failed: ${(e as Error).message}`)
+    }
+  }
+
+  const doClose = async () => {
+    setNote("⋯ closing…")
+    try {
+      await $`gh pr close ${item.number} --repo ${item.repo}`.quiet()
+      setNote(null)
+      if (onRemove) onRemove(item)
+      else onBack()
+    } catch (e) {
+      setNote(`✗ close failed: ${(e as Error).message}`)
+    }
+  }
+
+  // Health tab only (the Conversation tab's `R` belongs to CommentsPanel's
+  // show-resolved). On a PR that is not a draft it does nothing but say so.
+  const markReady = async () => {
+    if (item.health !== "draft") {
+      setNote("Not a draft — nothing to mark ready")
+      return
+    }
+    setNote("⋯ marking ready…")
+    try {
+      await $`gh pr ready ${item.number} --repo ${item.repo}`.quiet()
+      setNote(null)
+      onRefresh?.()
+    } catch (e) {
+      setNote(`✗ ready failed: ${(e as Error).message}`)
+    }
+  }
+
+  // Posts the answer as a comment, then hands follow-through to the host —
+  // typically clearing its own decision label, whose name this package never
+  // learns. See `decision.ts`.
+  const submitAnswer = async (body: string) => {
+    const text = body.trim()
+    setAnswering(false)
+    if (!text) return
+    setNote("Posting…")
+    try {
+      await $`gh pr comment ${item.number} --repo ${item.repo} --body ${text}`.quiet()
+      setNote("✓ Answered")
+      await decisionHooks().answered?.({
+        kind: "pr",
+        repo: item.repo,
+        number: item.number,
+        url: item.url,
+        labels: item.labels,
+      })
+    } catch (e) {
+      setNote(`✗ ${(e as Error).message}`)
+    }
+  }
+
+  // The diff in the viewer's pager, which owns the terminal while it runs.
+  //
+  // In an effect, after a frame saying so has been drawn, rather than straight
+  // from the keypress: spawnSync blocks the event loop, so the frame before it
+  // is the one left on screen, and the note changing back afterwards is what
+  // makes Ink repaint at all — it writes only when its output differs, and an
+  // identical frame after a cleared screen would leave the screen blank.
+  //
+  // Raw mode off for the pager's keys, and the alternate screen re-entered on
+  // the way out: a pager such as less leaves it with `rmcup`, which drops the
+  // terminal back to the main screen under a cockpit that drew in the
+  // alternate one. Number and repo travel as positional args, never
+  // interpolated into the shell string.
+  useEffect(() => {
+    if (!paging) return
+    // A beat for Ink to flush the "opening" frame: it writes on a throttle, and
+    // a blocking spawn straight after commit can beat it to the terminal.
+    const timer = setTimeout(() => {
+      setRawMode(false)
+      spawnSync(
+        "sh",
+        [
+          "-c",
+          'gh pr diff "$0" --repo "$1" --color=always | ${PAGER:-less -R}',
+          String(item.number),
+          item.repo,
+        ],
+        { stdio: "inherit" },
+      )
+      process.stdout.write("\x1b[?1049h\x1b[2J\x1b[H")
+      setRawMode(true)
+      setNote(null)
+      setPaging(false)
+    }, 50)
+    return () => clearTimeout(timer)
+  }, [paging])
+
   useInput(
     (input, key) => {
       if (menu.handleKey(key)) return
+      // Decision keys live in the DRILL views only, never on inbox rows, and
+      // only while the host marked this row as needing the viewer. A key never
+      // changes meaning based on item state.
+      if (item.needsYou) {
+        // A pending confirm resolves on the next key: `y` goes ahead, anything
+        // else — esc included — stands the question down.
+        if (confirm === "merge") {
+          if (input === "y" || input === "Y") void doMerge()
+          setConfirm(null)
+          return
+        }
+        if (confirm === "close") {
+          if (input === "y" || input === "Y") void doClose()
+          setConfirm(null)
+          return
+        }
+        // `c` answers: a text box, posted as a comment, then the host's
+        // "answered" hook. Free on every tab.
+        if (input === "c") {
+          setAnswering(true)
+          return
+        }
+        // `d` shows the diff in the user's pager. PR only. Free on every tab.
+        if (input === "d") {
+          setNote("⋯ opening the diff in your pager…")
+          setPaging(true)
+          return
+        }
+        // `X` closes, with a confirm, on every tab.
+        if (input === "X") {
+          setConfirm("close")
+          return
+        }
+        // `m` merges, with a confirm — on the Conversation tab only. On Health
+        // the shared HealthPanel already owns `m` (merge with a `y` confirm),
+        // so handling it here too would fire both on one keypress.
+        if (input === "m" && tab === "conversation") {
+          setConfirm("merge")
+          return
+        }
+        // `R` marks a draft PR ready — on the Health tab only. Conversation
+        // keeps `R` = show resolved, which CommentsPanel owns.
+        if (input === "R" && tab === "health") {
+          void markReady()
+          return
+        }
+      }
       // `M`, not `m`: HealthPanel owns lowercase `m` for merge on this screen.
       // Same mnemonic as the inbox's `m`, one shift away, and both are safe to
       // hit by mistake — the menu is inert until you pick something, and merge
@@ -306,6 +471,26 @@ export const PrView = ({
     )
   }
 
+  // Footer hints show the decision keys only when live: needsYou set, on the
+  // tab where each applies. `m` is listed on Conversation alone, since Health
+  // already lists the merge HealthPanel owns; `R` on Health alone, since
+  // Conversation's `R` is CommentsPanel's show-resolved.
+  const decisionHints: [string, string][] = !item.needsYou
+    ? []
+    : tab === "health"
+      ? [
+          ["c", "answer"],
+          ["d", "diff"],
+          ["X", "close"],
+          ["R", "ready"],
+        ]
+      : [
+          ["c", "answer"],
+          ["d", "diff"],
+          ["m", "merge"],
+          ["X", "close"],
+        ]
+
   const hints: [string, string][] =
     tab === "health"
       ? [
@@ -313,6 +498,7 @@ export const PrView = ({
           ["↵/l", "log"],
           ["r", "retrigger"],
           ["m", "merge"],
+          ...decisionHints,
           ["a", "AI"],
           ["y", "copy prompt"],
           ["e", "files"],
@@ -326,6 +512,7 @@ export const PrView = ({
           ["x", "resolve"],
           ["r", "reply"],
           ["R", "show resolved"],
+          ...decisionHints,
           ["M", "actions"],
           ["a", "AI"],
           ["y", "copy prompt"],
@@ -386,10 +573,49 @@ export const PrView = ({
           ))}
         </Box>
       ) : null}
+      {/* Pinned under the summary, above the tabs: below, it would read as
+          belonging to the active panel, which is exactly the claim not being
+          made — the decision is the drill's, not the tab's. */}
+      {item.needsYou ? <DecisionBlock needsYou={item.needsYou} /> : null}
       <Box marginBottom={1} marginTop={1}>
         <Tabs active={tab} items={tabItems} />
       </Box>
-      {menu.actions ? (
+      {/* The decision keys' own line: a pending merge/close confirm first (the
+          same wording and colours HealthPanel draws), else the one-line status
+          for whatever the keys last did. */}
+      {confirm === "merge" ? (
+        <Box marginBottom={1}>
+          <Text color={colors.warning}>
+            {`  Merge #${item.number}?  `}
+            <Text color={colors.success}>y</Text>
+            <Text dimColor> confirm · any other key cancels</Text>
+          </Text>
+        </Box>
+      ) : confirm === "close" ? (
+        <Box marginBottom={1}>
+          <Text color={colors.warning}>
+            {`  Close #${item.number}?  `}
+            <Text color={colors.success}>y</Text>
+            <Text dimColor> confirm · any other key cancels</Text>
+          </Text>
+        </Box>
+      ) : note ? (
+        <Box marginBottom={1}>
+          <Text color={colors.warning} bold>
+            {"  " + note}
+          </Text>
+        </Box>
+      ) : null}
+      {/* The answer box REPLACES the panel while it is open, as the menu does:
+          HealthPanel and CommentsPanel bind bare letters (r retriggers, m asks
+          to merge, x resolves) and would act on every one typed into it. */}
+      {answering ? (
+        <TextInput
+          placeholder="Answer… (↵ send · esc cancel)"
+          onSubmit={(value) => void submitAnswer(value)}
+          onCancel={() => setAnswering(false)}
+        />
+      ) : menu.actions ? (
         <ActionMenu item={item} actions={menu.actions} cursor={menu.cursor} />
       ) : tab === "health" ? (
         <HealthPanel

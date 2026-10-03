@@ -372,6 +372,20 @@ const ISSUE_CONVERSATION = `
 const ISSUE_LABELS = `
       labels(first: 10) { nodes { name } }`
 
+// The same selection on PR nodes, and it is not a copy that drifted — it is
+// the same ten names for the same reason, plus one a host cannot get any other
+// way. A host deciding "does this PR need a decision from the viewer" reads a
+// `decision-needed` label off the row, and the row only carries what the query
+// selected: without this, a host filtering PRs by label would have to fire one
+// `gh pr view --json labels` per row, which is exactly the per-row round trip
+// the inbox query exists to avoid. Agents reading the raw payload get the same
+// benefit issues already had — labels on PRs as they have on issues — rather
+// than a payload where half the rows answer "what am I" and the other half do
+// not. Absent from `recentlyDone` on purpose: a merged row is never triaged by
+// label.
+const PR_LABELS = `
+      labels(first: 10) { nodes { name } }`
+
 /*
  * Computed per call, never at module scope. A CLI process is short-lived and
  * would not notice, but a long-running server imports this once and keeps it
@@ -391,6 +405,7 @@ type Selections = {
   conversation: string
   issueConversation: string
   issueLabels: string
+  prLabels: string
 }
 
 /*
@@ -401,7 +416,7 @@ type Selections = {
  */
 const SOURCES: Record<InboxSource, (s: Selections, first: number) => string> = {
   myPRs: (
-    { scope, health, size, conversation },
+    { scope, health, size, conversation, prLabels },
     first,
   ) => `  myPRs: search(query: "${scope}is:pr is:open author:@me", type: ISSUE, first: ${first}) {
     issueCount
@@ -412,11 +427,12 @@ const SOURCES: Record<InboxSource, (s: Selections, first: number) => string> = {
       ${size}
       ${health}
       ${conversation}
+      ${prLabels}
     }}
   }`,
 
   reviewRequests: (
-    { scope, health, size, conversation },
+    { scope, health, size, conversation, prLabels },
     first,
   ) => `  reviewRequests: search(query: "${scope}is:pr is:open review-requested:@me", type: ISSUE, first: ${first}) {
     issueCount
@@ -427,11 +443,12 @@ const SOURCES: Record<InboxSource, (s: Selections, first: number) => string> = {
       ${size}
       ${health}
       ${conversation}
+      ${prLabels}
     }}
   }`,
 
   reviewed: (
-    { scope, health, size, conversation },
+    { scope, health, size, conversation, prLabels },
     first,
   ) => `  reviewed: search(query: "${scope}is:pr is:open reviewed-by:@me -author:@me -review-requested:@me", type: ISSUE, first: ${first}) {
     issueCount
@@ -442,11 +459,20 @@ const SOURCES: Record<InboxSource, (s: Selections, first: number) => string> = {
       ${size}
       ${health}
       ${conversation}
+      ${prLabels}
     }}
   }`,
 
   assigned: (
-    { scope, health, size, conversation, issueConversation, issueLabels },
+    {
+      scope,
+      health,
+      size,
+      conversation,
+      issueConversation,
+      issueLabels,
+      prLabels,
+    },
     first,
   ) => `  assigned: search(query: "${scope}is:open assignee:@me", type: ISSUE, first: ${first}) {
     issueCount
@@ -462,6 +488,7 @@ const SOURCES: Record<InboxSource, (s: Selections, first: number) => string> = {
         ${size}
         ${health}
         ${conversation}
+        ${prLabels}
       }
     }
   }`,
@@ -523,7 +550,7 @@ const SOURCES: Record<InboxSource, (s: Selections, first: number) => string> = {
   }`,
 
   repoPRs: (
-    { scope, owned, health, size, conversation },
+    { scope, owned, health, size, conversation, prLabels },
     first,
   ) => `  repoPRs: search(query: "${scope}${owned}is:pr is:open -author:@me archived:false", type: ISSUE, first: ${first}) {
     issueCount
@@ -534,6 +561,7 @@ const SOURCES: Record<InboxSource, (s: Selections, first: number) => string> = {
       ${size}
       ${health}
       ${conversation}
+      ${prLabels}
     }}
   }`,
 
@@ -579,6 +607,7 @@ const selectionsFor = ({
     conversation: full ? PR_CONVERSATION : "",
     issueConversation: full ? ISSUE_CONVERSATION : "",
     issueLabels: full ? ISSUE_LABELS : "",
+    prLabels: full ? PR_LABELS : "",
   }
 }
 

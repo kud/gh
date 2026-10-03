@@ -586,7 +586,16 @@ export const PrRow = ({
         dimColor={motion === "departing" || motion === "withdrawn"}
         strikethrough={motion === "withdrawn"}
       >
-        {truncate(item.title, titleMax) + "  "}
+        {/* On a needs-you tab the row answers "what must be decided" rather than
+            "what is it called": the host's one plain line replaces the title in
+            the same cell, same truncation, same styling — `titleMax` is a width,
+            not a measure of the title, so the budget holds either way. A row
+            with an empty decision draws its title as before rather than a
+            blank. */}
+        {truncate(
+          item.needsYou?.decision ? item.needsYou.decision : item.title,
+          titleMax,
+        ) + "  "}
       </Text>
       {/* Straight after the title and before the repo, not out in the trailing
           furniture: a label says what the row IS, so it is read as part of the

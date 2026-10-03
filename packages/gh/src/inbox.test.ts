@@ -83,6 +83,21 @@ describe("buildInboxQuery", () => {
     }
   })
 
+  // A host deciding "does this PR need a decision" reads a label off the row,
+  // and the row only carries what the query selected — so every PR source
+  // selects labels exactly the way the issue sources already did. recentlyDone
+  // is exempt: a merged row is never triaged by label.
+  it("selects labels on every open-PR source, as on issues", () => {
+    const query = buildInboxQuery()
+    for (const alias of OPEN_PR_SOURCES)
+      expect(blockFor(query, alias)).toContain("labels(first: 10)")
+    expect(blockFor(query, "recentlyDone")).not.toContain("labels(")
+  })
+
+  it("drops PR labels with the rest when minimal", () => {
+    const query = buildInboxQuery({ shape: "minimal" })
+    expect(blockFor(query, "myPRs")).not.toContain("labels(")
+  })
   // Both levels, and the distinction is the feature rather than a detail of it:
   // a reaction on the last comment can only settle that comment, one on the PR
   // settles the PR. Collapse them to one and whichever survives is wrong for

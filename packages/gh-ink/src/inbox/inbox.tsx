@@ -122,6 +122,7 @@ import {
   bandOf,
   PIN_MARK,
   layoutGHItems,
+  NEEDS_YOU_SECTION,
   filterByOrigin,
   filterBySearch,
   filterByRepos,
@@ -129,6 +130,7 @@ import {
 import type {
   GHDetail,
   GHItem,
+  NeedsYou,
   TaskRow,
   RepoHeader,
   ShowMore,
@@ -156,6 +158,7 @@ export {
   bandOf,
   PIN_MARK,
   layoutGHItems,
+  NEEDS_YOU_SECTION,
   filterByOrigin,
   filterBySearch,
   filterByRepos,
@@ -163,6 +166,7 @@ export {
 export type {
   GHDetail,
   GHItem,
+  NeedsYou,
   TaskRow,
   RepoHeader,
   ShowMore,

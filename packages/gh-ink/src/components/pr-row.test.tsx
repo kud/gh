@@ -222,4 +222,41 @@ describe("PrRow", () => {
     )
     expect(frame).toContain("#123456  six digits")
   })
+
+  /*
+   * On a needs-you tab the row answers "what must be decided" rather than
+   * "what is it called": the host's one line replaces the title in the same
+   * cell. An empty decision is no decision — the title draws as before rather
+   * than a blank where the subject should be.
+   */
+  it("draws the host's decision line in place of the title when set", () => {
+    const item = pr({
+      title: "retry a declined card instead of reporting a network error",
+      needsYou: { band: "decide", decision: "Approve the migration plan" },
+    })
+    const frame = frameOf(<PrRow item={item} active={false} cols={120} />)
+    expect(frame).toContain("Approve the migration plan")
+    expect(frame).not.toContain(
+      "retry a declined card instead of reporting a network error",
+    )
+  })
+
+  it("draws the title when the decision is empty or absent", () => {
+    for (const needsYou of [undefined, { band: "decide" as const }]) {
+      const item = pr({
+        title: "retry a declined card instead of reporting a network error",
+        ...(needsYou ? { needsYou } : {}),
+      })
+      expect(
+        frameOf(<PrRow item={item} active={false} cols={120} />),
+      ).toContain("retry a declined card instead of reporting a network error")
+    }
+    const empty = pr({
+      title: "retry a declined card instead of reporting a network error",
+      needsYou: { band: "decide", decision: "" },
+    })
+    expect(frameOf(<PrRow item={empty} active={false} cols={120} />)).toContain(
+      "retry a declined card instead of reporting a network error",
+    )
+  })
 })

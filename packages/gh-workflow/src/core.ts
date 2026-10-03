@@ -47,6 +47,23 @@ export type GHDetail = {
   lastEventAt?: string
 }
 
+/**
+ * A host-supplied marker saying this row wants the viewer's eyes, and why.
+ * The package never derives it: which rows belong on a "needs you" tab and
+ * what the decision text says are the host's vocabulary — it reads its own
+ * labels, its own reviewers, its own notion of urgency — and this type is only
+ * the envelope that carries the verdict down to the layout, the row and the
+ * search below.
+ *
+ * `decide` is an item waiting on the viewer's decision, and `decision` is one
+ * plain line saying what must be decided. `merge` is work with nothing to
+ * decide that is ready for the viewer to merge. Absent `band` reads as
+ * `decide`: a row the host flagged with nothing to say about it is still
+ * waiting on somebody, and the layout must put it somewhere rather than drop
+ * it.
+ */
+export type NeedsYou = { band: "decide" | "merge"; decision?: string }
+
 export type GHItem = {
   kind: "pr" | "issue"
   number: number
@@ -119,6 +136,12 @@ export type GHItem = {
    */
   labels?: readonly string[]
   detail?: GHDetail
+  /**
+   * A host-supplied marker saying this row wants the viewer, and why — see
+   * `NeedsYou`. Optional because most tabs never set it, and a row without it
+   * lays out exactly as before.
+   */
+  needsYou?: NeedsYou
   /**
    * Where YOU stand on this row, when the host knows it per row rather than per
    * tab. Set it and the whose-move band reads it instead of inferring from the
@@ -856,6 +879,13 @@ export const bandOf = (
   return whoseMove(health, sectionId, standing, theySpokeLast, pinned, ownsRepo)
 }
 
+// The section id a host's "needs you" tab answers under. A constant rather
+// than a convention so the layout below and the host's tab spec cannot spell
+// it two ways: the layout special-cases exactly this string the way it
+// special-cases `"done"`, and anything else lays out by whose-move bands as
+// before.
+export const NEEDS_YOU_SECTION = "needs-you"
+
 // Lay out a section's GH items. The Done tab is a flat newest-first list; every
 // other tab splits into two whose-move bands, each keeping its own repo grouping
 // so the outer key stays legible inside a band. Repo headers are inserted in
@@ -884,6 +914,34 @@ export const layoutGHItems = (
   login: string,
 ): AnyItem[] => {
   if (sectionId === "done") return insertRepoHeaders(sortByRecency(items))
+
+  // The needs-you tab is laid out by the host's marker, not by whose-move:
+  // two bands in fixed order, "decide" then "merge", each with its own repo
+  // grouping like every other band. A row the host flagged without a band is
+  // waiting on somebody, so it reads as `decide` rather than falling out of
+  // both. Empty bands are omitted — a "(0)" header names a band with nothing
+  // in it — and the whose-move machinery is never consulted here, so health,
+  // standing and lastActor cannot move a row between these two.
+  if (sectionId === NEEDS_YOU_SECTION) {
+    const bands = (["decide", "merge"] as const).map((side) => ({
+      side,
+      rows: sortItems(
+        items.filter((i) => (i.needsYou?.band ?? "decide") === side),
+      ),
+    }))
+    const NEEDS_YOU_LABEL = { decide: "Decide", merge: "Merge" } as const
+    return bands
+      .filter((b) => b.rows.length > 0)
+      .flatMap(({ side, rows }) => [
+        {
+          kind: "subgroup-header" as const,
+          label: `${NEEDS_YOU_LABEL[side]} (${rows.length})`,
+          age: "",
+          indent: false,
+        },
+        ...insertRepoHeaders(rows),
+      ])
+  }
 
   const sorted = sortItems(items)
   // `unknown` sits BETWEEN the two, not after them. The bands rank claims on the
@@ -1011,7 +1069,7 @@ export const filterByOrigin = (
 
 const searchText = (i: AnyItem): string =>
   i.kind === "pr" || i.kind === "issue"
-    ? `${i.title} ${i.repo} #${i.number}`
+    ? `${i.title} ${i.repo} #${i.number}${i.needsYou?.decision ? ` ${i.needsYou.decision}` : ""}`
     : i.kind === "task"
       ? `${i.summary} ${i.key}`
       : ""

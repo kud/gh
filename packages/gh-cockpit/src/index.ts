@@ -16,6 +16,13 @@ export {
   type PromptContext,
   type PromptForms,
 } from "./prompts.js"
+export {
+  registerDecisionHooks,
+  decisionHooks,
+  type DecisionHooks,
+  type DecisionTarget,
+} from "./decision.js"
+export { DecisionBlock } from "./views/decision-block.js"
 export { detailFor } from "./views/detail.js"
 // A host registering its own CheckDrill renders inside the cockpit's frame, so it
 // needs the same chrome the built-in drills use — without this the only way to

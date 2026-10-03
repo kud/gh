@@ -26,13 +26,16 @@ export const detailFor = (ctx: DetailContext) =>
       onTyping={ctx.onTyping}
     />
   ) : (
-    // No refresh/remove/merged: IssueView has no action menu to hang them off,
-    // so passing them would type-check into a handler nothing ever calls. They
-    // belong here the day it grows the `M` menu PrView has.
+    // Refresh/remove ride along for the close key (`X`): `onRemove` drops the
+    // row the way PrView's does, closing over the full item here because
+    // IssueView only holds its subset and reports removal without handing a
+    // row back. `onMerged` stays absent — an issue never merges.
     <IssueView
       item={ctx.item}
       login={ctx.login}
       onBack={ctx.onBack}
+      onRefresh={ctx.onRefresh}
+      onRemove={() => ctx.onRemove(ctx.item)}
       registerPeel={ctx.registerPeel}
       onTyping={ctx.onTyping}
     />

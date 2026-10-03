@@ -63,6 +63,7 @@ export {
   impliedLabels,
   labelPriority,
   layoutGHItems,
+  NEEDS_YOU_SECTION,
   matchesFilter,
   maxViewStart,
   moveCursor,
