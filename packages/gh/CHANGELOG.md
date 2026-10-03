@@ -1,5 +1,12 @@
 # @kud/gh
 
+## 0.19.0
+
+### Minor Changes
+
+- 86e66de: A host can now hide repositories from the inbox entirely. A throwaway repo that integration tests open and close pull requests in used to surface on every board that read the account, and the only way to keep it out was to filter rows after the fetch, which left each search's total still counting it and its rows still taking slots that real work should have had. `excludeRepos` on `buildInboxQuery`, `buildInboxQueries` and `buildPulseQuery` now adds a `-repo:` qualifier to every search, so the hidden repo never comes back from GitHub at all and the pulse stops waking a board for changes it will not show. A name that is not an `owner/name` slug throws rather than being skipped, since a repo that silently stays visible is the failure the option exists to prevent.
+- 9e6b595: A host can now grow a first tab that answers "what needs you". The inbox query selects labels on every pull request source, exactly as it already did on issues, so a host reading a decision label off a PR row no longer pays a round trip per row to learn what the row already knew. Rows carry an optional host-supplied `needsYou` marker — the package never derives it — and the needs-you section lays itself out around it in two bands, Decide then Merge, with the decision line drawn in place of the title so the tab reads as a list of questions rather than a list of branches. Drilling in pins a Decision block under the summary, and the drill views grow the keys the moment calls for: answer posts a comment and hands follow-through to the host's `answered` hook, diff pages the PR in the viewer's pager, merge and close ask first and then do it, and ready marks a draft for review. Typing a search still finds the decision's own words.
+
 ## 0.18.0
 
 ### Minor Changes
