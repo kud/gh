@@ -433,31 +433,27 @@ export const reposInSections = (sections: Section[]): string[] =>
 /**
  * The next selectable row in `dir`, or `current` when there is none.
  *
- * A repo-header is a STOP, and a subgroup-header is not. The two look alike and
- * are not: the fence names a thing you can act on — open the checkout, copy every
- * URL under it — where a band label ("Your move") names an arrangement of rows
- * and has nothing behind it to open. Landing on the second would be a keystroke
- * spent on a row whose every key is inert.
+ * Both header kinds are STOPS. A repo-header names a thing you can act on —
+ * open the checkout, copy every URL under it — and a band header
+ * ("» Your move") does now too: `c` copies the whole band. Landing on one
+ * used to be a keystroke spent on a row whose every key was inert, which is
+ * why `moveCursor` stepped over subgroup-headers; now that the key does
+ * something there, skipping it would hide the row that says how many links
+ * the key will take.
  *
- * Unconditional in both directions, deliberately. Skipping the fence going down
- * and landing on it going up would make ↓ then ↑ end somewhere other than where
- * it started, and an arrow pair that is not its own inverse reads as the list
- * drifting rather than as a shortcut. The cost is one press per repo group; the
- * fence is also the "you have crossed into another repo" beat the eye takes
- * anyway, so the press buys orientation as well as position.
+ * Unconditional in both directions, deliberately. Skipping a header going
+ * down and landing on it going up would make ↓ then ↑ end somewhere other
+ * than where it started, and an arrow pair that is not its own inverse reads
+ * as the list drifting rather than as a shortcut. The cost is one press per
+ * header; each is also the "you have crossed into another group" beat the eye
+ * takes anyway, so the press buys orientation as well as position.
  */
 export const moveCursor = (
   items: AnyItem[],
   current: number,
   dir: 1 | -1,
 ): number => {
-  let next = current + dir
-  while (
-    next >= 0 &&
-    next < items.length &&
-    items[next].kind === "subgroup-header"
-  )
-    next += dir
+  const next = current + dir
   if (next < 0 || next >= items.length) return current
   return next
 }
@@ -666,6 +662,55 @@ export const treeUrls = (items: readonly AnyItem[], i: number): string[] => {
     if (url) urls.push(url)
   }
   return urls
+}
+
+/**
+ * Every URL under a band header (`» Your move`): the run of rows between it
+ * and the next band header, across however many repo fences that spans.
+ *
+ * The band, not the tab. Standing on `» Your move (4)` and getting every open
+ * row in the tab would hand over rows from a band you never had on screen —
+ * the same over-copy `groupUrls` refuses between fences, one level up. The
+ * count in the header is what the key promises, so the run stops where the
+ * header's own tally does.
+ */
+export const bandUrls = (items: readonly AnyItem[], i: number): string[] => {
+  const urls: string[] = []
+  for (let j = i + 1; j < items.length; j += 1) {
+    const item = items[j]
+    if (item.kind === "subgroup-header") break
+    // A collapsed row is not a gap in the band, it IS the rest of it — same
+    // reasoning as groupUrls above.
+    if (item.kind === "show-more") {
+      for (const child of item.hidden) if (child.url) urls.push(child.url)
+      continue
+    }
+    const url = (item as { url?: string }).url
+    if (url) urls.push(url)
+  }
+  return urls
+}
+
+/**
+ * What `c` copies from wherever the cursor stands: the row's own URL, the
+ * whole repo group under a fence, or the whole band under a `»` header — in
+ * display order, newline-separated by the caller.
+ *
+ * One function rather than three arms at the call site so the footer hint can
+ * name the same count the key will copy. An out-of-range index and a row with
+ * no URL both answer `[]`, and the caller treats that as "do nothing" rather
+ * than copying an empty string.
+ */
+export const copyUrls = (
+  items: readonly AnyItem[],
+  i: number,
+): string[] => {
+  const item = items[i]
+  if (!item) return []
+  if (item.kind === "repo-header") return groupUrls(items, i)
+  if (item.kind === "subgroup-header") return bandUrls(items, i)
+  const url = (item as { url?: string }).url
+  return url ? [url] : []
 }
 
 export const gapsAbove = (items: readonly AnyItem[], i: number): boolean => {
@@ -2392,11 +2437,15 @@ const ItemRow = ({
   if (item.kind === "repo-header")
     return <RepoHeaderRow repo={item.repo} gap={gap ?? false} active={active} />
 
+  // A band header is a selectable row like a fence, so it wears the same cursor
+  // in the same column: a fixed two-column cell, so standing on it shifts
+  // nothing sideways and leaving it draws byte-identical output to before.
   if (item.kind === "subgroup-header")
     return (
       <Box marginTop={gap ? 1 : 0}>
+        <Text color={colors.info}>{active ? "❯ " : "  "}</Text>
         <Text color={colors.accent} bold>
-          {"  » "}
+          {"» "}
         </Text>
         <Text bold>{item.label}</Text>
       </Box>
@@ -3466,19 +3515,12 @@ const BrowseScreen = ({
             s.items.length - 1,
           )
           if (c < 0) return [s.id, 0]
-          return [
-            s.id,
-            // Only `subgroup-header`, which is the one kind the arrows refuse to
-            // stand on — `moveCursor` skips it and nothing else. A REPO header is
-            // selectable on purpose: it opens the repo and `C` copies the group,
-            // and the footer advertises both. Stepping off it here meant that
-            // standing on a repo and pressing `r` moved you onto an issue, every
-            // single time, and the rule predated repo headers being selectable
-            // at all.
-            s.items[c]?.kind === "subgroup-header"
-              ? moveCursor(s.items, c, 1)
-              : c,
-          ]
+          // No stepping off headers here: both kinds are selectable rows — a
+          // fence opens the repo, a band header copies the band — so a cursor
+          // restored onto one is standing somewhere the keys understand.
+          // (This stepped off subgroup-headers back when the arrows refused to
+          // stand on them, and off repo-headers before that.)
+          return [s.id, c]
         }),
       ),
     )
@@ -3520,8 +3562,8 @@ const BrowseScreen = ({
     : rawSection
 
   // A new query puts the cursor on the first MATCH, not on index 0. Index 0 of a
-  // filtered tab is the band header the matches landed under, which the arrows
-  // refuse to stand on, so resetting to it left no row selected at all: ↵ and
+  // filtered tab is the band header the matches landed under, which is not
+  // itself a match, so resetting to it left no row selected at all: ↵ and
   // every row binding went nowhere until an arrow nudged the cursor onto a row.
   useEffect(() => {
     setCursors((p) => ({ ...p, [activeId]: firstSelectable(section) }))
@@ -3531,9 +3573,9 @@ const BrowseScreen = ({
   const allRepos = reposInSections(localSections)
 
   // The one cursor in this file useListCursor fits: a flat list with a uniform
-  // step. The main tree's cursor moves through moveCursor, which SKIPS header
-  // rows, so ±1 is the wrong step there — see the note on the tree's handlers.
-  // vimKeys off keeps the picker's keymap byte-for-byte what it was.
+  // step and no memory. The main tree's cursor is one entry in a per-tab map,
+  // restored by row identity across refetches — see the note on the tree's
+  // handlers. vimKeys off keeps the picker's keymap byte-for-byte what it was.
   const { cursor: repoCursor, setCursor: setRepoCursor } = useListCursor(
     allRepos.length,
     { vimKeys: false, isActive: repoPicker },
@@ -4032,12 +4074,11 @@ const BrowseScreen = ({
     }
     if (menu.handleKey(key)) return
 
-    // Not useListCursor / useTabs, and not an oversight. The cursor steps through
-    // moveCursor, which skips repo-header and subgroup-header rows, so the hook's
-    // ±1 would land on a header. And tabIdx stays a position with its own clamp
-    // while useTabs owns a tab VALUE — adopting it would add a derived index and a
-    // clamp effect on top, to replace four correct lines. The repo picker above is
-    // the fit; this is not.
+    // Not useListCursor / useTabs, and not an oversight. The cursor is one entry
+    // in a per-tab map restored by row identity across refetches, and tabIdx
+    // stays a position with its own clamp while useTabs owns a tab VALUE —
+    // adopting either would add a derived index and a clamp effect on top, to
+    // replace four correct lines. The repo picker above is the fit; this is not.
     if (key.upArrow) {
       const next = moveCursor(section.items, cursor, -1)
       const newVs = Math.min(viewStart, withHeaders(section.items, next))
@@ -4089,10 +4130,10 @@ const BrowseScreen = ({
     // that drops every header, and below the extension arm for the same reason
     // every built-in binding sits there. Deliberately the same letters a PR row
     // uses, one level up: ↵ opens the thing, o puts it in a browser, c copies
-    // its URL, C and O take everything under it. Nothing new to learn, and the
-    // block returns unconditionally — u, x, b, s and t have no meaning for a
-    // repo, and a key that quietly did nothing to the row below would be worse
-    // than one that does nothing at all.
+    // every URL under it, C and O take everything under it. Nothing new to
+    // learn, and the block returns unconditionally — u, x, b, s and t have no
+    // meaning for a repo, and a key that quietly did nothing to the row below
+    // would be worse than one that does nothing at all.
     if (activeItem?.kind === "repo-header") {
       const { repo } = activeItem
       const repoUrl = `https://github.com/${repo}`
@@ -4112,8 +4153,10 @@ const BrowseScreen = ({
         return
       }
       if (input === "c") {
-        clipboard(repoUrl)
-        showFlash(`✓ Copied URL for ${repo}`)
+        const urls = copyUrls(section.items, cursor)
+        if (urls.length === 0) return
+        clipboard(urls.join("\n"))
+        showFlash(`✓ Copied ${urls.length} link${urls.length === 1 ? "" : "s"}`)
         return
       }
       // treeUrls resolves a fence to its whole group, so C and O read exactly
@@ -4136,10 +4179,24 @@ const BrowseScreen = ({
       return
     }
 
-    // repo-header is gone from this guard because the block above consumes it
-    // whole — TS calls the arm dead, and leaving it in would read as a second
-    // line of defence that no longer exists.
-    if (!activeItem || activeItem.kind === "subgroup-header") return
+    // A band header answers for itself the way a fence does — above the guard
+    // that drops headers, and returning unconditionally. It names no repo and
+    // no single URL, so only `c` does anything here: the whole band, which is
+    // the count the header already carries.
+    if (activeItem?.kind === "subgroup-header") {
+      if (input === "c") {
+        const urls = copyUrls(section.items, cursor)
+        if (urls.length === 0) return
+        clipboard(urls.join("\n"))
+        showFlash(`✓ Copied ${urls.length} link${urls.length === 1 ? "" : "s"}`)
+      }
+      return
+    }
+
+    // Both header kinds are consumed whole by the blocks above — TS calls a
+    // leftover arm dead, and leaving one in would read as a second line of
+    // defence that no longer exists.
+    if (!activeItem) return
 
     if (key.return && activeItem.kind === "show-more") {
       setLocalSections((prev) =>
@@ -4405,10 +4462,24 @@ const BrowseScreen = ({
   })
 
   // What the strip advertises depends on where the cursor is, because on a
-  // fence half of it would be a lie: `m` opens nothing there, and the two keys
-  // that matter — open the checkout, copy the group — are exactly the ones a
-  // fixed strip would leave unnamed. A selectable row that advertises nothing is
-  // a row nobody presses.
+  // header half of it would be a lie: `m` opens nothing there, and the key
+  // that matters — copy the links under it — is exactly the one a fixed strip
+  // would leave unnamed. A selectable row that advertises nothing is a row
+  // nobody presses.
+  //
+  // How many links `c` would take from where the cursor stands, named in the
+  // strip so a header says what the key will do before it is pressed. Read off
+  // `copyUrls` rather than counted separately, so the hint and the key cannot
+  // disagree about it.
+  const headerLinks =
+    activeItem?.kind === "repo-header" ||
+    activeItem?.kind === "subgroup-header"
+      ? copyUrls(section.items, cursor).length
+      : 0
+  const headerHint: [string, string] = [
+    "c",
+    `copy ${headerLinks} link${headerLinks === 1 ? "" : "s"}`,
+  ]
   const hints: [string, string][] = railActive
     ? // The rail's own keymap while it holds focus, not the list's with a line
       // bolted on. A footer advertising `m actions` beside a cursor that cannot
@@ -4429,10 +4500,18 @@ const BrowseScreen = ({
           ["←→", "tab"],
           ["↵", "open repo"],
           ["o", "browser"],
-          ["C", "copy group"],
+          headerHint,
           ["?", "help"],
           ["q", "quit"],
         ]
+      : activeItem?.kind === "subgroup-header"
+        ? [
+            ["↑↓", "nav"],
+            ["←→", "tab"],
+            headerHint,
+            ["?", "help"],
+            ["q", "quit"],
+          ]
       : [
           ["↑↓", "nav"],
           ["←→", "tab"],

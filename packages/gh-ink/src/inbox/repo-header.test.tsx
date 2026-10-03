@@ -1,9 +1,30 @@
-import { describe, it, expect } from "vitest"
+import { describe, it, expect, vi } from "vitest"
 import { EventEmitter } from "node:events"
 import React from "react"
 import { render } from "ink"
 import { moveCursor, treeUrls, App } from "./inbox.js"
 import type { AnyItem, GHItem, Section } from "./inbox.js"
+
+// What `c` wrote to the clipboard, read off a stubbed pbcopy rather than the
+// machine's — the same stub sidebar.test.tsx uses for the rail's `c`.
+const copied: string[] = []
+vi.mock("node:child_process", async (orig) => {
+  const actual = await orig<typeof import("node:child_process")>()
+  return {
+    ...actual,
+    spawn: (cmd: string, ...rest: unknown[]) =>
+      cmd === "pbcopy"
+        ? {
+            stdin: {
+              write: (text: string) => {
+                copied.push(text)
+              },
+              end: () => {},
+            },
+          }
+        : (actual.spawn as (...a: unknown[]) => unknown)(cmd, ...rest),
+  }
+})
 
 // The repo fence used to be scenery: moveCursor stepped over it, firstSelectable
 // started past it, and every key arm returned early on it. It is a row now — you
@@ -59,10 +80,11 @@ describe("moveCursor over a repo fence", () => {
     expect(moveCursor(ROWS, 3, 1)).toBe(4)
   })
 
-  // A band label names an arrangement of rows, not a thing with anything behind
-  // it — every key would be inert there, so the keystroke would buy nothing.
-  it("still steps over a subgroup-header", () => {
-    expect(moveCursor(ROWS, 1, -1)).toBe(1)
+  // A band header is a stop like a fence: `c` copies the whole band there, so
+  // the keystroke buys the count the header already carries.
+  it("stops on a subgroup-header", () => {
+    expect(moveCursor(ROWS, 1, -1)).toBe(0)
+    expect(moveCursor(ROWS, 0, 1)).toBe(1)
   })
 
   // The reason the fence is not skipped in one direction only: ↓ then ↑ has to
@@ -156,30 +178,33 @@ const fenceLine = (frame: string): string =>
     .map((l) => l.replace(ANSI, ""))
     .find((l) => l.includes("── kud/ambre")) ?? ""
 
-describe("the fence on screen", () => {
-  const mount = () => {
-    const stdout = new FakeStdout(120, 30)
-    const stdin = new FakeStdin()
-    const instance = render(
-      <App fetcher={async () => ({ sections: SECTIONS, login: "kud" })} />,
-      {
-        stdout: stdout as never,
-        stdin: stdin as never,
-        debug: true,
-        exitOnCtrlC: false,
-        patchConsole: false,
-      },
-    )
-    return {
-      stdout,
-      stdin,
-      done: () => {
-        instance.unmount()
-        instance.cleanup()
-      },
-    }
+// One mount for every render test in this file: which rows are on screen is
+// the only thing that varies, so it is a parameter with the common case as
+// the default.
+const mount = (sections: Section[] = SECTIONS) => {
+  const stdout = new FakeStdout(120, 30)
+  const stdin = new FakeStdin()
+  const instance = render(
+    <App fetcher={async () => ({ sections, login: "kud" })} />,
+    {
+      stdout: stdout as never,
+      stdin: stdin as never,
+      debug: true,
+      exitOnCtrlC: false,
+      patchConsole: false,
+    },
+  )
+  return {
+    stdout,
+    stdin,
+    done: () => {
+      instance.unmount()
+      instance.cleanup()
+    },
   }
+}
 
+describe("the fence on screen", () => {
   // The constraint the whole change was given: unselected, the fence draws
   // exactly what it has always drawn. The cursor takes the two spaces the fence
   // already reserved, so this also pins that nothing shifted sideways.
@@ -237,7 +262,7 @@ describe("the fence on screen", () => {
 
   // A selectable row that advertises nothing is a row nobody presses — and on a
   // fence the fixed strip was actively wrong, offering `m` (which opens nothing
-  // there) over the two keys that do.
+  // there) over the key that does, which names how many links it will take.
   it("re-labels the footer for what a fence can actually do", async () => {
     const { stdout, stdin, done } = mount()
     await settle()
@@ -249,7 +274,101 @@ describe("the fence on screen", () => {
     done()
     expect(onRow).toContain("actions")
     expect(onFence).toContain("open repo")
-    expect(onFence).toContain("copy group")
+    expect(onFence).toContain("copy 2 links")
     expect(onFence).not.toContain("actions")
+  })
+})
+
+// A band header is selectable the way a fence is, so it is pinned the same
+// way: what it looks like under the cursor, what the footer promises there,
+// and what `c` hands over.
+describe("the band header on screen", () => {
+  const BAND_SECTIONS: Section[] = [
+    {
+      id: "open",
+      label: "Open",
+      items: [
+        band,
+        fence("kud/ambre"),
+        pr(1, "kud/ambre"),
+        pr(2, "kud/ambre"),
+      ],
+    },
+  ]
+
+  const mountBand = () => mount(BAND_SECTIONS)
+
+  const bandLine = (frame: string): string =>
+    frame
+      .split("\n")
+      .map((l) => l.replace(ANSI, ""))
+      .find((l) => l.includes("»")) ?? ""
+
+  // The cursor starts on the first row, two presses up the list: fence, then
+  // the band. Unselected the band draws what it always drew — the cursor cell
+  // is the two spaces that were already there.
+  it("takes the cursor and keeps its shape", async () => {
+    const { stdout, stdin, done } = mountBand()
+    await settle()
+    await settle()
+    expect(bandLine(stdout.lastFrame())).toMatch(/ {2}» Your move/)
+    stdin.press(UP)
+    await settle()
+    stdin.press(UP)
+    await settle()
+    const line = bandLine(stdout.lastFrame())
+    done()
+    expect(line).toContain("❯")
+    expect(line).toContain("» Your move")
+  })
+
+  it("promises the band's link count in the footer", async () => {
+    const { stdout, stdin, done } = mountBand()
+    await settle()
+    await settle()
+    stdin.press(UP)
+    await settle()
+    stdin.press(UP)
+    await settle()
+    const onBand = stdout.lastFrame().replace(ANSI, "")
+    done()
+    expect(onBand).toContain("copy 2 links")
+    expect(onBand).not.toContain("actions")
+  })
+
+  it("copies the whole band on `c`, newline-separated", async () => {
+    copied.length = 0
+    const { stdout, stdin, done } = mountBand()
+    await settle()
+    await settle()
+    stdin.press(UP)
+    await settle()
+    stdin.press(UP)
+    await settle()
+    stdin.press("c")
+    await settle()
+    const frame = stdout.lastFrame().replace(ANSI, "")
+    done()
+    expect(copied).toEqual([
+      "https://github.com/kud/ambre/pull/1\nhttps://github.com/kud/ambre/pull/2",
+    ])
+    expect(frame).toContain("✓ Copied 2 links")
+  })
+
+  it("copies the group on `c` from the fence", async () => {
+    copied.length = 0
+    const { stdout, stdin, done } = mountBand()
+    await settle()
+    await settle()
+    stdin.press(UP)
+    await settle()
+    stdin.press("c")
+    await settle()
+    const frame = stdout.lastFrame().replace(ANSI, "")
+    done()
+    expect(copied).toEqual([
+      "https://github.com/kud/ambre/pull/1\nhttps://github.com/kud/ambre/pull/2",
+    ])
+    expect(frame).toContain("✓ Copied 2 links")
   })
 })
