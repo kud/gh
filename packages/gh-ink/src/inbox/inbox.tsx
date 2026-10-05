@@ -65,6 +65,13 @@ import {
 } from "./diff.js"
 import type { Transient } from "./diff.js"
 import {
+  applyOverrides,
+  failedOverrides,
+  failureNotice,
+  pruneOverrides,
+} from "./overrides.js"
+import type { Override } from "./overrides.js"
+import {
   SidePanel,
   railWidth,
   railsOf,
@@ -291,7 +298,39 @@ export type JiraTransition = {
 export type JiraAvailableTransition = {
   id: string
   name: string
-  to: { name: string }
+  /**
+   * The status the transition lands on. `category` is Jira's status category
+   * (`new`, `indeterminate`, `done`) where the host has it — the one field a
+   * `tabForStatus` can map without knowing every workflow's status names.
+   */
+  to: { name: string; category?: string }
+}
+
+/**
+ * Which tab a ticket belongs in once it lands on `to`, as the host lays its
+ * tabs out — the section id, or null when the ticket leaves the board or the
+ * host cannot say. Only the host knows: one board files by status category,
+ * another by a status-to-column table, and the inbox has neither.
+ *
+ * Supplying it makes a move optimistic: the row goes to that tab the moment
+ * the move is chosen instead of at the next fetch. Null keeps the move
+ * pessimistic, exactly as it is without the prop — a row guessed off the board
+ * that turns out to still be on it is worse than one that waits for the fetch.
+ */
+export type TabForStatus = (to: {
+  name: string
+  category?: string
+}) => string | null
+
+/**
+ * What a move hands back when the screen took it optimistically: the request's
+ * two possible answers, reported so the pending patch can stop showing `◌` or
+ * be marked failed. Absent when the move was not taken optimistically, and the
+ * caller falls back to its own flashes.
+ */
+export type OptimisticHandle = {
+  settled: () => void
+  failed: (err: unknown) => void
 }
 
 /**
@@ -344,6 +383,8 @@ export type OrderedJiraMove = {
   label: string
   transition: string
   resolutions?: string[]
+  /** Where the workflow says the transition lands — what an optimistic move places the row by. */
+  to?: { name: string; category?: string }
 }
 
 /**
@@ -366,14 +407,14 @@ export const orderJiraMoves = (
     known.add(live.name)
     ordered.push(
       resolutions && resolutions.length > 0
-        ? { label, transition: live.name, resolutions }
-        : { label, transition: live.name },
+        ? { label, transition: live.name, resolutions, to: live.to }
+        : { label, transition: live.name, to: live.to },
     )
   }
   const rest = available
     .filter((t) => !known.has(t.name))
     .sort((a, b) => a.name.localeCompare(b.name))
-    .map((t) => ({ label: t.name, transition: t.name }))
+    .map((t) => ({ label: t.name, transition: t.name, to: t.to }))
   return [...ordered, ...rest]
 }
 
@@ -384,14 +425,40 @@ export const orderJiraMoves = (
  * plus one line the static rows never needed: a successful move drops the
  * ticket's cached transitions, so reopening the submenu re-asks the workflow
  * instead of re-offering the move just taken.
+ *
+ * `optimistic` is asked at the moment a move is chosen, with where it lands.
+ * A handle back means the screen has already put the row there, so the
+ * request's answer goes to the handle — and a failure goes ONLY there: the
+ * failed patch has its own sticky line, and a 1.5s flash naming the same
+ * failure would be a second voice saying it less well.
  */
 export const jiraMoveActions = (
   ticket: string,
   moves: OrderedJiraMove[],
   showFlash: (msg: string) => void,
   onActed?: () => void,
-): Action[] =>
-  moves.map(({ label, transition, resolutions }) =>
+  optimistic?: (to: {
+    name: string
+    category?: string
+  }) => OptimisticHandle | undefined,
+): Action[] => {
+  const execute = (
+    to: OrderedJiraMove["to"],
+    request: () => Promise<unknown>,
+    done: string,
+    failed: string,
+  ) => {
+    const held = to ? optimistic?.(to) : undefined
+    void request()
+      .then(() => {
+        invalidateJiraMoves(ticket)
+        held?.settled()
+        showFlash(done)
+        onActed?.()
+      })
+      .catch((err) => (held ? held.failed(err) : showFlash(failed)))
+  }
+  return moves.map(({ label, transition, resolutions, to }) =>
     resolutions && resolutions.length > 0
       ? {
           label,
@@ -402,13 +469,13 @@ export const jiraMoveActions = (
             hint: "",
             run: () => {
               showFlash(`⋯ ${label} · ${resolution}…`)
-              void quietly`jira issue move ${ticket} ${transition} --resolution ${resolution}`
-                .then(() => {
-                  invalidateJiraMoves(ticket)
-                  showFlash(`✓ ${label} · ${resolution}`)
-                  onActed?.()
-                })
-                .catch(() => showFlash(`✗ Move to ${label} failed`))
+              execute(
+                to,
+                () =>
+                  quietly`jira issue move ${ticket} ${transition} --resolution ${resolution}`,
+                `✓ ${label} · ${resolution}`,
+                `✗ Move to ${label} failed`,
+              )
             },
           })),
         }
@@ -417,16 +484,16 @@ export const jiraMoveActions = (
           hint: "",
           run: () => {
             showFlash(`⋯ Moving to ${label}…`)
-            void quietly`jira issue move ${ticket} ${transition}`
-              .then(() => {
-                invalidateJiraMoves(ticket)
-                showFlash(`✓ Moved to ${label}`)
-                onActed?.()
-              })
-              .catch(() => showFlash(`✗ Move to ${label} failed`))
+            execute(
+              to,
+              () => quietly`jira issue move ${ticket} ${transition}`,
+              `✓ Moved to ${label}`,
+              `✗ Move to ${label} failed`,
+            )
           },
         },
   )
+}
 
 /** The single dim row a move submenu shows while the hook is in flight. */
 export const jiraLoadingActions = (): Action[] => [
@@ -451,6 +518,10 @@ export const openJiraMoves = (deps: {
   isOpen: () => boolean
   showFlash: (msg: string) => void
   onActed?: () => void
+  optimistic?: (to: {
+    name: string
+    category?: string
+  }) => OptimisticHandle | undefined
 }): void => {
   const {
     ticket,
@@ -461,6 +532,7 @@ export const openJiraMoves = (deps: {
     isOpen,
     showFlash,
     onActed,
+    optimistic,
   } = deps
   // An empty answer still earns a row: `open([])` is a deliberate no-op (see
   // useActionMenu), so opening nothing would leave the loading row — or, on a
@@ -469,7 +541,7 @@ export const openJiraMoves = (deps: {
     const ordered = orderJiraMoves(moves, configured)
     open(
       ordered.length > 0
-        ? jiraMoveActions(ticket, ordered, showFlash, onActed)
+        ? jiraMoveActions(ticket, ordered, showFlash, onActed, optimistic)
         : [
             {
               label: "No transitions available",
@@ -2679,6 +2751,18 @@ const NO_HOLDS: Map<string, number> = new Map()
 // Held on its last frame it says one thing, once. A departure resting on `·` is
 // the row admitting it has gone, which is the reading that was wrong for the tab
 // mark (see PULSE_SETTLED_FRAME) and is exactly right here.
+// Dimmed in the transit cell while a patched row waits on its request. An
+// open circle because nothing has happened yet — the ramps fill and empty, and
+// this is the frame before either.
+const PENDING_GLYPH = "\u25CC"
+
+/**
+ * How long the failure line stands in the footer before it steps aside for
+ * the key hints. Longer than a flash, because it is the one message here that
+ * asks for a keypress; the failed row itself stays put whatever this says.
+ */
+export const FAILURE_NOTICE_MS = 8000
+
 const TRANSIT_OUT_FRAMES = ["◉", "◎", "○", "·"]
 const TRANSIT_IN_FRAMES = ["·", "○", "◎", "◉"]
 // Reinforcement only. NEW / GONE / UPDATED below are the actual signal, for the
@@ -2798,6 +2882,7 @@ const ItemRow = ({
   merged,
   transient: refreshMark,
   leaving,
+  pending,
   transitAt,
   prefix = "",
   parent,
@@ -2860,6 +2945,8 @@ const ItemRow = ({
   transient?: Transient
   /** You just closed it, or removed yourself from it: on its way out. */
   leaving?: boolean
+  /** Patched ahead of the server, which has not answered yet. */
+  pending?: boolean
   /**
    * When THIS row's transit began, so its ramp can play once from there.
    *
@@ -2961,7 +3048,12 @@ const ItemRow = ({
     // reason the GitHub row puts it in the health cell: every key and title on
     // screen is aligned off this column, so a marker that appears and vanishes
     // would shift the very row being watched.
-    const transitIcon = !transient
+    // Pending outranks the ramp. The ramp says where the row went; `◌` says
+    // the server has not yet agreed it went anywhere, which is the one thing
+    // the reader cannot otherwise tell from a row that simply moved.
+    const transitIcon = pending
+      ? PENDING_GLYPH
+      : !transient
       ? " "
       : isDeparture(transient)
       ? (TRANSIT_OUT_FRAMES[rampAt(TRANSIT_OUT_FRAMES.length)] as string)
@@ -3014,9 +3106,13 @@ const ItemRow = ({
             fixed-width either way, so nothing shifts when a ticket gains or
             loses its last PR. */}
         <Text dimColor>{parent ? "┬ " : "  "}</Text>
-        <Text bold color={transient ? TRANSIT_COLOUR[transient] : undefined}>
-          {transitIcon + " "}
-        </Text>
+        {pending ? (
+          <Text dimColor>{transitIcon + " "}</Text>
+        ) : (
+          <Text bold color={transient ? TRANSIT_COLOUR[transient] : undefined}>
+            {transitIcon + " "}
+          </Text>
+        )}
         {/* The host's mark — a priority arrow — in its own fixed cell, never
             folded into the transit cell: transit is refresh choreography that
             is blank between refreshes, and a mark that vanished for the length
@@ -3635,6 +3731,7 @@ export const HelpModal = ({
     ["/", "search"],
     ["f", "filter by repo"],
     ["r", "refresh"],
+    ["w", "restore a change that failed"],
     ...extensionLegend(extensions),
     ["?", "this help"],
     ["q", "quit"],
@@ -3940,6 +4037,10 @@ const BrowseScreen = ({
   onTabChange,
   sidebar,
   liveLabel,
+  optimisticMove,
+  pendingKeys,
+  failure,
+  onRestore,
 }: {
   brand: string
   sections: Section[]
@@ -4067,6 +4168,24 @@ const BrowseScreen = ({
   // once wired, undefined for no strip at all.
   stripState?: StripStatusState
   stripLabel?: string
+  /**
+   * Take a ticket move optimistically: the host patches its rows and hands back
+   * where to report the answer, or undefined to leave the move pessimistic.
+   * See `TabForStatus`.
+   */
+  optimisticMove?: (
+    task: TaskRow,
+    to: { name: string; category?: string },
+  ) => OptimisticHandle | undefined
+  /** Rows whose patch is still waiting on its request, by row key — drawn `◌`. */
+  pendingKeys?: ReadonlySet<string>
+  /**
+   * The failure line, and which failure it currently names — the sequence is
+   * what tells a new failure from the one already dismissed.
+   */
+  failure?: { notice: string; seq: number }
+  /** `w`: restore the newest failed patch. */
+  onRestore?: () => void
 }) => {
   const { rows } = useWindowSize()
   // Both directions are the same filter with `keep` flipped, so the host supplies
@@ -4330,6 +4449,20 @@ const BrowseScreen = ({
     flashTimer.current = setTimeout(() => setFlash(null), 1500)
   }
 
+  // The failure line takes the same slot and outranks the flash, because it
+  // carries a way back the flash never does. It stays until `w`, `esc` or
+  // FAILURE_NOTICE_MS — dismissed by the sequence of the failure it showed, so a
+  // NEW failure, or the next one surfacing after a `w`, shows again rather
+  // than inheriting the dismissal.
+  const [dismissedSeq, setDismissedSeq] = useState<number | null>(null)
+  const noticeUp = !!failure && dismissedSeq !== failure.seq
+  useEffect(() => {
+    if (!failure) return
+    const seq = failure.seq
+    const timer = setTimeout(() => setDismissedSeq(seq), FAILURE_NOTICE_MS)
+    return () => clearTimeout(timer)
+  }, [failure?.seq])
+
   // Which tabs are still holding news nobody has read. The marker itself lives
   // on the row, in a tab that may not be open — so without this the hold keeps
   // its promise perfectly and nothing ever tells you to go and collect on it.
@@ -4400,6 +4533,9 @@ const BrowseScreen = ({
     // it too, so this double-closes by one idempotent state update rather than
     // buying surgery on a two-caller hook.
     if (menu.actions !== null) return menu.close(), true
+    // Dismissing, not restoring: the row stays where the failed patch put it,
+    // and `w` still restores it with the line gone.
+    if (noticeUp && failure) return setDismissedSeq(failure.seq), true
     if (search != null) return filter.clear(), true
     if (repoFilter.size > 0) return setRepoFilter(new Set()), true
     return false
@@ -4586,6 +4722,7 @@ const BrowseScreen = ({
       isOpen: () => menuActionsRef.current !== null,
       showFlash,
       onActed,
+      optimistic: optimisticMove ? (to) => optimisticMove(task, to) : undefined,
     })
   }
 
@@ -4699,6 +4836,14 @@ const BrowseScreen = ({
     // through to the list below so you can walk the matches without leaving
     // the query. `/` itself is the hook's too, in both modes.
     if (searchInput && !key.upArrow && !key.downArrow) return
+    // Above the rail and every row binding, because it is about neither: it
+    // answers the failure line, wherever focus happens to be. Live only while
+    // a failed patch exists, so an extension that claims `w` keeps it the
+    // rest of the time.
+    if (input === "w" && failure && onRestore) {
+      onRestore()
+      return
+    }
     if (input === "f" && allRepos.length > 0) {
       setRepoCursor(0)
       setRepoPicker(true)
@@ -5661,6 +5806,7 @@ const BrowseScreen = ({
                       !!leavingUrls?.includes(item.url)
                     }
                     transient={transientOf(transients, item, section.id)}
+                    pending={!!pendingKeys?.has(keyOf(item) ?? "")}
                     transitAt={
                       "url" in item ? transitSince?.get(item.url) : undefined
                     }
@@ -5738,7 +5884,9 @@ const BrowseScreen = ({
       </Box>
 
       <Box marginTop={1}>
-        {flash ? (
+        {noticeUp && failure ? (
+          <Text color={colors.error}>{failure.notice}</Text>
+        ) : flash ? (
           <Text color={colors.success}>{flash}</Text>
         ) : overlayOpen ? (
           // The overlay's own verbs, plus the way back. `page="nested"` is what
@@ -5857,6 +6005,7 @@ export const App = ({
   jiraSetupHint,
   jiraTransitions,
   jiraTransitionsFor,
+  tabForStatus,
   hasCiStatus,
   ciJob,
   ciFetcher,
@@ -5934,6 +6083,12 @@ export const App = ({
   // The live transitions for a ticket — see BrowseScreen. Threaded straight
   // through to it; App never calls it, it only carries it.
   jiraTransitionsFor?: JiraTransitionsFor
+  /**
+   * Which tab a moved ticket lands in — see TabForStatus. Supplying it makes
+   * moves through `jiraTransitionsFor` optimistic; leaving it out keeps every
+   * move waiting on the next fetch, as before.
+   */
+  tabForStatus?: TabForStatus
   // Reserves a standing CI status row above everything else — loading until
   // the first fetch resolves, then ready/error — so callers that don't wire a
   // job (home's cockpit) see no row at all rather than one that never fills in.
@@ -6128,12 +6283,17 @@ export const App = ({
      and leave you to spot the difference against a frame the terminal had
      already scrolled away — the reason the manual gate felt like a cost rather
      than a control. */
-  const showData = (sections: Section[], login: string) => {
+  const showData = (sections: Section[], login: string, fetched = true) => {
     const before = displayedSections.current
     displayedSections.current = sections
     displayedKey.current = signatureOf(sections)
-    setPending(null)
-    setFetchedAt(Date.now())
+    // A patch is not a fetch. It must not stamp the list as fresh, and it must
+    // not discard a fetch still waiting behind `r` — that one has the patch
+    // laid over it separately, in `hold`.
+    if (fetched) {
+      setPending(null)
+      setFetchedAt(Date.now())
+    }
 
     // First paint has nothing to have changed FROM. Every row is technically
     // new and flagging them all says nothing, so it opens quiet.
@@ -6294,7 +6454,7 @@ export const App = ({
     return known.remaining >= Math.max(known.cost, 1) * 2
   }
 
-  const revalidate = (manual = false) => {
+  const revalidate = (manual = false, apply = false) => {
     // The FIRST fetch is never gated, whatever the budget. There is nothing on
     // screen to preserve yet, and declining it strands the app on "loading"
     // with no rows, no error and no way forward — the pause notice renders in
@@ -6332,7 +6492,7 @@ export const App = ({
         setFetchedAt(Date.now())
         setRefreshError(null)
         if (hasCiStatus) applyCiStatus(fresh.ciStatus ?? null)
-        receive(fresh)
+        receive(fresh, apply)
       })
       .catch((err) => {
         setRefreshing(false)
@@ -6359,8 +6519,29 @@ export const App = ({
    * two must behave identically: a result adopted from disk still has to pass
    * the manual-apply gate rather than reshuffling the list under you.
    */
-  const receive = (fresh: { sections: Section[]; login: string }) => {
+  const receive = (
+    truth: { sections: Section[]; login: string },
+    apply = false,
+  ) => {
+    // The server's answer first decides which patches it has caught up with,
+    // then wears the rest. Everything below — the gate, the diff, the marks —
+    // sees only the patched list, which is how a fetch that predates a move
+    // cannot narrate the row bouncing back.
+    overrides.current = pruneOverrides(
+      overrides.current,
+      truth.sections,
+      Date.now(),
+    )
+    setOverrideRev((n) => n + 1)
+    const fresh = {
+      ...truth,
+      sections: applyOverrides(truth.sections, overrides.current),
+    }
     const freshKey = signatureOf(fresh.sections)
+    if (apply && displayedKey.current) {
+      showData(fresh.sections, fresh.login)
+      return
+    }
     if (!displayedKey.current) {
       if (fresh.sections.length === 0) {
         setState({ phase: "empty" })
@@ -6386,6 +6567,110 @@ export const App = ({
   const applyOrRefresh = () => {
     if (pending) showData(pending.sections, pending.login)
     else revalidate(true)
+  }
+
+  /*
+   * Patches the reader made ahead of the server, keyed by row. A ref because
+   * `receive` reads it from callbacks that closed over an older render; the
+   * revision is only there to repaint what is derived from it — the `◌` rows
+   * and the failure line.
+   */
+  const overrides = useRef<Map<string, Override>>(new Map())
+  const [overrideRev, setOverrideRev] = useState(0)
+  const failureSeq = useRef(0)
+  const pendingKeys = useMemo(
+    () =>
+      new Set(
+        [...overrides.current]
+          .filter(([, o]) => o.phase === "inflight")
+          .map(([key]) => key),
+      ),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [overrideRev],
+  )
+  const failure = useMemo(() => {
+    const failed = failedOverrides(overrides.current)
+    const notice = failureNotice(failed)
+    const seq = failed[0]?.[1].failure?.seq
+    return notice && seq != null ? { notice, seq } : undefined
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [overrideRev])
+
+  /*
+   * Lay a new patch over what is on screen, and over a fetch waiting behind
+   * `r` if there is one — applying that later must not undo the move. Laid
+   * over the DISPLAYED list rather than a remembered fetch because every patch
+   * names an end state, so laying one twice is the same as laying it once.
+   */
+  const hold = (key: string, override: Override): OptimisticHandle => {
+    overrides.current = new Map(overrides.current).set(key, override)
+    setOverrideRev((n) => n + 1)
+    const one = new Map([[key, override]])
+    if (state.phase === "browse")
+      showData(
+        applyOverrides(displayedSections.current, one),
+        state.login,
+        false,
+      )
+    setPending((p) =>
+      p ? { ...p, sections: applyOverrides(p.sections, one) } : p,
+    )
+    // Answers land on THIS patch only. A newer move on the same row has
+    // replaced it in the map, and a late answer from the older request is not
+    // news about the newer one.
+    const answer = (next: Partial<Override>) => {
+      if (overrides.current.get(key) !== override) return
+      overrides.current = new Map(overrides.current).set(key, {
+        ...override,
+        ...next,
+      })
+      setOverrideRev((n) => n + 1)
+    }
+    return {
+      // Answered yes: only now does the hold clock matter — see OVERRIDE_HOLD_MS.
+      settled: () => answer({ phase: "sent", since: Date.now() }),
+      failed: (err) =>
+        answer({
+          phase: "failed",
+          failure: { reason: explainGhAction(err), seq: ++failureSeq.current },
+        }),
+    }
+  }
+
+  const optimisticMove = tabForStatus
+    ? (
+        task: TaskRow,
+        to: { name: string; category?: string },
+      ): OptimisticHandle | undefined => {
+        const key = keyOf(task)
+        const toSection = tabForStatus(to)
+        if (!key || !toSection) return undefined
+        return hold(key, {
+          patch: { kind: "move", toSection, fields: { status: to.name } },
+          action: "move",
+          label: task.ticket ?? task.key,
+          since: Date.now(),
+          phase: "inflight",
+        })
+      }
+    : undefined
+
+  /*
+   * `w`: drop the newest failed patch and ask the server where the row really
+   * is. Never a replay of the list from before the action — that list is as
+   * old as the action, and anything else that moved meanwhile would move back
+   * with it. Applied straight through rather than parked behind `r`: the
+   * reader asked for exactly this list, so the gate has nothing to protect.
+   */
+  const restore = () => {
+    const newest = failedOverrides(overrides.current)[0]
+    if (!newest) return
+    const next = new Map(overrides.current)
+    next.delete(newest[0])
+    overrides.current = next
+    setOverrideRev((n) => n + 1)
+    if (cacheKey) invalidateCache(cacheKey)
+    revalidate(true, true)
   }
 
   /* Drop the cache the instant a mutation lands, then refresh once GitHub has
@@ -6789,6 +7074,10 @@ export const App = ({
         jiraSetupHint={jiraSetupHint}
         jiraTransitions={jiraTransitions}
         jiraTransitionsFor={jiraTransitionsFor}
+        optimisticMove={optimisticMove}
+        pendingKeys={pendingKeys}
+        failure={failure}
+        onRestore={restore}
         onRefresh={applyOrRefresh}
         onActed={onActed}
         onSettled={onSettled}
