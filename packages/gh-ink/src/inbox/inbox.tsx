@@ -1454,7 +1454,7 @@ export const selectionBackground = (
   backdropped: boolean,
 ): string | undefined => (active && !backdropped ? SELECTION_BG : undefined)
 
-export const TICKET_KEY_COLOUR = "#FFCB6B"
+export const TICKET_KEY_COLOUR = colors.ticket
 
 /**
  * What the task key wears: November's type yellow, bold, on every row. A
@@ -4235,10 +4235,11 @@ const BrowseScreen = ({
   // held here rather than in the palette because the rows are DERIVED from it
   // — a ticket key becomes two verbs — and the derivation is this screen's.
   const [palette, setPalette] = useState<string | null>(null)
-  // The search, as ink-ui's `useFilterMode`: `/` types, `↵` keeps the filter
-  // and hands the letter keys back as hotkeys, `/` again goes back into the
-  // term, `esc` clears it. Extracted from this screen on 2026-09-30 so every
-  // @kud TUI filters the same way. Stood down under every overlay, where `/`
+  // The search, as ink-ui's `useFilterMode`: `/` types, `↵` or `esc` keeps the
+  // filter and hands the letter keys back as hotkeys, `/` again goes back into
+  // the term, `⌃u` empties it, and `esc` on a kept filter clears it through
+  // the peel, so two presses clear it from the field. Extracted from this
+  // screen on 2026-09-30 so every @kud TUI filters the same way. Stood down under every overlay, where `/`
   // is not a search — the legend dismisses on any key, the repo picker and the
   // launcher own their own keys.
   const filter = useFilterMode({

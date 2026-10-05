@@ -10,7 +10,7 @@ import { colors } from "@kud/ink-ui"
 // field that takes keys and a filter that merely stands), but a piped frame
 // carries no colour and a test frame carries no escape codes, so the kept
 // state needed its own WORDS as well as its own tint: `filtered · keys
-// active` says the letters are hotkeys again, where `↑↓ move · ↵ keep` said
+// active` says the letters are hotkeys again, where `↑↓ move · ↵/esc done` says
 // they type. The magnifier is the nerd-font half of the same distinction —
 // text mode keeps the `/` the keys contract already names.
 //
@@ -55,6 +55,6 @@ export const searchBarState = ({
   glyphColor: typing ? colors.info : colors.muted,
   caret: typing,
   hints: typing
-    ? "↑↓ move · ↵ keep · esc clear"
+    ? "↑↓ move · ↵/esc done · ⌃u clear"
     : "filtered · keys active · esc clear",
 })

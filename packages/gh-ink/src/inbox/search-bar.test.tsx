@@ -149,7 +149,7 @@ describe("searchBarState", () => {
 
   it("words the kept state as a standing filter, not an open field", () => {
     expect(searchBarState({ typing: true, nerd: false }).hints).toBe(
-      "↑↓ move · ↵ keep · esc clear",
+      "↑↓ move · ↵/esc done · ⌃u clear",
     )
     expect(searchBarState({ typing: false, nerd: false }).hints).toBe(
       "filtered · keys active · esc clear",
@@ -168,7 +168,7 @@ describe("the search bar while typing", () => {
     t.done()
     expect(bar).toContain("/ fix")
     expect(bar).toContain("▏")
-    expect(bar).toContain("↑↓ move · ↵ keep · esc clear")
+    expect(bar).toContain("↑↓ move · ↵/esc done · ⌃u clear")
     expect(bar).toContain("2 matches")
   })
 
@@ -181,8 +181,9 @@ describe("the search bar while typing", () => {
     for (const ch of "fix") await t.press(ch)
     const bar = t.barLine()
     t.done()
-    expect(bar).toContain("\uF422")
-    expect(bar).not.toContain("/")
+    // The head, not any slash: the typing hints carry one in `↵/esc`.
+    expect(bar).toContain("\uF422 fix")
+    expect(bar).not.toContain("/ fix")
     expect(bar).toContain("▏")
     expect(bar).toContain("2 matches")
   })
@@ -219,5 +220,62 @@ describe("the search bar with a kept filter", () => {
     expect(bar).not.toContain("▏")
     expect(bar).toContain("filtered · keys active · esc clear")
     expect(bar).toContain("2 matches")
+  })
+})
+
+/*
+ * ESC LEAVES THE FIELD AND KEEPS THE FILTER, as ↵ does. It used to clear the
+ * term on the way out, so a reflexive esc to get the hotkeys back threw away
+ * the query it had just narrowed to. Clearing is now two steps: `⌃u` empties
+ * the term inside the field, and esc on a kept filter is the inbox's peel —
+ * the bottom layer, after anything pushed above it — so esc twice clears a
+ * filter from the field.
+ */
+const ESC = "\u001b"
+const CTRL_U = "\u0015"
+
+describe("esc and ⌃u in the search bar", () => {
+  it("keeps the filter on esc rather than clearing it", async () => {
+    const t = mount()
+    await settle()
+    await settle()
+    await t.press("/")
+    for (const ch of "fix") await t.press(ch)
+    await t.press(ESC)
+    const bar = t.barLine()
+    t.done()
+    expect(bar).toContain("/ fix")
+    expect(bar).not.toContain("▏")
+    expect(bar).toContain("filtered · keys active · esc clear")
+    expect(bar).toContain("2 matches")
+  })
+
+  it("clears the kept filter on a second esc, through the peel", async () => {
+    const t = mount()
+    await settle()
+    await settle()
+    await t.press("/")
+    for (const ch of "fix") await t.press(ch)
+    await t.press(ESC)
+    const kept = t.barLine()
+    await t.press(ESC)
+    const cleared = t.barLine()
+    t.done()
+    expect(kept).toContain("/ fix")
+    expect(cleared).toBe("")
+  })
+
+  it("empties the term on ⌃u and stays in the field", async () => {
+    const t = mount()
+    await settle()
+    await settle()
+    await t.press("/")
+    for (const ch of "fix") await t.press(ch)
+    await t.press(CTRL_U)
+    const bar = t.barLine()
+    t.done()
+    expect(bar).not.toContain("fix")
+    expect(bar).toContain("▏")
+    expect(bar).toContain("↑↓ move · ↵/esc done · ⌃u clear")
   })
 })

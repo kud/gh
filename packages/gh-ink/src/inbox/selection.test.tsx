@@ -57,10 +57,13 @@ describe("selectionBackground", () => {
 describe("taskKeyStyle", () => {
   /*
    * Exact equality on purpose: bold yellow on every row, unlike the PR number,
-   * so a stray prop breaks the shape.
+   * so a stray prop breaks the shape. The yellow is ink-ui's `ticket` token, so
+   * every @kud TUI draws a key alike, and never the PR number's orange.
    */
   it("wears bold November yellow on every row", () => {
-    expect(taskKeyStyle()).toEqual({ color: TICKET_KEY_COLOUR, bold: true })
+    expect(TICKET_KEY_COLOUR).toBe(colors.ticket)
+    expect(TICKET_KEY_COLOUR).not.toBe(colors.pr)
+    expect(taskKeyStyle()).toEqual({ color: colors.ticket, bold: true })
   })
 })
 
