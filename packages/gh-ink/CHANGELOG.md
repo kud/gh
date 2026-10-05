@@ -1,5 +1,11 @@
 # @kud/gh-ink
 
+## 0.69.2
+
+### Patch Changes
+
+- f7f019e: Ticket keys render in info blue so they read apart from PR numbers.
+
 ## 0.69.1
 
 ### Patch Changes

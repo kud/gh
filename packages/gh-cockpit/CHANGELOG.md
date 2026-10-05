@@ -1,5 +1,13 @@
 # @kud/gh-cockpit
 
+## 0.11.5
+
+### Patch Changes
+
+- f7f019e: Ticket keys render in info blue so they read apart from PR numbers.
+- Updated dependencies [f7f019e]
+  - @kud/gh-ink@0.69.2
+
 ## 0.11.4
 
 ### Patch Changes
