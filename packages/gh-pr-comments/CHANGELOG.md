@@ -1,5 +1,14 @@
 # @kud/gh-pr-comments
 
+## 0.1.125
+
+### Patch Changes
+
+- 923462b: Every package moves to `@kud/ink-ui` 0.33.0 together. A host that also draws with ink-ui at that version — the Jira board does — was loading a second copy beside these packages' 0.31.0, and two copies of the component library in one process configure one instance and read the other. The skeleton rows also pick up 0.33.0's shimmer.
+- Updated dependencies [923462b]
+- Updated dependencies [28ead82]
+  - @kud/gh-ink@0.66.0
+
 ## 0.1.124
 
 ### Patch Changes
