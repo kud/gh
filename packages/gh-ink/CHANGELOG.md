@@ -1,5 +1,11 @@
 # @kud/gh-ink
 
+## 0.70.0
+
+### Minor Changes
+
+- a928dff: Ticket keys are bold November purple. `taskKeyStyle` no longer takes the active flag.
+
 ## 0.69.4
 
 ### Patch Changes
