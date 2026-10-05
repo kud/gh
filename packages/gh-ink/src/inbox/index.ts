@@ -64,6 +64,8 @@ export {
   type ShowLess,
   type TaskRow,
   type JiraTransition,
+  type JiraAvailableTransition,
+  type JiraTransitionsFor,
   type CiStatus,
   type CiStatusState,
   type StripStatusState,

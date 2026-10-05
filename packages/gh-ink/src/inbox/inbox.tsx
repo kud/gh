@@ -239,6 +239,10 @@ export type Action = {
   // only when ink-ui's `getIconMode()` is `"nerd"` — in text mode the column
   // goes away entirely, so the label always says it alone.
   icon?: string
+  // A display-only tone for synthetic rows (the move submenu's loading and
+  // error states), deliberately beside `group` rather than in it: `group`
+  // drives separators and `menuTone`, and a loading row must change neither.
+  tone?: "dim" | "error"
 }
 
 // One row of an open menu: an action, or the blank row between two groups.
@@ -264,6 +268,238 @@ export type JiraTransition = {
   /** Offered as a second step when the transition asks for a resolution. */
   resolutions?: string[]
 }
+
+/**
+ * One transition the ticket's workflow currently allows, as the host resolved
+ * it — the shape `jira issue move KEY --json` reports, trimmed to what the
+ * menu needs. `id` is carried so a future executor that can address a
+ * transition directly has it; today's `jira issue move` takes only the NAME,
+ * so execution passes `name` verbatim and `id` rides along unused.
+ */
+export type JiraAvailableTransition = {
+  id: string
+  name: string
+  to: { name: string }
+}
+
+/**
+ * Resolve the live transitions for a ticket, called lazily when its move
+ * submenu opens — never at board fetch, where one call per visible ticket
+ * would spend the Jira quota the board just spent. A host without one keeps
+ * the static `jiraTransitions` list exactly as before.
+ */
+export type JiraTransitionsFor = (
+  ticket: string,
+) => Promise<JiraAvailableTransition[]>
+
+// The session's live-transition cache, keyed by ticket with the status the
+// answer was true for. The submenu is keyed off the row's CURRENT status, so
+// a move that lands the ticket elsewhere misses the old entry on its own —
+// but the entry is also dropped explicitly after a move runs on the ticket,
+// because the workflow's answer for the OLD status is now certainly stale and
+// the row may still wear it until the next board fetch.
+type JiraMovesEntry = {
+  status: string
+  moves: JiraAvailableTransition[]
+}
+
+const jiraMovesCache = new Map<string, JiraMovesEntry>()
+
+/** The cached live transitions for a ticket, but only if asked from the same status they were fetched for. */
+export const cachedJiraMoves = (
+  ticket: string,
+  status: string,
+): JiraAvailableTransition[] | undefined => {
+  const entry = jiraMovesCache.get(ticket)
+  return entry && entry.status === status ? entry.moves : undefined
+}
+
+export const storeJiraMoves = (
+  ticket: string,
+  status: string,
+  moves: JiraAvailableTransition[],
+): void => {
+  jiraMovesCache.set(ticket, { status, moves })
+}
+
+/** Drop a ticket's cached transitions — after a move ran on it. Returns whether there was anything to drop. */
+export const invalidateJiraMoves = (ticket: string): boolean =>
+  jiraMovesCache.delete(ticket)
+
+// One ordered move row's worth: the workflow's own name to execute, wearing
+// the host's label and resolution step where the host knows this transition.
+export type OrderedJiraMove = {
+  label: string
+  transition: string
+  resolutions?: string[]
+}
+
+/**
+ * Merge the workflow's live answer with the host's static vocabulary. A live
+ * transition whose name matches a `jiraTransitions` entry keeps that entry's
+ * place in line, its label and its resolution step (the Done-resolution dance
+ * included); anything the static list does not know is still offered — hiding
+ * it would reintroduce the forbidden-move problem one step sideways — after
+ * the known ones, alphabetically, labelled by its own name.
+ */
+export const orderJiraMoves = (
+  available: JiraAvailableTransition[],
+  configured?: JiraTransition[],
+): OrderedJiraMove[] => {
+  const known = new Set<string>()
+  const ordered: OrderedJiraMove[] = []
+  for (const { label, transition, resolutions } of configured ?? []) {
+    const live = available.find((t) => t.name === transition)
+    if (!live) continue
+    known.add(live.name)
+    ordered.push(
+      resolutions && resolutions.length > 0
+        ? { label, transition: live.name, resolutions }
+        : { label, transition: live.name },
+    )
+  }
+  const rest = available
+    .filter((t) => !known.has(t.name))
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map((t) => ({ label: t.name, transition: t.name }))
+  return [...ordered, ...rest]
+}
+
+/**
+ * The move submenu rows for one ticket from an ordered list. Execution is the
+ * same contract the static list has always used — `jira issue move KEY
+ * "<transition name>"`, names never ids, because that is all jira-cli takes —
+ * plus one line the static rows never needed: a successful move drops the
+ * ticket's cached transitions, so reopening the submenu re-asks the workflow
+ * instead of re-offering the move just taken.
+ */
+export const jiraMoveActions = (
+  ticket: string,
+  moves: OrderedJiraMove[],
+  showFlash: (msg: string) => void,
+  onActed?: () => void,
+): Action[] =>
+  moves.map(({ label, transition, resolutions }) =>
+    resolutions && resolutions.length > 0
+      ? {
+          label,
+          hint: "",
+          run: () => {},
+          subActions: resolutions.map((resolution) => ({
+            label: resolution,
+            hint: "",
+            run: () => {
+              showFlash(`⋯ ${label} · ${resolution}…`)
+              void quietly`jira issue move ${ticket} ${transition} --resolution ${resolution}`
+                .then(() => {
+                  invalidateJiraMoves(ticket)
+                  showFlash(`✓ ${label} · ${resolution}`)
+                  onActed?.()
+                })
+                .catch(() => showFlash(`✗ Move to ${label} failed`))
+            },
+          })),
+        }
+      : {
+          label,
+          hint: "",
+          run: () => {
+            showFlash(`⋯ Moving to ${label}…`)
+            void quietly`jira issue move ${ticket} ${transition}`
+              .then(() => {
+                invalidateJiraMoves(ticket)
+                showFlash(`✓ Moved to ${label}`)
+                onActed?.()
+              })
+              .catch(() => showFlash(`✗ Move to ${label} failed`))
+          },
+        },
+  )
+
+/** The single dim row a move submenu shows while the hook is in flight. */
+export const jiraLoadingActions = (): Action[] => [
+  { label: "Loading transitions…", hint: "", tone: "dim", run: () => {} },
+]
+
+/**
+ * Open a ticket's move submenu through the live hook, swapping rows in place
+ * as the answer arrives. A cache hit opens the ordered moves at once with no
+ * loading row; a failure opens one error row whose run retries the hook —
+ * the static list is NEVER the fallback, because offering moves the workflow
+ * just refused to confirm is the defect this exists to remove. Settling late
+ * (the menu closed, or another submenu opened since) drops the answer rather
+ * than popping a menu over whatever the reader is doing now.
+ */
+export const openJiraMoves = (deps: {
+  ticket: string
+  status: string
+  fetch: JiraTransitionsFor
+  configured?: JiraTransition[]
+  open: (actions: Action[]) => void
+  isOpen: () => boolean
+  showFlash: (msg: string) => void
+  onActed?: () => void
+}): void => {
+  const {
+    ticket,
+    status,
+    fetch,
+    configured,
+    open,
+    isOpen,
+    showFlash,
+    onActed,
+  } = deps
+  // An empty answer still earns a row: `open([])` is a deliberate no-op (see
+  // useActionMenu), so opening nothing would leave the loading row — or, on a
+  // cache hit, the closed menu — standing instead of the answer.
+  const openOrdered = (moves: JiraAvailableTransition[]) => {
+    const ordered = orderJiraMoves(moves, configured)
+    open(
+      ordered.length > 0
+        ? jiraMoveActions(ticket, ordered, showFlash, onActed)
+        : [
+            {
+              label: "No transitions available",
+              hint: "",
+              tone: "dim" as const,
+              run: () => {},
+            },
+          ],
+    )
+  }
+  const hit = cachedJiraMoves(ticket, status)
+  if (hit) {
+    openOrdered(hit)
+    return
+  }
+  const attempt = ++openJiraMovesSeq
+  open(jiraLoadingActions())
+  void fetch(ticket).then(
+    (moves) => {
+      if (attempt !== openJiraMovesSeq || !isOpen()) return
+      storeJiraMoves(ticket, status, moves)
+      openOrdered(moves)
+    },
+    () => {
+      if (attempt !== openJiraMovesSeq || !isOpen()) return
+      open([
+        {
+          label: "Couldn't load transitions — Retry",
+          hint: "",
+          tone: "error",
+          run: () => openJiraMoves(deps),
+        },
+      ])
+    },
+  )
+}
+
+// Which lazy open is current. A retry (or a second ticket's submenu) supersedes
+// the in-flight one, and the superseded answer is dropped on arrival — without
+// this, a slow first fetch would overwrite the retry's rows with its own stale
+// failure or success.
+let openJiraMovesSeq = 0
 
 // The glance health derivation now lives in @kud/gh (shared with the health
 // panel and the standalone CLIs). Cockpit's aggregation query shapes checks under
@@ -1384,6 +1620,15 @@ export const buildActions = (
      * the settlement signal.
      */
     onSettled?: (item: GHItem, result: SettledResult) => void
+    /**
+     * Open the ticket's move submenu through the live-transitions hook. Passed
+     * by the browse screen (which owns the menu the rows open into) only when
+     * the host wired `jiraTransitionsFor`; its presence is what switches
+     * "Move status" from the static sub-list below to the lazy submenu. A
+     * host that calls buildActions directly without it gets today's static
+     * list, hook or no hook.
+     */
+    onOpenMove?: (item: TaskRow) => void
   },
 ): Action[] => {
   if (
@@ -1448,54 +1693,75 @@ export const buildActions = (
     const base: Action[] = drillAction
       ? [drillAction, open, copyUrl]
       : [open, copyUrl]
-    if (item.ticket && jiraTransitions && jiraTransitions.length > 0) {
-      base.push({
-        label: "Move status",
-        hint: "t",
-        // The task's act: changing its state, the one mutation this menu owns.
-        // Guarded by the caller's own condition above — without configured
-        // transitions there is no such row, and none is invented here.
-        group: "act",
-        run: () => {},
-        subActions: jiraTransitions.map(({ label, transition, resolutions }) =>
-          resolutions && resolutions.length > 0
-            ? {
-                label,
-                hint: "",
-                run: () => {},
-                subActions: resolutions.map((resolution) => ({
-                  label: resolution,
-                  hint: "",
-                  run: () => {
-                    showFlash(`⋯ ${label} · ${resolution}…`)
-                    void quietly`jira issue move ${
-                      (item as TaskRow).ticket
-                    } ${transition} --resolution ${resolution}`
-                      .then(() => {
-                        showFlash(`✓ ${label} · ${resolution}`)
-                        ext?.onActed?.()
-                      })
-                      .catch(() => showFlash(`✗ Move to ${label} failed`))
+    if (
+      item.ticket &&
+      (ext?.onOpenMove ?? (jiraTransitions && jiraTransitions.length > 0))
+    ) {
+      // With a live hook the submenu cannot be built here — buildActions is
+      // synchronous and the hook is not — so the row carries no subActions and
+      // its run opens the lazy submenu instead. Return then executes the run
+      // rather than descending, which reads exactly like opening the submenu.
+      if (ext?.onOpenMove) {
+        const task = item as TaskRow
+        const openMove = ext.onOpenMove
+        base.push({
+          label: "Move status",
+          hint: "t",
+          // The task's act: changing its state, the one mutation this menu owns.
+          // Guarded by the caller's own condition above — without a hook or
+          // configured transitions there is no such row, and none is invented here.
+          group: "act",
+          run: () => openMove(task),
+        })
+      } else
+        base.push({
+          label: "Move status",
+          hint: "t",
+          // The task's act: changing its state, the one mutation this menu owns.
+          // Guarded by the caller's own condition above — without configured
+          // transitions there is no such row, and none is invented here.
+          group: "act",
+          run: () => {},
+          subActions: jiraTransitions!.map(
+            ({ label, transition, resolutions }) =>
+              resolutions && resolutions.length > 0
+                ? {
+                    label,
+                    hint: "",
+                    run: () => {},
+                    subActions: resolutions.map((resolution) => ({
+                      label: resolution,
+                      hint: "",
+                      run: () => {
+                        showFlash(`⋯ ${label} · ${resolution}…`)
+                        void quietly`jira issue move ${
+                          (item as TaskRow).ticket
+                        } ${transition} --resolution ${resolution}`
+                          .then(() => {
+                            showFlash(`✓ ${label} · ${resolution}`)
+                            ext?.onActed?.()
+                          })
+                          .catch(() => showFlash(`✗ Move to ${label} failed`))
+                      },
+                    })),
+                  }
+                : {
+                    label,
+                    hint: "",
+                    run: () => {
+                      showFlash(`⋯ Moving to ${label}…`)
+                      void quietly`jira issue move ${
+                        (item as TaskRow).ticket
+                      } ${transition}`
+                        .then(() => {
+                          showFlash(`✓ Moved to ${label}`)
+                          ext?.onActed?.()
+                        })
+                        .catch(() => showFlash(`✗ Move to ${label} failed`))
+                    },
                   },
-                })),
-              }
-            : {
-                label,
-                hint: "",
-                run: () => {
-                  showFlash(`⋯ Moving to ${label}…`)
-                  void quietly`jira issue move ${
-                    (item as TaskRow).ticket
-                  } ${transition}`
-                    .then(() => {
-                      showFlash(`✓ Moved to ${label}`)
-                      ext?.onActed?.()
-                    })
-                    .catch(() => showFlash(`✗ Move to ${label} failed`))
-                },
-              },
-        ),
-      })
+          ),
+        })
     }
     // Display order is group order (Act first); the menu sorts defensively as
     // well, so this return already reads as drawn. See `menuRowsOf`.
@@ -3122,7 +3388,14 @@ export const ActionMenu = ({
             <Box flexGrow={1}>
               <Text
                 bold={i === cursor}
-                color={isCloseRow(row) ? colors.error : undefined}
+                color={
+                  row.tone === "error"
+                    ? colors.error
+                    : isCloseRow(row)
+                      ? colors.error
+                      : undefined
+                }
+                dimColor={row.tone === "dim" ? true : undefined}
               >
                 {row.label}
               </Text>
@@ -3617,6 +3890,7 @@ const BrowseScreen = ({
   jiraKeyRe,
   jiraSetupHint,
   jiraTransitions,
+  jiraTransitionsFor,
   onRefresh,
   onActed,
   onSettled,
@@ -3702,6 +3976,11 @@ const BrowseScreen = ({
   // it owns the config; the shell only knows that `jiraBase` is absent.
   jiraSetupHint?: string
   jiraTransitions?: JiraTransition[]
+  // The live transitions for a ticket, asked lazily when its move submenu
+  // opens. Present, the submenu offers only what the workflow allows (ordered
+  // against `jiraTransitions` above, which keeps naming the labels); absent,
+  // the static list is the whole submenu, exactly as before.
+  jiraTransitionsFor?: JiraTransitionsFor
   onRefresh?: () => void
   /** A mutation landed: drop the cached glance now, refresh shortly. */
   onActed?: () => void
@@ -4269,6 +4548,32 @@ const BrowseScreen = ({
     return false
   }
 
+  // Whether the action menu is on screen, mirrored out of `menu.actions` so the
+  // lazy move submenu's late answer can check it. A fetch that outlives its
+  // menu (esc while loading) must drop its rows, not pop the menu back open.
+  const menuActionsRef = useRef<MenuRow[] | null>(null)
+  useEffect(() => {
+    menuActionsRef.current = menu.actions
+  })
+
+  // One door for both move-submenu openings: the `t` key below and the
+  // "Move status" row's run. Without the hook this is never called and both
+  // stay on the static list they have always built.
+  const openMoveFor = (task: TaskRow) => {
+    if (!task.ticket || !jiraTransitionsFor) return
+    const fetch = jiraTransitionsFor
+    openJiraMoves({
+      ticket: task.ticket,
+      status: task.status,
+      fetch,
+      configured: jiraTransitions,
+      open: (rows) => menu.open(rows),
+      isOpen: () => menuActionsRef.current !== null,
+      showFlash,
+      onActed,
+    })
+  }
+
   const openMenu = () => {
     if (
       !activeItem ||
@@ -4289,7 +4594,13 @@ const BrowseScreen = ({
       onRefresh,
       dismissItem,
       openDrillView,
-      { extensions, onOpenExt, onActed, onSettled },
+      {
+        extensions,
+        onOpenExt,
+        onActed,
+        onSettled,
+        onOpenMove: jiraTransitionsFor ? openMoveFor : undefined,
+      },
     )
     menu.open(actions)
   }
@@ -4804,11 +5115,18 @@ const BrowseScreen = ({
       activeItem &&
       activeItem.kind === "task" &&
       activeItem.ticket &&
-      jiraTransitions &&
-      jiraTransitions.length > 0
+      (jiraTransitionsFor ?? (jiraTransitions && jiraTransitions.length > 0))
     ) {
+      // The lazy submenu when the host wired the hook; the static list exactly
+      // as before when it did not. Mirrors the `m` menu's guard in buildActions.
+      if (jiraTransitionsFor) {
+        openMoveFor(activeItem)
+        return
+      }
+      // Reached only when the hook is absent, where the guard above required a
+      // non-empty static list — the `?? []` is for the typechecker, not a path.
       const jiraKey = activeItem.ticket
-      const actions: Action[] = jiraTransitions.map(
+      const actions: Action[] = (jiraTransitions ?? []).map(
         ({ label, transition, resolutions }) =>
           resolutions && resolutions.length > 0
             ? {
@@ -5466,6 +5784,7 @@ export const App = ({
   jiraKeyRe,
   jiraSetupHint,
   jiraTransitions,
+  jiraTransitionsFor,
   hasCiStatus,
   ciJob,
   ciFetcher,
@@ -5540,6 +5859,9 @@ export const App = ({
   // it owns the config; the shell only knows that `jiraBase` is absent.
   jiraSetupHint?: string
   jiraTransitions?: JiraTransition[]
+  // The live transitions for a ticket — see BrowseScreen. Threaded straight
+  // through to it; App never calls it, it only carries it.
+  jiraTransitionsFor?: JiraTransitionsFor
   // Reserves a standing CI status row above everything else — loading until
   // the first fetch resolves, then ready/error — so callers that don't wire a
   // job (home's cockpit) see no row at all rather than one that never fills in.
@@ -6397,6 +6719,7 @@ export const App = ({
         jiraKeyRe={jiraKeyRe}
         jiraSetupHint={jiraSetupHint}
         jiraTransitions={jiraTransitions}
+        jiraTransitionsFor={jiraTransitionsFor}
         onRefresh={applyOrRefresh}
         onActed={onActed}
         onSettled={onSettled}
