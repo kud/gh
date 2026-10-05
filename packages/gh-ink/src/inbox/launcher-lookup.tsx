@@ -1,5 +1,5 @@
 import React, { useRef, useState, type ReactNode } from "react"
-import { colors } from "@kud/ink-ui"
+import { colors, type PaletteMessage } from "@kud/ink-ui"
 import { fetchItemNode, formatRef, parseRef } from "@kud/gh"
 import { refCandidates, resolveRef } from "@kud/gh-workflow"
 import type { AnyItem, GHItem, Section } from "@kud/gh-workflow"
@@ -172,7 +172,7 @@ export type Lookup =
       message: string
     }
 
-// A failure's own words, short enough for one palette row. `gh` reports on
+// A failure's own words, short enough for the palette's message line. `gh` reports on
 // stderr as `gh: <reason>`, and execa's own `message` opens with the whole
 // command line — which here is a GraphQL document — so stderr is read first and
 // the message only as a fallback.
@@ -274,14 +274,18 @@ export type LookupRow = {
  *   idle      `↵ opens acme/api-gateway#2926`, then open-in-browser
  *   loading   `Looking up acme/api-gateway#2926…`, alone
  *   missed    no row: `message` takes the launcher's message slot, muted
- *   failed    the reason, in the error tone; Enter asks again
+ *   failed    no row: the reason takes the slot in the error tone, and
+ *             Enter asks again through the message's `onSubmit`
  *
  * `exclusive` says the lookup owns the launcher, so nothing else is appended:
  * a Jira or extension row under a pending lookup would take an Enter meant for
- * the wait. The message slot only draws when there are no rows at all, which
- * is why `missed` is the one phase with none — and why a failure, which has to
- * be readable as a failure, is a row of its own: the slot has a single, muted
- * ink.
+ * the wait. The message slot only draws when there are no rows at all, so both
+ * answers that leave the launcher open without opening anything have none.
+ * A failure used to be a red row of its own (`✗ couldn't look up …`, Enter
+ * retried), because until ink-ui 0.37.0 the slot had a single, muted ink and a
+ * failure has to read as one. The slot's error tone now draws the `✗` itself,
+ * so the reason sits where every other launcher verdict does, and `onSubmit`
+ * keeps Enter retrying without a row for the cursor to land on.
  */
 export const lookupRows = (
   claim: Claim,
@@ -289,7 +293,11 @@ export const lookupRows = (
   query: string,
   start: (query: string, claim: Claim) => void,
   openUrl: (url: string, label: string) => void,
-): { rows: LookupRow[]; message?: string; exclusive: boolean } => {
+): {
+  rows: LookupRow[]
+  message?: string | PaletteMessage
+  exclusive: boolean
+} => {
   const ref = (s: string) => <Text color={colors.accent}>{s}</Text>
   if (lookup?.phase === "loading")
     return {
@@ -309,19 +317,12 @@ export const lookupRows = (
   if (lookup?.phase === "failed")
     return {
       exclusive: true,
-      rows: [
-        {
-          id: "launcher:retry",
-          title: `Couldn't look up ${claim.label}: ${lookup.message}`,
-          label: (
-            <Text color={colors.error}>
-              ✗ couldn't look up {claim.label} · {lookup.message}
-            </Text>
-          ),
-          run: () => start(query, claim),
-          keepOpen: true,
-        },
-      ],
+      rows: [],
+      message: {
+        text: `couldn't look up ${claim.label} · ${lookup.message} · ↵ retry`,
+        tone: "error",
+        onSubmit: () => start(query, claim),
+      },
     }
   const rows: LookupRow[] = [
     {
