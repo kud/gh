@@ -1,5 +1,15 @@
 # @kud/gh-ink
 
+## 0.66.0
+
+### Minor Changes
+
+- 28ead82: `PrRow` takes `gutter={false}` for a host that draws its own cursor. A board that hangs pull requests under its own rows already marks the selected line in a column further left, so the row's `❯` turned up a second time on the same line, after the tree glyphs. With the gutter hidden the row draws no cursor of its own and gives the two columns it would have spent to the title. The default is unchanged.
+
+### Patch Changes
+
+- 923462b: Every package moves to `@kud/ink-ui` 0.33.0 together. A host that also draws with ink-ui at that version — the Jira board does — was loading a second copy beside these packages' 0.31.0, and two copies of the component library in one process configure one instance and read the other. The skeleton rows also pick up 0.33.0's shimmer.
+
 ## 0.65.1
 
 ### Patch Changes
