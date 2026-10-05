@@ -1,5 +1,15 @@
 # @kud/gh-ink
 
+## 0.73.0
+
+### Minor Changes
+
+- 160ee2d: Moving a Jira ticket no longer leaves the row standing in its old tab until the next fetch. A host that passes the new `tabForStatus` prop, which maps a transition's destination status to a tab, now sees the row land in that tab the moment the move is chosen, marked `◌` until Jira answers, and the tab counts move with it. The move is held as a patch laid over every fetch, so a refetch that predates Jira's index cannot bounce the row back; it clears as soon as a fetch agrees, and after 30 seconds at the latest. If Jira refuses, the row stays where it was put and the footer says so, `✗ Couldn't move SHOP-1234: <reason>  w restore`, until `w`, `esc` or eight seconds; `w` drops the patch and refetches the real position. Without `tabForStatus`, or when it returns null, moves behave exactly as before.
+
+### Patch Changes
+
+- 894f9ae: Built against `@kud/ink-ui` 0.36.0. Ticket keys now take their yellow from ink-ui's `ticket` token rather than a hex of their own, so every TUI draws a key alike; the `@kud/ink-ui` peer range moves to `>=0.36.0 <1` because an older host has no such token and would draw the key uncoloured. The inbox search also follows the new `useFilterMode`: `esc` while typing used to clear the term on the way out, throwing away the query a reflexive press was only meant to step out of, and now it keeps the filter just as `↵` does. `⌃u` empties the term inside the field, and `esc` on a kept filter still clears it, so two presses clear it from anywhere.
+
 ## 0.72.0
 
 ### Minor Changes
