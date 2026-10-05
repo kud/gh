@@ -55,12 +55,12 @@ describe("selectionBackground", () => {
 
 describe("taskKeyStyle", () => {
   /*
-   * Exact equality on purpose: the accent on every row, like the PR number, and
+   * Exact equality on purpose: info blue on every row, unlike the PR number, and
    * bold only under the cursor, so a stray prop breaks the shape.
    */
-  it("wears the accent on every row and bold only when active", () => {
-    expect(taskKeyStyle(true)).toEqual({ color: colors.accent, bold: true })
-    expect(taskKeyStyle(false)).toEqual({ color: colors.accent, bold: false })
+  it("wears info blue on every row and bold only when active", () => {
+    expect(taskKeyStyle(true)).toEqual({ color: colors.info, bold: true })
+    expect(taskKeyStyle(false)).toEqual({ color: colors.info, bold: false })
   })
 })
 

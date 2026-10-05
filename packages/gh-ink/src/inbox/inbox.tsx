@@ -1371,9 +1371,10 @@ export const selectionBackground = (
 ): string | undefined => (active && !backdropped ? SELECTION_BG : undefined)
 
 /**
- * What the task key wears, given whether its row is under the cursor. The
- * accent on every row, like the PR number one branch down: both are the row's
- * identifier, so they share a hue (Iris, 2026-10-05). Bold only when active,
+ * What the task key wears, given whether its row is under the cursor. Info
+ * blue on every row, so a ticket key never reads as the PR number one branch
+ * down, which keeps the accent. Both are identifiers, and sharing a hue made
+ * them easy to confuse (Erwann, 2026-10-05, reversing the shared accent). Bold only when active,
  * because weight is the selection signal and bold at rest would mute it. A
  * function rather than bare props so the shape stays pinnable — see
  * `selectionBackground` for why a frame cannot assert it.
@@ -1381,7 +1382,7 @@ export const selectionBackground = (
 export const taskKeyStyle = (
   active: boolean,
 ): { color: string; bold: boolean } => ({
-  color: colors.accent,
+  color: colors.info,
   bold: active,
 })
 
