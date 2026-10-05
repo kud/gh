@@ -373,6 +373,12 @@ export type Section = {
   label: string
   items: AnyItem[]
   /**
+   * Optional group name. When set, tabs with the same group render together;
+   * a divider is drawn where the group value changes between neighbouring tabs.
+   * Absent means no grouping — the tab renders without a divider.
+   */
+  group?: string
+  /**
    * Present when `items` is a SAMPLE of a larger set rather than the set —
    * because a source behind it matched more rows than its query was allowed to
    * return. `total` is how many there really are.

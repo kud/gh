@@ -5486,6 +5486,7 @@ const BrowseScreen = ({
                 pulseSettled ? PULSE_SETTLED_FRAME : sparkFrame,
               ),
               markerColor: colors.accent,
+              group: s.group,
             }))}
           />
         </Box>
