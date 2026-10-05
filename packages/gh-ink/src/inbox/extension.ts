@@ -176,4 +176,37 @@ export interface InboxExtension {
   // extension can only add verbs, never reorder the built-ins. Returning `[]`
   // adds nothing and draws nothing: an extension's silence is never a row.
   commands?: (target: ExtensionTarget) => Command[]
+  // A thing this extension can open BY NAME from the launcher — a ticket key, a
+  // build number — when the viewer pastes it and it is not a row on screen.
+  //
+  // Two halves, because the launcher needs one answer per keystroke and one
+  // round trip per Enter. The outer call is the recognition: sync and pure, the
+  // same rules as `commands`, and `null` means "not mine". What it returns is the
+  // fetch, which runs only when the viewer presses Enter on the row it earns.
+  // The thunk resolves to the row to open, which goes through the same drill a
+  // listed row of that kind takes; it rejects with `LookupMiss` for "nothing by
+  // that name" (drawn muted, as the launcher's no-match line) and with anything
+  // else for a failure (drawn in the error tone). The input stays open either
+  // way, so a typo costs a keystroke rather than a reopen.
+  //
+  // GitHub references are the host's own resolver and are asked FIRST, then each
+  // extension in declaration order; the first non-null answer claims the input.
+  // So an extension cannot shadow `acme/api-gateway#2926`, and two extensions
+  // claiming one shape resolve the way their keys already do — first declared
+  // wins. If the resolved row is already in the inbox, the listed copy opens
+  // instead, so the drill sees the row the list will come back to.
+  resolve?: (input: string) => (() => Promise<AnyItem>) | null
+}
+
+/**
+ * How a `resolve` thunk says "nothing by that name": the launcher draws its
+ * message muted, the way it draws a query that matched nothing, and keeps the
+ * input open. Any other rejection is a failure and is drawn in the error tone —
+ * the difference a reader needs between "you typed it wrong" and "try again".
+ */
+export class LookupMiss extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = "LookupMiss"
+  }
 }

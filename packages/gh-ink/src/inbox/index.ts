@@ -84,6 +84,7 @@ export {
 } from "./inbox.js"
 export type { Command, InboxExtension, ExtensionTarget } from "./extension.js"
 export {
+  LookupMiss,
   useChrome,
   type ChromeHints,
   type ChromeSpec,

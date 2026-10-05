@@ -35,6 +35,7 @@ export const IssueView = ({
     title?: string
     labels?: readonly string[]
     needsYou?: NeedsYou
+    notInInbox?: boolean
   }
   login: string
   onBack: () => void
@@ -172,6 +173,7 @@ export const IssueView = ({
     <DrillView
       title={`#${item.number} · ${item.repo}`}
       subtitle={item.title}
+      tag={item.notInInbox ? "not in inbox" : undefined}
       hints={[
         ["↑↓", "scroll"],
         ...(item.needsYou

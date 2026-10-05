@@ -37,6 +37,12 @@ import {
 } from "../components/pr-row.js"
 import type { Command, InboxExtension, ExtensionTarget } from "./extension.js"
 import { InboxChromeContext } from "./extension.js"
+import {
+  claimFor,
+  lookupRows,
+  settle,
+  useLauncherLookup,
+} from "./launcher-lookup.js"
 import type { ChromeSpec, ChromeState } from "./extension.js"
 import {
   invalidateCache,
@@ -3623,9 +3629,9 @@ export const HelpModal = ({
     ...(hasJira
       ? ([
           ["t", "Jira: move / open ticket"],
-          ["⌃K", "launch · jump to a ticket by key"],
         ] as [string, string][])
       : []),
+    ["⌃K", "launch · open a ticket or PR by name"],
     ["/", "search"],
     ["f", "filter by repo"],
     ["r", "refresh"],
@@ -5225,9 +5231,10 @@ const BrowseScreen = ({
         ["←→", "tab"],
         ["↵/d", "open"],
         ["m", "actions"],
-        // Only where Jira is configured: without it the launcher can only say
-        // so, and a footer key that opens an apology is a broken feature.
-        ...(jiraBase ? ([["⌃K", "launch"]] as [string, string][]) : []),
+        // Always, now that the launcher opens a pasted PR or issue too. It was
+        // shown only where Jira was configured, when a ticket key was all it
+        // could take and without one it could only apologise.
+        ["⌃K", "launch"],
         // Advertised only where it does something, and named for what it
         // shows rather than for the furniture: nobody wants "a sidebar".
         ...(showRail
@@ -5269,13 +5276,27 @@ const BrowseScreen = ({
    *
    * The message is composed here too, because this screen holds both facts: no
    * `jiraBase` means Jira is not configured, and the host says how to fix that
-   * in its own words; a query that matches nothing is "no ticket matches". An
+   * in its own words; a query that matches nothing is "nothing matches". An
    * extension returning `[]` is never a row and never a message.
+   *
+   * A REFERENCE outranks all of it: a PR or issue GitHub's resolver recognises,
+   * or whatever an extension's `resolve` claims, draws its rows first — and,
+   * while its lookup is in flight or has failed, alone, so no other row can take
+   * the Enter meant for the wait. Its rows keep the launcher open when chosen,
+   * which is why `keepOpen` rides out beside `run`: the answer lands here, and a
+   * miss or a failure leaves the input as typed. The phases and what each draws
+   * live in launcher-lookup.tsx.
    */
+  const launcherLookup = useLauncherLookup(palette, (item) => {
+    if (!openDrillView(settle(localSections, item))) return false
+    setPalette(null)
+    return true
+  })
   const launcher = useMemo(() => {
     const run = new Map<string, () => void | Promise<void>>()
+    const keepOpen = new Set<string>()
     if (palette === null)
-      return { items: [] as PaletteItem[], run, message: undefined }
+      return { items: [] as PaletteItem[], run, keepOpen, message: undefined }
     const query = palette.trim()
     const ticketKey = jiraKeyRe
       ? query.toUpperCase().match(jiraKeyRe)?.[0]
@@ -5288,6 +5309,35 @@ const BrowseScreen = ({
       </Text>
     )
     const labels = new Map<string, ReactNode>()
+    const claim = claimFor(
+      query,
+      {
+        activeRepo:
+          activeItem?.kind === "pr" || activeItem?.kind === "issue"
+            ? activeItem.repo
+            : undefined,
+        repos: reposInSections(localSections),
+        sections: localSections,
+      },
+      extensions,
+    )
+    const claimed = claim
+      ? lookupRows(
+          claim,
+          launcherLookup.lookup,
+          palette,
+          launcherLookup.start,
+          (url, label) => {
+            quietly`open ${url}`.catch(() => {})
+            showFlash(`↗ Opened ${label} in browser`)
+          },
+        )
+      : undefined
+    for (const row of claimed?.rows ?? []) {
+      commands.push({ id: row.id, title: row.title, run: row.run })
+      labels.set(row.id, row.label)
+      if (row.keepOpen) keepOpen.add(row.id)
+    }
     if (ticketKey && jiraBase) {
       const row: AnyItem = {
         kind: "task",
@@ -5323,11 +5373,14 @@ const BrowseScreen = ({
         commands.push({ ...command, id: `${ext.id}:${command.id}` })
       }
     }
+    if (claimed?.exclusive) commands.splice(claimed.rows.length)
     for (const command of commands) run.set(command.id, command.run)
-    const message = !jiraBase
+    const message = claimed
+      ? claimed.message
+      : !jiraBase
       ? `Jira not configured${jiraSetupHint ? ` · ${jiraSetupHint}` : ""}`
       : query && !ticketKey
-      ? `no ticket matches "${query}"`
+      ? `nothing matches "${query}"`
       : undefined
     const items: PaletteItem[] = commands.map((command) => ({
       id: command.id,
@@ -5335,11 +5388,21 @@ const BrowseScreen = ({
       group: command.group,
       label: labels.get(command.id),
     }))
-    return { items, run, message }
+    return { items, run, keepOpen, message }
     // `extensionTargetFor`, `openDrillView` and `showFlash` are re-created every
     // render and deliberately not listed: the query changes on every keystroke,
-    // so the memo already recomputes at least as often as they do.
-  }, [palette, activeItem, extensions, jiraBase, jiraKeyRe, jiraSetupHint])
+    // so the memo already recomputes at least as often as they do. Neither is
+    // `launcherLookup.start`, which reaches only refs and a state setter.
+  }, [
+    palette,
+    activeItem,
+    extensions,
+    jiraBase,
+    jiraKeyRe,
+    jiraSetupHint,
+    localSections,
+    launcherLookup.lookup,
+  ])
 
   // The App-level overlay (a drill-in view or an extension body) takes the
   // list's place between the same header and footer: the frame never unmounts,
@@ -5356,18 +5419,23 @@ const BrowseScreen = ({
       <CommandPalette
         items={launcher.items}
         query={palette}
-        onQueryChange={setPalette}
+        onQueryChange={(query) => {
+          // A lookup answers the query it was asked for, never the next one.
+          launcherLookup.reset()
+          setPalette(query)
+        }}
         onSelect={(id) => {
           // Close first, then run: a command that mounts a drill wants the list
           // to be the top layer again, and one that opens a browser tab wants
-          // the palette gone before the flash lands under it.
+          // the palette gone before the flash lands under it. A lookup row is
+          // the exception — its answer lands in the palette, so it stays up.
           const run = launcher.run.get(id)
-          setPalette(null)
+          if (!launcher.keepOpen.has(id)) setPalette(null)
           void run?.()
         }}
         onClose={() => setPalette(null)}
         message={launcher.message}
-        placeholder="ticket key…"
+        placeholder="ticket, PR, owner/repo#N or URL…"
         width={Math.min(60, Math.max(30, listCols - 2))}
         maxRows={Math.max(3, listHeight - 6)}
         hints={[

@@ -7,6 +7,7 @@ import type { GHItem, Section } from "./inbox.js"
 import type { ExtensionTarget, InboxExtension } from "./extension.js"
 
 // The launcher (Ctrl+K): what a typed ticket key becomes, and in what order.
+// What a pasted PR or issue reference becomes is launcher-lookup.test.tsx.
 //
 // Mounted for real rather than asserted against a hand-built row list, because
 // the subject is the DERIVATION — that the browse screen turns the query into
@@ -132,17 +133,17 @@ describe("launcher", () => {
     const { stdout, stdin, done } = mount({ jiraBase: JIRA_BASE })
     await settle()
     await settle()
-    expect(stdout.lastFrame()).not.toContain("ticket key…")
+    expect(stdout.lastFrame()).not.toContain("ticket, PR, owner/repo#N or URL…")
 
     stdin.press(CTRL_K)
     await settle()
-    expect(stdout.lastFrame()).toContain("ticket key…")
+    expect(stdout.lastFrame()).toContain("ticket, PR, owner/repo#N or URL…")
 
     stdin.press(ESC)
     await settle()
     await settle()
     done()
-    expect(stdout.lastFrame()).not.toContain("ticket key…")
+    expect(stdout.lastFrame()).not.toContain("ticket, PR, owner/repo#N or URL…")
   })
 
   it("turns a typed key into open-here and open-in-Jira, in that order", async () => {
@@ -227,7 +228,7 @@ describe("launcher", () => {
     await type(miss.stdin, "nope")
     const missed = miss.stdout.lastFrame()
     miss.done()
-    expect(missed).toContain('no ticket matches "nope"')
+    expect(missed).toContain('nothing matches "nope"')
     expect(missed).not.toMatch(/Open \S+ (here|in Jira)/)
 
     const bare = mount({ jiraSetupHint: "jira config" })

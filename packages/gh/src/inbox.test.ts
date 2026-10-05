@@ -12,6 +12,7 @@ import {
   buildInboxQueries,
   buildInboxQuery,
   fetchInbox,
+  fetchItemNode,
   healthIdsFrom,
   limitsFor,
   mergeHealth,
@@ -1014,5 +1015,86 @@ describe("mergeHealth", () => {
     expect(
       mergeHealth(undefined, [{ nodes: [enriched("PR_one")] }]),
     ).toBeUndefined()
+  })
+})
+
+describe("fetchItemNode", () => {
+  const notFound = (message: string) =>
+    Object.assign(new Error(`gh: ${message}`), {
+      stdout: JSON.stringify({
+        data: null,
+        errors: [{ type: "NOT_FOUND", message }],
+      }),
+    })
+
+  it("asks for the inbox's own health and conversation selections, plus state", async () => {
+    let asked = ""
+    let vars: Record<string, string | number> = {}
+    await fetchItemNode("acme/api-gateway", 2926, async (query, v) => {
+      asked = query
+      vars = v
+      return { repository: { issueOrPullRequest: null } }
+    })
+    const inbox = blockFor(buildInboxQuery(), "assigned")
+    // Every selection the inbox's mixed source carries on either type, so a
+    // looked-up row maps exactly like a listed one.
+    for (const field of [
+      "reviewDecision mergeable",
+      "statusCheckRollup",
+      "reviewThreads(last: 20)",
+      "reactionGroups { content viewerHasReacted }",
+      "commits(last: 1)",
+      "labels(first: 10)",
+      "additions deletions changedFiles",
+    ]) {
+      expect(inbox).toContain(field)
+      expect(asked).toContain(field)
+    }
+    expect(asked).toContain("issueOrPullRequest(number: $number)")
+    expect(asked).toMatch(/\.\.\. on PullRequest \{\s+id number title state/)
+    expect(asked).toMatch(/\.\.\. on Issue \{\s+number title state/)
+    expect(vars).toEqual({ owner: "acme", name: "api-gateway", number: 2926 })
+  })
+
+  it("returns the node GitHub answered with", async () => {
+    const node = { __typename: "Issue", number: 41 }
+    expect(
+      await fetchItemNode("acme/api-gateway", 41, async () => ({
+        repository: { issueOrPullRequest: node },
+      })),
+    ).toBe(node)
+  })
+
+  it("reads NOT_FOUND — no such item, or no access — as null", async () => {
+    for (const message of [
+      "Could not resolve to an issue or pull request with the number of 9.",
+      "Could not resolve to a Repository with the name 'acme/secret'.",
+    ])
+      expect(
+        await fetchItemNode("acme/secret", 9, async () => {
+          throw notFound(message)
+        }),
+      ).toBeNull()
+  })
+
+  it("throws anything else, so a miss is never confused with an outage", async () => {
+    await expect(
+      fetchItemNode("acme/api-gateway", 1, async () => {
+        throw new Error("gh: connect ECONNREFUSED")
+      }),
+    ).rejects.toThrow("ECONNREFUSED")
+    await expect(
+      fetchItemNode("acme/api-gateway", 1, async () => {
+        throw Object.assign(new Error("gh: HTTP 401"), {
+          stdout: JSON.stringify({ errors: [{ type: "FORBIDDEN" }] }),
+        })
+      }),
+    ).rejects.toThrow("401")
+  })
+
+  it("refuses a repo that is not an owner/name slug", async () => {
+    await expect(fetchItemNode("acme", 1, async () => ({}))).rejects.toThrow(
+      "owner/name",
+    )
   })
 })

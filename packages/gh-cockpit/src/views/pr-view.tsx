@@ -528,6 +528,7 @@ export const PrView = ({
     <DrillView
       title={`#${item.number} · ${item.repo}`}
       subtitle={item.title}
+      tag={item.notInInbox ? "not in inbox" : undefined}
       hints={hints}
     >
       {/* Above the tabs, never below: below, it would read as belonging to the

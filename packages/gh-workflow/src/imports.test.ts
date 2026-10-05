@@ -16,7 +16,7 @@ import { fileURLToPath } from "node:url"
 
 const dist = join(dirname(fileURLToPath(import.meta.url)), "..", "dist")
 
-const ALLOWED = new Set(["@kud/gh/health"])
+const ALLOWED = new Set(["@kud/gh/health", "@kud/gh/ref"])
 
 const jsFiles = (dir: string): string[] =>
   readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
