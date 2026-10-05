@@ -750,8 +750,8 @@ export const PrRow = ({
         >
           {sizeParts ? (
             <Text>
-              <Text color={colors.success}>{sizeParts.added}</Text>{" "}
-              <Text color={colors.error}>{sizeParts.removed}</Text>
+              <Text color={colors.added}>{sizeParts.added}</Text>{" "}
+              <Text color={colors.removed}>{sizeParts.removed}</Text>
             </Text>
           ) : null}
         </Box>

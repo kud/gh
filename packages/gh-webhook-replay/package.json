@@ -37,7 +37,7 @@
   },
   "dependencies": {
     "@kud/gh": "0.21.0",
-    "@kud/ink-ui": "0.37.0",
+    "@kud/ink-ui": "0.38.0",
     "ink": "7.1.0",
     "react": "19.2.7"
   },
