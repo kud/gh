@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
 import { EventEmitter } from "node:events"
 import { mkdtempSync, writeFileSync } from "node:fs"
+import { createRequire } from "node:module"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import React from "react"
@@ -21,6 +22,10 @@ import type { GHItem, Section, TaskRow } from "./inbox.js"
  * the indicator — it must never reach the screen on its own.
  */
 
+// Every frame any mounted tree has written, for `settle` to tell a quiet tree
+// from one still drawing.
+let writes = 0
+
 class FakeStdout extends EventEmitter {
   frames: string[] = []
   constructor(
@@ -31,6 +36,7 @@ class FakeStdout extends EventEmitter {
   }
   write = (frame: string) => {
     this.frames.push(frame)
+    writes += 1
   }
   lastFrame = () => this.frames.at(-1) ?? ""
 }
@@ -55,8 +61,68 @@ class FakeStdin extends EventEmitter {
   }
 }
 
-const settle = () => new Promise((resolve) => setImmediate(resolve))
+/*
+ * Wait for React, not for a number of event-loop turns.
+ *
+ * `settle` used to be one `setImmediate`, called twice wherever two felt like
+ * enough. Ink mounts a LEGACY root, and a legacy root runs its passive effects
+ * on React's scheduler rather than at the end of the commit; the scheduler
+ * works in 5ms slices measured on the real `performance.now()`, which no fake
+ * clock here touches, and yields a macrotask whenever a slice runs out. So the
+ * number of turns a frame needs depends on how fast the machine is.
+ *
+ * "settles once the hold is up" failed on a loaded CI runner in exactly that
+ * gap. Spending a hold is two renders, not one: App drops the marks and the
+ * departed rows, and BrowseScreen copies the new list into its own state from
+ * an effect. The two trailing settles after the clock jump caught the frame
+ * between them — marks gone, the departed row still standing unmarked, which
+ * reads as a hold that spent itself and kept the row anyway.
+ *
+ * So `settle` waits until the tree is quiet instead. An idle-priority task runs
+ * only once nothing more urgent is queued on the scheduler, which drains every
+ * pending effect; the turn after it lets a render those effects scheduled
+ * land. Round again until a round writes no frame. It is the scheduler instance
+ * Ink's reconciler resolved, not a copy: there is one in the tree.
+ */
+type Scheduler = {
+  unstable_scheduleCallback: (priority: number, task: () => void) => unknown
+  unstable_IdlePriority: number
+}
+const scheduler = createRequire(import.meta.url)("scheduler") as Scheduler
+const drainScheduler = () =>
+  new Promise<void>((resolve) => {
+    scheduler.unstable_scheduleCallback(scheduler.unstable_IdlePriority, () =>
+      resolve(),
+    )
+  })
+const settle = async () => {
+  let seen: number
+  do {
+    seen = writes
+    await drainScheduler()
+    await new Promise((resolve) => setImmediate(resolve))
+  } while (writes !== seen)
+}
 const after = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+// Wait on what the screen says rather than on how long it might take to say
+// it. Each step drains React first, so a match is never a frame whose effects
+// are still queued. The deadline is real time, untouched by the fake clock,
+// and only bounds a failure: a passing wait returns at the first frame that
+// matches.
+const frameWith = async (
+  stdout: FakeStdout,
+  ok: (frame: string) => boolean,
+  what: string,
+) => {
+  const deadline = performance.now() + 5000
+  await settle()
+  while (!ok(stdout.lastFrame())) {
+    if (performance.now() > deadline)
+      throw new Error(`no frame ${what}:\n${stdout.lastFrame()}`)
+    await settle()
+  }
+}
 
 /*
  * A spec that waits out a 7s hold in real time is not testing the hold, it is
@@ -68,10 +134,10 @@ const after = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
  *
  * So these specs own the clock. Only Date and setTimeout are faked, which is
  * exactly what the hold reads and what it schedules. Ink's render loop and
- * React's effect flush ride on setImmediate and microtasks, and freezing
- * those stops the render rather than controlling it — `settle` stays real for
- * that reason. setInterval stays real too: the spark animation and the CI
- * poll are nobody's business here.
+ * React's scheduler ride on setImmediate and microtasks, and freezing those
+ * stops the render rather than controlling it — `settle` stays real for that
+ * reason. setInterval stays real too: the spark animation and the CI poll are
+ * nobody's business here.
  *
  * Not applied to the stamp-file specs. Those wait on an fs.watch event, which
  * arrives on real time and cannot be advanced — faking the clock there would
@@ -91,14 +157,32 @@ const withFakeClock = () => {
 // so advancing before that effect has run moves the clock past a stamp that
 // does not exist yet; the effect then stamps Date.now() on the far side of the
 // jump and the hold starts over, which reads exactly like a hold that refuses
-// to expire. Flush first, then advance. The trailing settles are for the other
+// to expire. Flush first, then advance. The trailing settle is for the other
 // end: expiring a hold sets state that schedules the render the assertion reads.
 const advance = async (ms: number) => {
   await settle()
-  await settle()
   await vi.advanceTimersByTimeAsync(ms)
   await settle()
+}
+
+// A key, then everything it set off. `useInput` subscribes its handler in an
+// effect too, and a key emitted before that is dropped, so every press goes
+// in from a settled tree and leaves one behind.
+const press = async (stdin: FakeStdin, key: string) => {
+  stdin.press(key)
   await settle()
+}
+
+// The two presses a person makes: `r` to fetch, which stops at the gate and
+// says what is waiting, and `r` again to apply it, which is done once the
+// gate's indicator has gone.
+const fetchBehindGate = async (stdin: FakeStdin, stdout: FakeStdout) => {
+  await press(stdin, "r")
+  await frameWith(stdout, (f) => f.includes("r apply"), "waiting behind r")
+}
+const applyFetched = async (stdin: FakeStdin, stdout: FakeStdout) => {
+  await press(stdin, "r")
+  await frameWith(stdout, (f) => !f.includes("r apply"), "with r applied")
 }
 
 const pr = (
@@ -178,8 +262,11 @@ const mount = async (watchPath?: string) => {
       patchConsole: false,
     },
   )
-  await settle()
-  await settle()
+  await frameWith(
+    stdout,
+    (f) => f.includes(STAYS),
+    "with the first fetch drawn",
+  )
   return {
     stdout,
     stdin,
@@ -203,10 +290,7 @@ describe("applying a refresh", () => {
 
   it("names what is waiting before you apply it", async () => {
     const { stdout, stdin, stop } = await mount()
-    stdin.press("r")
-    await settle()
-    await settle()
-    await advance(50)
+    await fetchBehindGate(stdin, stdout)
 
     const frame = stdout.lastFrame()
     // Counted, not merely announced: "something changed" is what the old
@@ -233,13 +317,8 @@ describe("applying a refresh", () => {
    */
   it("says what it did, in words, in the header", async () => {
     const { stdout, stdin, stop } = await mount()
-    stdin.press("r")
-    await settle()
-    await settle()
-    await advance(50)
-    stdin.press("r")
-    await settle()
-    await settle()
+    await fetchBehindGate(stdin, stdout)
+    await applyFetched(stdin, stdout)
 
     const frame = stdout.lastFrame()
     const header = frame.split("\n").find((l) => l.includes("Cockpit")) ?? ""
@@ -253,13 +332,8 @@ describe("applying a refresh", () => {
   // whether or not it is occupied, and weight. Neither can reflow a row.
   it("marks the rows themselves without a word", async () => {
     const { stdout, stdin, stop } = await mount()
-    stdin.press("r")
-    await settle()
-    await settle()
-    await advance(50)
-    stdin.press("r")
-    await settle()
-    await settle()
+    await fetchBehindGate(stdin, stdout)
+    await applyFetched(stdin, stdout)
 
     const frame = stdout.lastFrame()
     for (const word of ["NEW", "UPDATED", "MOVED"])
@@ -273,13 +347,8 @@ describe("applying a refresh", () => {
 
   it("leaves the row that did not move unmarked", async () => {
     const { stdout, stdin, stop } = await mount()
-    stdin.press("r")
-    await settle()
-    await settle()
-    await advance(50)
-    stdin.press("r")
-    await settle()
-    await settle()
+    await fetchBehindGate(stdin, stdout)
+    await applyFetched(stdin, stdout)
 
     // A marker on every row is a marker on none. `age` drifts on every fetch,
     // so a diff that compared it would flag the whole list each time.
@@ -295,12 +364,8 @@ describe("applying a refresh", () => {
 
   it("settles once the hold is up", async () => {
     const { stdout, stdin, stop } = await mount()
-    stdin.press("r")
-    await settle()
-    await settle()
-    await advance(50)
-    stdin.press("r")
-    await settle()
+    await fetchBehindGate(stdin, stdout)
+    await applyFetched(stdin, stdout)
     await advance(TRANSIT_HOLD_MS + 500)
 
     const frame = stdout.lastFrame()
@@ -404,16 +469,14 @@ const mountTwoTabs = async () => {
       patchConsole: false,
     },
   )
-  await settle()
-  await settle()
+  await frameWith(
+    stdout,
+    (f) => f.includes(STAYS),
+    "with the first fetch drawn",
+  )
   // Fetch the second list, then apply it — the same two presses a person makes.
-  stdin.press("r")
-  await settle()
-  await settle()
-  await advance(50)
-  stdin.press("r")
-  await settle()
-  await settle()
+  await fetchBehindGate(stdin, stdout)
+  await applyFetched(stdin, stdout)
   return {
     stdout,
     stdin,
@@ -435,9 +498,7 @@ describe("a change in a tab you are not on", () => {
     // all — so a passing assertion has to come from the OTHER tab.
     expect(stdout.lastFrame()).not.toContain(OTHER_MOVES)
 
-    stdin.press(RIGHT_ARROW)
-    await settle()
-    await settle()
+    await press(stdin, RIGHT_ARROW)
 
     const frame = stdout.lastFrame()
     expect(frame).toContain(OTHER_MOVES)
@@ -449,8 +510,7 @@ describe("a change in a tab you are not on", () => {
 
   it("settles once you have actually looked at it", async () => {
     const { stdout, stdin, stop } = await mountTwoTabs()
-    stdin.press(RIGHT_ARROW)
-    await settle()
+    await press(stdin, RIGHT_ARROW)
     await advance(TRANSIT_HOLD_MS + 500)
 
     const frame = stdout.lastFrame()
@@ -465,17 +525,11 @@ describe("a change in a tab you are not on", () => {
     const { stdout, stdin, stop } = await mountTwoTabs()
     // Over to the news, then straight back. A reader who has seen it has no
     // reason to stand there while a timer runs out on their behalf.
-    stdin.press(RIGHT_ARROW)
-    await settle()
-    await settle()
-    stdin.press(LEFT_ARROW)
-    await settle()
-    await settle()
+    await press(stdin, RIGHT_ARROW)
+    await press(stdin, LEFT_ARROW)
     await advance(TRANSIT_HOLD_MS + 500)
 
-    stdin.press(RIGHT_ARROW)
-    await settle()
-    await settle()
+    await press(stdin, RIGHT_ARROW)
 
     const frame = stdout.lastFrame()
     expect(frame).not.toContain("UPDATED")
@@ -515,8 +569,7 @@ describe("the tab marker", () => {
 
   it("goes once that tab has been read", async () => {
     const { stdout, stdin, stop } = await mountTwoTabs()
-    stdin.press(RIGHT_ARROW)
-    await settle()
+    await press(stdin, RIGHT_ARROW)
     await advance(TRANSIT_HOLD_MS + 500)
 
     const bar = tabBar(stdout.lastFrame())
@@ -621,8 +674,11 @@ const mountTasks = async () => {
       patchConsole: false,
     },
   )
-  await settle()
-  await settle()
+  await frameWith(
+    stdout,
+    (f) => f.includes(T_STAYS),
+    "with the first fetch drawn",
+  )
   return {
     stdout,
     stdin,
@@ -642,13 +698,8 @@ describe("applying a refresh on task rows", () => {
   // them at full width with a note hanging off the end.
   it("says what it did, in words, in the header", async () => {
     const { stdout, stdin, stop } = await mountTasks()
-    stdin.press("r")
-    await settle()
-    await settle()
-    await advance(50)
-    stdin.press("r")
-    await settle()
-    await settle()
+    await fetchBehindGate(stdin, stdout)
+    await applyFetched(stdin, stdout)
 
     const frame = stdout.lastFrame()
     // This surface is `life`, not the cockpit — the brand is whatever the host
@@ -665,13 +716,8 @@ describe("applying a refresh on task rows", () => {
 
   it("leaves the row that did not move unmarked", async () => {
     const { stdout, stdin, stop } = await mountTasks()
-    stdin.press("r")
-    await settle()
-    await settle()
-    await advance(50)
-    stdin.press("r")
-    await settle()
-    await settle()
+    await fetchBehindGate(stdin, stdout)
+    await applyFetched(stdin, stdout)
 
     const line = stdout
       .lastFrame()
