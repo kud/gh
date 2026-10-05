@@ -5174,8 +5174,20 @@ const BrowseScreen = ({
         <Box marginBottom={1}>
           <Text color={searchBar.glyphColor}>{`  ${searchBar.glyph} `}</Text>
           <Text>{search.slice(0, filter.caret)}</Text>
-          {searchBar.caret ? <Text color={colors.info}>▏</Text> : null}
-          <Text>{search.slice(filter.caret)}</Text>
+          {/* Mid-term the caret is a block, the character under it inverted,
+              as ink-ui's FilterBar draws it: a bar would take a cell and
+              split the term. At the end it stays the bar. */}
+          {searchBar.caret && filter.caret < search.length ? (
+            <>
+              <Text inverse>{search[filter.caret]}</Text>
+              <Text>{search.slice(filter.caret + 1)}</Text>
+            </>
+          ) : (
+            <>
+              {searchBar.caret ? <Text color={colors.info}>▏</Text> : null}
+              <Text>{search.slice(filter.caret)}</Text>
+            </>
+          )}
           <Text dimColor>{`   ${matchCount} match${
             matchCount !== 1 ? "es" : ""
           }  ${

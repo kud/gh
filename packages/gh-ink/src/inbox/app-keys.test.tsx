@@ -206,6 +206,7 @@ describe("the app's own keys", () => {
     const edited = frame()
     done()
 
-    expect(edited).toContain("px▏u")
+    expect(edited).toContain("pxu")
+    expect(edited).not.toContain("▏")
   })
 })
