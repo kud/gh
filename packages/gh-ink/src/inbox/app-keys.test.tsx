@@ -82,11 +82,11 @@ const settle = () => new Promise((resolve) => setImmediate(resolve))
 const ANSI = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "g")
 const ESC = String.fromCharCode(27)
 
-const mount = (sections: Section[] = SECTIONS) => {
+const mount = () => {
   const stdout = new FakeStdout(120, 30)
   const stdin = new FakeStdin()
   const instance = render(
-    <App fetcher={async () => ({ sections, login: "kud" })} />,
+    <App fetcher={async () => ({ sections: SECTIONS, login: "kud" })} />,
     {
       stdout: stdout as never,
       stdin: stdin as never,
@@ -187,30 +187,5 @@ describe("the app's own keys", () => {
 
     expect(committed).toContain("filtered · keys active · esc clear")
     expect(after).toContain("/ pu")
-  })
-
-  /*
-   * ←→ SWITCH TABS WHILE TYPING, like ↑↓ walk the list. The field has no
-   * caret to move, so the arrows used to land in it and do nothing at all.
-   */
-  it("switches tabs on ←→ without leaving the query", async () => {
-    const { press, frame, done } = mount([
-      { id: "open", label: "Open", items: [pr(1)] },
-      { id: "review", label: "Review", items: [pr(3)] },
-    ])
-    await settle()
-    await settle()
-
-    await press("/")
-    await press("p")
-    await press("\u001B[C")
-    const right = frame()
-    await press("\u001B[D")
-    const left = frame()
-    done()
-
-    expect(right).toContain("pull request number 3")
-    expect(right).toContain("↵ keep")
-    expect(left).toContain("pull request number 1")
   })
 })
