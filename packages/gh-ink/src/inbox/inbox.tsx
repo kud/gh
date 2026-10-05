@@ -5173,8 +5173,9 @@ const BrowseScreen = ({
       {!overlayOpen && search != null ? (
         <Box marginBottom={1}>
           <Text color={searchBar.glyphColor}>{`  ${searchBar.glyph} `}</Text>
-          <Text>{search}</Text>
+          <Text>{search.slice(0, filter.caret)}</Text>
           {searchBar.caret ? <Text color={colors.info}>▏</Text> : null}
+          <Text>{search.slice(filter.caret)}</Text>
           <Text dimColor>{`   ${matchCount} match${
             matchCount !== 1 ? "es" : ""
           }  ${

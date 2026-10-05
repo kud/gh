@@ -188,4 +188,24 @@ describe("the app's own keys", () => {
     expect(committed).toContain("filtered · keys active · esc clear")
     expect(after).toContain("/ pu")
   })
+
+  /*
+   * ←→ MOVE THE CARET INSIDE THE TERM while typing, and a letter lands where
+   * the caret is, not at the end.
+   */
+  it("edits the term at the caret after ←", async () => {
+    const { press, frame, done } = mount()
+    await settle()
+    await settle()
+
+    await press("/")
+    await press("p")
+    await press("u")
+    await press("\u001B[D")
+    await press("x")
+    const edited = frame()
+    done()
+
+    expect(edited).toContain("px▏u")
+  })
 })
