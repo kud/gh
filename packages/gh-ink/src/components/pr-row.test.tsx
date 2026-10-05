@@ -3,6 +3,7 @@ import { render } from "ink-testing-library"
 import { describe, it, expect } from "vitest"
 import type { GHItem } from "@kud/gh-workflow"
 import {
+  layoutOf,
   numberColumnsOf,
   PrRow,
   sectionShedOf,
@@ -258,5 +259,28 @@ describe("PrRow", () => {
     expect(frameOf(<PrRow item={empty} active={false} cols={120} />)).toContain(
       "retry a declined card instead of reporting a network error",
     )
+  })
+})
+
+describe("PrRow gutter", () => {
+  // A host that draws its own cursor further left — a board hanging PRs under
+  // tickets — would otherwise put two `❯` on the selected line.
+  it("draws no cursor of its own when the host owns the gutter", () => {
+    const frame = frameOf(
+      <PrRow item={pr()} active cols={120} gutter={false} prefix="├─ " />,
+    )
+    expect(frame).not.toContain("❯")
+    expect(frame.startsWith("├─ ")).toBe(true)
+  })
+
+  it("keeps its cursor by default", () => {
+    expect(frameOf(<PrRow item={pr()} active cols={120} />)).toContain("❯")
+  })
+
+  it("hands the hidden gutter's two columns to the title", () => {
+    const long = pr({ title: "x".repeat(200) })
+    const withGutter = layoutOf({ item: long, cols: 80 })
+    const without = layoutOf({ item: long, cols: 80, gutter: false })
+    expect(without.titleMax).toBe(withGutter.titleMax + 2)
   })
 })

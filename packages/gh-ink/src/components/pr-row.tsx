@@ -94,6 +94,13 @@ export type PrRowProps = {
    * number into the title.
    */
   numberCols?: number
+  /**
+   * Whether the row draws its own `❯` gutter. A host that marks the selected
+   * stop itself, in a column further left, passes `false` — otherwise the
+   * selected row carries two cursors (`❯ ├─ ❯ …`). Hidden, the two columns go
+   * to the title rather than standing empty.
+   */
+  gutter?: boolean
 }
 
 // Unresolved review threads — a comment glyph (nf-fa-comments) + count, keeping
@@ -200,6 +207,7 @@ type LayoutInput = Pick<
   | "columns"
   | "shed"
   | "numberCols"
+  | "gutter"
 >
 
 /**
@@ -245,6 +253,7 @@ export const layoutOf = ({
   columns,
   shed = {},
   numberCols,
+  gutter = true,
 }: LayoutInput) => {
   const numCols = numberCols ?? numberColumnsOf([item])
   const numStr = `#${item.number}`.padEnd(numCols)
@@ -393,7 +402,7 @@ export const layoutOf = ({
     // then the glyph's second column.
     const cell = labelCell()
     return (
-      2 +
+      (gutter ? 2 : 0) +
       prefix.length +
       2 /* health */ +
       2 /* turn */ +
@@ -478,6 +487,7 @@ export const PrRow = ({
   columns,
   shed,
   numberCols,
+  gutter = true,
 }: PrRowProps) => {
   // Read once for the row rather than at each of the pill sites — a hook, so it
   // cannot sit inside a branch.
@@ -571,13 +581,16 @@ export const PrRow = ({
     columns,
     shed,
     numberCols,
+    gutter,
   })
 
   return (
     // The wash paints every cell of the fixed-width row — an Ink Box's
     // background covers its full measure, not just the inked cells.
     <Box width={cols} backgroundColor={selectionBg}>
-      <Text color={colors.info}>{active ? "❯ " : "  "}</Text>
+      {gutter ? (
+        <Text color={colors.info}>{active ? "❯ " : "  "}</Text>
+      ) : null}
       <Text dimColor>{prefix}</Text>
       <Text color={color as any} bold>
         {icon + " "}
