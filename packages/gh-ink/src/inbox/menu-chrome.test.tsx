@@ -286,6 +286,18 @@ describe("menu cursor and width", () => {
     expect(atBottom).toBe(after)
   })
 
+  // Stepping off either end used to index past the rows and throw inside the
+  // state updater, taking the whole inbox down with it.
+  it("holds at both ends rather than stepping off them", async () => {
+    const t = await mountMenu(prActions())
+    await t.up()
+    expect(t.state().cursor).toBe(0)
+    for (let i = 0; i < 30; i += 1) await t.down()
+    expect(t.state().cursor).toBe(17)
+    expect(cursorLine(t.lines())).toContain("Close PR and delete branch")
+    t.done()
+  })
+
   it("clamps a short menu to the 40-column floor", async () => {
     const t = await mountMenu(prActions())
     const top = t.lines()[menuTop(t.lines())]!

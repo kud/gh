@@ -212,7 +212,11 @@ describe("an optimistic ticket move", () => {
     // Arrived in Review before anything has answered: the target pill counts it.
     expect(t.tabs()).toMatch(/Review\D*2/)
     // The tab it left still draws it on its way out, as any departure does,
-    // until that tab's own transit hold settles — then its pill drops too.
+    // but its pill drops now: the count is about what you just did, not about
+    // the farewell. It used to wait out the transit hold, seven seconds of a
+    // number that disagreed with the keypress.
+    expect(t.tabs()).toMatch(/To do\D*1/)
+    expect(t.lineOf(MOVING)).not.toBe("")
     await advance(8000)
     expect(t.tabs()).toMatch(/To do\D*1/)
     expect(t.lineOf(MOVING)).toBe("")
