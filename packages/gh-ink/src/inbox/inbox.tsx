@@ -1431,6 +1431,7 @@ export const buildActions = (
   const actions: Action[] = drillAction
     ? [drillAction, open, copyUrl]
     : [open, copyUrl]
+  const closing: Action[] = []
 
   actions.push({
     label: "Copy repo name",
@@ -1616,7 +1617,11 @@ export const buildActions = (
       }
     }
 
-    actions.push({
+    // Held back and appended after the item extensions, so the destructive
+    // pair is always the last thing in the menu — Land and Submit came after
+    // "Close PR" until 2026-10-05, which put the one verb you cannot take back
+    // between the reader and the one they came for.
+    closing.push({
       label: "Close PR",
       hint: "",
       run: () => {},
@@ -1647,7 +1652,7 @@ export const buildActions = (
     })
 
     if (item.branch) {
-      actions.push({
+      closing.push({
         label: "Close PR + Delete branch",
         hint: "",
         run: () => {},
@@ -1691,6 +1696,8 @@ export const buildActions = (
           showFlash,
         }),
     })
+
+  actions.push(...closing)
 
   return actions
 }
