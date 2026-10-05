@@ -56,15 +56,11 @@ describe("selectionBackground", () => {
 
 describe("taskKeyStyle", () => {
   /*
-   * Exact equality on purpose: November pink on every row, unlike the PR number, and
-   * bold only under the cursor, so a stray prop breaks the shape.
+   * Exact equality on purpose: bold purple on every row, unlike the PR number,
+   * so a stray prop breaks the shape.
    */
-  it("wears November pink on every row and bold only when active", () => {
-    expect(taskKeyStyle(true)).toEqual({ color: TICKET_KEY_COLOUR, bold: true })
-    expect(taskKeyStyle(false)).toEqual({
-      color: TICKET_KEY_COLOUR,
-      bold: false,
-    })
+  it("wears bold November purple on every row", () => {
+    expect(taskKeyStyle()).toEqual({ color: TICKET_KEY_COLOUR, bold: true })
   })
 })
 

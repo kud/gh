@@ -1376,23 +1376,23 @@ export const selectionBackground = (
   backdropped: boolean,
 ): string | undefined => (active && !backdropped ? SELECTION_BG : undefined)
 
-export const TICKET_KEY_COLOUR = "#FF0174"
+export const TICKET_KEY_COLOUR = "#C792EA"
 
 /**
- * What the task key wears, given whether its row is under the cursor. The
- * November pink, the shell prompt's path colour, on every row, so a ticket key
- * never reads as the PR number one branch down, which keeps the accent. Both are
- * identifiers, and sharing a hue made them easy to confuse (Erwann, 2026-10-05).
- * Cyan read as a washed-out lavender and a sky blue sat outside the November
- * palette; both were tried and dropped the same day. Bold only when active, because weight is the selection signal and
- * bold at rest would mute it. A function rather than bare props so the shape
- * stays pinnable — see `selectionBackground` for why a frame cannot assert it.
+ * What the task key wears: November's keyword purple, bold, on every row. A
+ * ticket key must never read as the PR number one branch down, which keeps the
+ * accent, and it must lead it: at about 7.2:1 on the terminal ground the purple
+ * is level with the orange, so the weight is what ranks it first (Iris,
+ * 2026-10-05). Bold at rest, so it does not change under the cursor; the row's
+ * summary carries the selection. Cyan read as a washed-out lavender, a sky blue
+ * sat outside the November palette and the pink read as bordeaux; all three
+ * were tried and dropped the same day. A function rather than bare props so the
+ * shape stays pinnable — see `selectionBackground` for why a frame cannot
+ * assert it.
  */
-export const taskKeyStyle = (
-  active: boolean,
-): { color: string; bold: boolean } => ({
+export const taskKeyStyle = (): { color: string; bold: boolean } => ({
   color: TICKET_KEY_COLOUR,
-  bold: active,
+  bold: true,
 })
 
 /**
@@ -3027,9 +3027,9 @@ const ItemRow = ({
             the ticket — and a dimmed key-only repeat was tried and dropped: it
             made the second band's heading harder to read for a duplication that
             was never actually confusing. */}
-        {/* The key wears the PR number's accent on every row — see
+        {/* The key wears its own bold purple on every row — see
             `taskKeyStyle`. */}
-        <Text {...taskKeyStyle(active)}>{item.key + "  "}</Text>
+        <Text {...taskKeyStyle()}>{item.key + "  "}</Text>
         <Text
           bold={active || (!!transient && isArrival(transient))}
           dimColor={!!transient && isDeparture(transient)}
