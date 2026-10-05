@@ -24,6 +24,7 @@ import { Backdrop, backdropStyle, Text, useBackdropped } from "./backdrop.js"
 export { backdropStyle }
 import { truncate } from "../lib/truncate.js"
 export { truncate }
+import { searchBarState } from "./search-bar.js"
 import {
   numberColumnsOf,
   PrRow,
@@ -226,13 +227,7 @@ export type SettledResult = { ok: true } | { ok: false; reason: string }
 // row between bands and never a heading; `confirm` is the close-confirmation
 // sub-menu, whose rows the cursor deliberately lands on last.
 export type ActionGroup =
-  | "act"
-  | "open"
-  | "switch"
-  | "copy"
-  | "quiet"
-  | "close"
-  | "confirm"
+  "act" | "open" | "switch" | "copy" | "quiet" | "close" | "confirm"
 
 export type Action = {
   label: string
@@ -2940,8 +2935,7 @@ const isConfirmRows = (rows: MenuRow[]): boolean =>
  * is glyph, word or weight, never hue alone.
  */
 export const menuTone = (row: Action): "error" | undefined =>
-  row.group === "close" ||
-  (row.group === "confirm" && row.label !== "Cancel")
+  row.group === "close" || (row.group === "confirm" && row.label !== "Cancel")
     ? "error"
     : undefined
 
@@ -3061,11 +3055,7 @@ export const ActionMenu = ({
   // elides the middle, which would eat the join between two halves that both
   // matter — a title truncates at the end, with the … saying so.
   const leadNum =
-    item.kind === "task"
-      ? item.key
-      : number !== null
-        ? `#${number}`
-        : ""
+    item.kind === "task" ? item.key : number !== null ? `#${number}` : ""
   const lead = leadNum ? `${leadNum} · ` : ""
   const rest = confirming
     ? `Close #${number}?`
@@ -4928,6 +4918,13 @@ const BrowseScreen = ({
   const matchCount = section.items.filter(
     (i) => i.kind !== "repo-header" && i.kind !== "subgroup-header",
   ).length
+  // The search bar's two states, read at render time like every other
+  // `getIconMode()` consumer: typing is lit and caret-bearing, a kept filter
+  // is dimmed furniture with its own words. See search-bar.ts.
+  const searchBar = searchBarState({
+    typing: searchInput,
+    nerd: getIconMode() === "nerd",
+  })
 
   /*
    * Above the `hidden` early return below because it is a hook: a drill that
@@ -5099,7 +5096,9 @@ const BrowseScreen = ({
         login={login}
         // Inside an overlay the breadcrumb names the open item; on browse, the
         // host's scope. The counts, the login and the freshness never leave.
-        scopeLabel={overlayOpen ? (chrome?.scope ?? origin?.label) : origin?.label}
+        scopeLabel={
+          overlayOpen ? (chrome?.scope ?? origin?.label) : origin?.label
+        }
         budgetLabel={budgetNotice(budget)?.label}
         budgetCritical={budgetNotice(budget)?.critical}
         refreshing={refreshing}
@@ -5135,48 +5134,52 @@ const BrowseScreen = ({
       ) : null}
 
       {overlayOpen ? null : (
-      <Box marginBottom={1}>
-        <Tabs
-          active={section.id}
-          items={localSections.map((s) => ({
-            value: s.id,
-            label: s.label,
-            count: workCount(s),
-            /*
-             * The denominator, and only where it can still be true.
-             *
-             * `sampled.total` is what the SEARCHES matched; `count` is what this
-             * frame draws. A filter moves the numerator and cannot move the
-             * denominator, so `20/97` under an active search would be a fraction
-             * of two different populations — worse than no fraction, because it
-             * reads as precise. Dropping it here rather than upstream is the
-             * whole reason the total arrives as a number instead of baked into
-             * the label: this is the only layer that knows a filter is on.
-             */
-            total: filterActive ? undefined : s.sampled?.total,
-            // Its own cell, always two wide, so news arriving never slides the
-            // bar — and free to animate for exactly that reason.
-            // The ticker undivided — see TAB_PULSE. The row marks' /3 buys quiet
-            // for motion sitting beside text, and this is not that.
-            marker: tabMarker(
-              markedTabs,
-              s.id,
-              pulseSettled ? PULSE_SETTLED_FRAME : sparkFrame,
-            ),
-            markerColor: colors.accent,
-          }))}
-        />
-      </Box>
+        <Box marginBottom={1}>
+          <Tabs
+            active={section.id}
+            items={localSections.map((s) => ({
+              value: s.id,
+              label: s.label,
+              count: workCount(s),
+              /*
+               * The denominator, and only where it can still be true.
+               *
+               * `sampled.total` is what the SEARCHES matched; `count` is what this
+               * frame draws. A filter moves the numerator and cannot move the
+               * denominator, so `20/97` under an active search would be a fraction
+               * of two different populations — worse than no fraction, because it
+               * reads as precise. Dropping it here rather than upstream is the
+               * whole reason the total arrives as a number instead of baked into
+               * the label: this is the only layer that knows a filter is on.
+               */
+              total: filterActive ? undefined : s.sampled?.total,
+              // Its own cell, always two wide, so news arriving never slides the
+              // bar — and free to animate for exactly that reason.
+              // The ticker undivided — see TAB_PULSE. The row marks' /3 buys quiet
+              // for motion sitting beside text, and this is not that.
+              marker: tabMarker(
+                markedTabs,
+                s.id,
+                pulseSettled ? PULSE_SETTLED_FRAME : sparkFrame,
+              ),
+              markerColor: colors.accent,
+            }))}
+          />
+        </Box>
       )}
 
       {!overlayOpen && search != null ? (
         <Box marginBottom={1}>
-          <Text color={colors.info}>{"  / "}</Text>
+          <Text color={searchBar.glyphColor}>{`  ${searchBar.glyph} `}</Text>
           <Text>{search}</Text>
-          {searchInput ? <Text color={colors.info}>▏</Text> : null}
+          {searchBar.caret ? <Text color={colors.info}>▏</Text> : null}
           <Text dimColor>{`   ${matchCount} match${
             matchCount !== 1 ? "es" : ""
-          }  ${filter.hints.map(([k, label]) => `${k} ${label}`).join(" · ")}`}</Text>
+          }  ${
+            searchInput
+              ? filter.hints.map(([k, label]) => `${k} ${label}`).join(" · ")
+              : searchBar.hints
+          }`}</Text>
         </Box>
       ) : !overlayOpen && repoFilter.size > 0 ? (
         <Box marginBottom={1}>
@@ -5216,106 +5219,106 @@ const BrowseScreen = ({
             {overlayBody}
           </Box>
         ) : (
-        <Box
-          flexDirection="column"
-          minHeight={listHeight}
-          width={listCols}
-          flexShrink={0}
-        >
-          {/* Dimmed by the rail as well as by an overlay, and for the same
+          <Box
+            flexDirection="column"
+            minHeight={listHeight}
+            width={listCols}
+            flexShrink={0}
+          >
+            {/* Dimmed by the rail as well as by an overlay, and for the same
               reason: the arrows are somewhere else. The keymap already shuts the
               list out while the rail holds focus (see the railActive branch in
               useInput), but nothing on screen said so — two lit cursors, one of
               them inert, and no way to tell which ↵ would act on. Recessing the
               list answers that without taking the row you will come back to off
               the screen: its ❯ is still there, in the backdrop's tone. */}
-          <Backdrop
-            dimmed={!!overlay || railActive}
-            absolute={!!overlay}
-            height={listHeight}
-          >
-            <Box flexDirection="column" flexGrow={1}>
-              {visibleItems.map((item, i) => (
-                <ItemRow
-                  // Prefix the absolute index so keys stay unique even when the
-                  // same repo header recurs down a time-sorted list (Done). The
-                  // sum viewStart + i is stable per underlying item across scroll.
-                  key={`${viewStart + i}:${rowKey(item)}`}
-                  item={item}
-                  active={viewStart + i === cursor}
-                  login={login}
-                  merged={
-                    (item.kind === "pr" || item.kind === "issue") &&
-                    !!mergedUrls?.includes(item.url)
-                  }
-                  leaving={
-                    (item.kind === "pr" || item.kind === "issue") &&
-                    !!leavingUrls?.includes(item.url)
-                  }
-                  transient={transientOf(transients, item, section.id)}
-                  transitAt={
-                    "url" in item ? transitSince?.get(item.url) : undefined
-                  }
-                  // Computed against section.items, never the visible slice: a
-                  // window boundary is not the end of a group, and slicing first
-                  // would draw a closing corner wherever the scroll happens to cut.
-                  prefix={treePrefix(section.items, viewStart + i)}
-                  parent={
-                    item.kind === "task" &&
-                    depthOf(section.items[viewStart + i + 1]) > depthOf(item)
-                  }
-                  sparkFrame={sparkFrame}
-                  // The PR rows end at `ROW_MAX_COLS`, and so do the two header
-                  // kinds, so every band ends on the same column — see
-                  // `rowCols` and `RepoHeaderRow`. Tasks and the show-more/less
-                  // rows join them now that the cursor paints a band: on the
-                  // list's full width theirs ran 40-odd columns past the rest on
-                  // a wide terminal. A task row budgets its title off this, so
-                  // its title loses the same columns.
-                  cols={
-                    item.kind === "pr" ||
-                    item.kind === "issue" ||
-                    item.kind === "repo-header" ||
-                    item.kind === "subgroup-header" ||
-                    item.kind === "task" ||
-                    item.kind === "show-more" ||
-                    item.kind === "show-less"
-                      ? rowCols
-                      : listCols
-                  }
-                  markerCols={markerCols}
-                  // Computed against section.items for the same reason as
-                  // markerCols and prefix above: uniformity is a property of the
-                  // group, not of whatever the scroll happens to be showing.
-                  uniformLabels={uniformLabels}
-                  columns={trailingColumns}
-                  shed={trailingShed}
-                  numberCols={numberCols}
-                  // `i > 0` is window-relative and stays that way: the window's
-                  // first row never draws its gap, and fitCount does not charge
-                  // for one. The rule itself is gapsAbove, shared with fitCount so
-                  // the two cannot drift.
-                  gap={i > 0 && gapsAbove(section.items, viewStart + i)}
-                />
-              ))}
-            </Box>
-            {hasMore && (
-              <Text dimColor>
-                {"  "}↓ {section.items.length - viewStart - visibleCount} more
-              </Text>
-            )}
-          </Backdrop>
-          {overlay ? (
-            <Box
-              flexGrow={1}
-              flexDirection="column"
-              justifyContent="center"
-              alignItems="center"
+            <Backdrop
+              dimmed={!!overlay || railActive}
+              absolute={!!overlay}
+              height={listHeight}
             >
-              {overlay}
-            </Box>
-          ) : null}
-        </Box>
+              <Box flexDirection="column" flexGrow={1}>
+                {visibleItems.map((item, i) => (
+                  <ItemRow
+                    // Prefix the absolute index so keys stay unique even when the
+                    // same repo header recurs down a time-sorted list (Done). The
+                    // sum viewStart + i is stable per underlying item across scroll.
+                    key={`${viewStart + i}:${rowKey(item)}`}
+                    item={item}
+                    active={viewStart + i === cursor}
+                    login={login}
+                    merged={
+                      (item.kind === "pr" || item.kind === "issue") &&
+                      !!mergedUrls?.includes(item.url)
+                    }
+                    leaving={
+                      (item.kind === "pr" || item.kind === "issue") &&
+                      !!leavingUrls?.includes(item.url)
+                    }
+                    transient={transientOf(transients, item, section.id)}
+                    transitAt={
+                      "url" in item ? transitSince?.get(item.url) : undefined
+                    }
+                    // Computed against section.items, never the visible slice: a
+                    // window boundary is not the end of a group, and slicing first
+                    // would draw a closing corner wherever the scroll happens to cut.
+                    prefix={treePrefix(section.items, viewStart + i)}
+                    parent={
+                      item.kind === "task" &&
+                      depthOf(section.items[viewStart + i + 1]) > depthOf(item)
+                    }
+                    sparkFrame={sparkFrame}
+                    // The PR rows end at `ROW_MAX_COLS`, and so do the two header
+                    // kinds, so every band ends on the same column — see
+                    // `rowCols` and `RepoHeaderRow`. Tasks and the show-more/less
+                    // rows join them now that the cursor paints a band: on the
+                    // list's full width theirs ran 40-odd columns past the rest on
+                    // a wide terminal. A task row budgets its title off this, so
+                    // its title loses the same columns.
+                    cols={
+                      item.kind === "pr" ||
+                      item.kind === "issue" ||
+                      item.kind === "repo-header" ||
+                      item.kind === "subgroup-header" ||
+                      item.kind === "task" ||
+                      item.kind === "show-more" ||
+                      item.kind === "show-less"
+                        ? rowCols
+                        : listCols
+                    }
+                    markerCols={markerCols}
+                    // Computed against section.items for the same reason as
+                    // markerCols and prefix above: uniformity is a property of the
+                    // group, not of whatever the scroll happens to be showing.
+                    uniformLabels={uniformLabels}
+                    columns={trailingColumns}
+                    shed={trailingShed}
+                    numberCols={numberCols}
+                    // `i > 0` is window-relative and stays that way: the window's
+                    // first row never draws its gap, and fitCount does not charge
+                    // for one. The rule itself is gapsAbove, shared with fitCount so
+                    // the two cannot drift.
+                    gap={i > 0 && gapsAbove(section.items, viewStart + i)}
+                  />
+                ))}
+              </Box>
+              {hasMore && (
+                <Text dimColor>
+                  {"  "}↓ {section.items.length - viewStart - visibleCount} more
+                </Text>
+              )}
+            </Backdrop>
+            {overlay ? (
+              <Box
+                flexGrow={1}
+                flexDirection="column"
+                justifyContent="center"
+                alignItems="center"
+              >
+                {overlay}
+              </Box>
+            ) : null}
+          </Box>
         )}
         {showRail && !overlayOpen ? (
           <SidePanel
@@ -5337,11 +5340,7 @@ const BrowseScreen = ({
           // appends `⌫ back` and `q quit`, so a body passes only its own keys
           // through `useChrome` — the same contract ink-ui's `Page` offers its
           // nested pages, without re-laying-out the browse frame as one.
-          <FooterHints
-            hints={chrome?.hints ?? []}
-            page="nested"
-            help={false}
-          />
+          <FooterHints hints={chrome?.hints ?? []} page="nested" help={false} />
         ) : (
           <FooterHints hints={hints} />
         )}

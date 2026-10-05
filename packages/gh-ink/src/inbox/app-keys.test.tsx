@@ -185,7 +185,7 @@ describe("the app's own keys", () => {
     const after = frame()
     done()
 
-    expect(committed).toContain("/ edit")
+    expect(committed).toContain("filtered · keys active · esc clear")
     expect(after).toContain("/ pu")
   })
 })
