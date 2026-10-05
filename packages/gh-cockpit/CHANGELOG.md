@@ -1,5 +1,22 @@
 # @kud/gh-cockpit
 
+## 0.11.0
+
+### Minor Changes
+
+- ef989ca: Drilling into a pull request or an issue keeps the cockpit around it now: the frame, the title row and the footer persist, and the detail — health, conversation, file list, check log, AI launcher — renders inside them instead of on a bare screen. Each view hands its title up as the header breadcrumb and its keys down to the persistent footer through `useChrome`, so the same component still draws its own frame when mounted outside the inbox. Nothing else moves: the tabs, rows and keys inside each view are unchanged.
+
+### Patch Changes
+
+- 245cdbe: The row action menu is grouped now instead of one long list: host verbs that act, then opens, checkouts, copies, quiet verbs and the close pair last, with a blank row between groups and the cursor stepping over them. Each row shows its key on the right and, on nerd-font terminals, its glyph on the left; closing rows and their confirmations wear the error tone, and the confirmation starts on Cancel rather than on the destructive verb. Host extensions declare their group and glyph through the new `menuGroup` and `icon` fields, and anything that claims nothing still lands with the quiet verbs. No keys change and no verbs were added or removed — "Close PR + Delete branch" reads "Close PR and delete branch" now, and that is the only rename.
+- 85fcc5e: Passes through the new `fetchInbox`, so a host fetching the inbox through this package gets every one of its own open pull requests instead of the first window of them, with no change at its own layer.
+- Updated dependencies [245cdbe]
+- Updated dependencies [ae1877e]
+- Updated dependencies [25a8d82]
+  - @kud/gh-ink@0.67.0
+  - @kud/gh@0.20.0
+  - @kud/gh-workflow@0.14.1
+
 ## 0.10.4
 
 ### Patch Changes
