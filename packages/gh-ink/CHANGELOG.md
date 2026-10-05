@@ -1,5 +1,18 @@
 # @kud/gh-ink
 
+## 0.67.0
+
+### Minor Changes
+
+- 245cdbe: The row action menu is grouped now instead of one long list: host verbs that act, then opens, checkouts, copies, quiet verbs and the close pair last, with a blank row between groups and the cursor stepping over them. Each row shows its key on the right and, on nerd-font terminals, its glyph on the left; closing rows and their confirmations wear the error tone, and the confirmation starts on Cancel rather than on the destructive verb. Host extensions declare their group and glyph through the new `menuGroup` and `icon` fields, and anything that claims nothing still lands with the quiet verbs. No keys change and no verbs were added or removed — "Close PR + Delete branch" reads "Close PR and delete branch" now, and that is the only rename.
+- ae1877e: Opening a pull request, an issue or an extension screen no longer blanks the cockpit to show it. The rounded frame, the title row with its counts and freshness, and the footer hints stay on screen while the detail renders in the content area between them, and a detail that wants a word in either claims it through the new `useChrome` hook — a header breadcrumb naming the open item and its own footer verbs, with the way back appended. A screen that claims nothing still renders inside the frame. No keys change: quitting, backing out and the app-level peel behave as before.
+
+### Patch Changes
+
+- Updated dependencies [25a8d82]
+  - @kud/gh@0.20.0
+  - @kud/gh-workflow@0.14.1
+
 ## 0.66.1
 
 ### Patch Changes
