@@ -21,6 +21,10 @@
     "./pulse": {
       "import": "./dist/pulse.js",
       "types": "./dist/pulse.d.ts"
+    },
+    "./ref": {
+      "import": "./dist/ref.js",
+      "types": "./dist/ref.d.ts"
     }
   },
   "files": [

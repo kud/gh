@@ -1,6 +1,6 @@
 import React from "react"
 import { Box, Text, useWindowSize } from "ink"
-import { colors, FooterHints, Panel } from "@kud/ink-ui"
+import { colors, FooterHints, Panel, Pill } from "@kud/ink-ui"
 import { useChrome } from "../lib.js"
 
 // Shared chrome for mounted drill views (comments / checks / issue): the title
@@ -20,14 +20,41 @@ import { useChrome } from "../lib.js"
 // it again beside the body's own would put two ways back on one footer.
 const SHELL_KEYS = new Set(["esc", "⌫", "q", "?"])
 
+// The title line, with the drill's one optional tag beside it — `not in inbox`
+// on an item opened from the launcher that no list holds. A tag rather than a
+// banner because nothing about the item is wrong: every verb works, and the
+// only news is that the list behind the drill will not show it. Soft and muted,
+// the classification tone, so it reads as a fact about the item and never as
+// an event competing with its health.
+const TitleLine = ({ subtitle, tag }: { subtitle?: string; tag?: string }) =>
+  subtitle || tag ? (
+    <Box>
+      {subtitle ? (
+        <>
+          <Text bold>{"Title: "}</Text>
+          <Text>{subtitle}</Text>
+        </>
+      ) : null}
+      {tag ? (
+        <Box marginLeft={subtitle ? 2 : 0} flexShrink={0}>
+          <Pill variant="muted" tone="soft">
+            {tag}
+          </Pill>
+        </Box>
+      ) : null}
+    </Box>
+  ) : null
+
 export const DrillView = ({
   title,
   subtitle,
+  tag,
   hints,
   children,
 }: {
   title: string
   subtitle?: string
+  tag?: string
   hints: [string, string][]
   children: React.ReactNode
 }) => {
@@ -38,17 +65,24 @@ export const DrillView = ({
   if (inShell) {
     return (
       <Box flexDirection="column">
-        {subtitle ? (
+        {subtitle || tag ? (
           <Box marginBottom={1}>
-            <Text bold>{"Title: "}</Text>
-            <Text>{subtitle}</Text>
+            <TitleLine subtitle={subtitle} tag={tag} />
           </Box>
         ) : null}
         {children}
       </Box>
     )
   }
-  return <LegacyDrillView title={title} subtitle={subtitle} hints={hints} children={children} />
+  return (
+    <LegacyDrillView
+      title={title}
+      subtitle={subtitle}
+      tag={tag}
+      hints={hints}
+      children={children}
+    />
+  )
 }
 
 // The standalone frame, byte-for-byte what every drill drew before the shell
@@ -65,11 +99,13 @@ export const DrillView = ({
 const LegacyDrillView = ({
   title,
   subtitle,
+  tag,
   hints,
   children,
 }: {
   title: string
   subtitle?: string
+  tag?: string
   hints: [string, string][]
   children: React.ReactNode
 }) => {
@@ -85,10 +121,9 @@ const LegacyDrillView = ({
           <Text color={colors.accent} bold>
             {title}
           </Text>
-          {subtitle ? (
+          {subtitle || tag ? (
             <Box marginTop={1}>
-              <Text bold>{"Title: "}</Text>
-              <Text>{subtitle}</Text>
+              <TitleLine subtitle={subtitle} tag={tag} />
             </Box>
           ) : null}
         </Box>

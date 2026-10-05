@@ -178,6 +178,16 @@ export type GHItem = {
    */
   heldSince?: number
   /**
+   * The row was looked up by name — pasted into the launcher — rather than
+   * found by any of the inbox's searches, so nothing in the list stands behind
+   * it. A drill says so in its header, because every verb still works on it
+   * but the list the viewer returns to will not show it.
+   *
+   * Set only on that path, and only when the inbox holds no copy: a looked-up
+   * item that IS listed opens as the listed row, flag and all absent.
+   */
+  notInInbox?: boolean
+  /**
    * What this row STANDS FOR, when that differs from what it is. Absent means
    * the row is a unit of work and is counted as one.
    *

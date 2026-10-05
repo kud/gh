@@ -1260,3 +1260,86 @@ export const mergeHealth = (data: any, parts: readonly any[]): any => {
 
   return out
 }
+
+/**
+ * One PR or issue by repo and number, as a node `toGHItem` can map — for an
+ * item the viewer named rather than one a search found (the cockpit launcher's
+ * `acme/api-gateway#2926`).
+ *
+ * THE SAME SELECTIONS AS THE INBOX, interpolated from the constants above rather
+ * than written out again, and that is the whole point of it living in this
+ * file. A node fetched without `PR_HEALTH` maps to `health: undefined`, which
+ * `whoseMove` reads as `unknown`, and a drill opened on it loses every action
+ * keyed off health; without `PR_CONVERSATION` the turn and the thread count go
+ * with it. A hand-written copy of the selection would be correct on the day it
+ * was written and drift from then on.
+ *
+ * `state` is the one field the inbox's sources do not carry, because they only
+ * ever search `is:open`. A named item can be merged or closed, and
+ * `computeHealth` reads `state` before anything else — without it a merged PR
+ * would be priced on its last checks and read as live.
+ *
+ * `issueOrPullRequest` because the shorthand does not say which, and GitHub
+ * numbers both from one sequence: the node's `__typename` answers it.
+ *
+ * Returns `null` for NOT_FOUND, which is how GitHub answers both "no such item"
+ * and "no access" — a private repo is indistinguishable from an absent one, by
+ * design. `gh` exits non-zero on it but still prints the body, so the error is
+ * read for its `errors[].type` rather than treated as a failure. Anything else
+ * (no network, an expired token) throws, so a caller can tell "nothing there"
+ * from "could not ask".
+ */
+export const fetchItemNode = async (
+  repo: string,
+  number: number,
+  run: (
+    query: string,
+    vars: Record<string, string | number>,
+  ) => Promise<any> = ghGraphql,
+): Promise<any | null> => {
+  const [owner, name] = repo.split("/")
+  if (!owner || !name) throw new Error(`"${repo}" is not an owner/name slug`)
+  const query = `
+query($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    issueOrPullRequest(number: $number) {
+      __typename
+      ... on Issue {
+        number title state createdAt url repository { nameWithOwner } author { login }
+        ${ISSUE_CONVERSATION}
+        ${ISSUE_LABELS}
+      }
+      ... on PullRequest {
+        id number title state createdAt url headRefName isDraft repository { nameWithOwner } author { login }
+        ${PR_SIZE}
+        ${PR_HEALTH}
+        ${PR_CONVERSATION}
+        ${PR_LABELS}
+      }
+    }
+  }
+}
+`
+  try {
+    const data = await run(query, { owner, name, number })
+    return data?.repository?.issueOrPullRequest ?? null
+  } catch (error) {
+    if (isNotFound(error)) return null
+    throw error
+  }
+}
+
+const isNotFound = (error: unknown): boolean => {
+  const stdout = (error as { stdout?: unknown })?.stdout
+  if (typeof stdout !== "string" || !stdout.trim()) return false
+  try {
+    const errors = JSON.parse(stdout)?.errors
+    return (
+      Array.isArray(errors) &&
+      errors.length > 0 &&
+      errors.every((e: any) => e?.type === "NOT_FOUND")
+    )
+  } catch {
+    return false
+  }
+}
