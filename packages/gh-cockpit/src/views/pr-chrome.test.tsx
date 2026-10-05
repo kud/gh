@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { EventEmitter } from "node:events"
+import { createRequire } from "node:module"
 import React from "react"
 import { render } from "ink"
 import { App, type GHItem, type Section } from "../lib.js"
@@ -13,6 +14,11 @@ import { detailFor } from "./detail.js"
 // Same sized-stdout harness as gh-ink's inbox specs: the subject is App-level
 // composition with keypresses, which ink-testing-library's fixed 100-column,
 // row-less stdout cannot size.
+//
+// `writes` counts every frame any mounted tree has drawn, for `settle` to tell
+// a quiet tree from one still drawing.
+let writes = 0
+
 class FakeStdout extends EventEmitter {
   frames: string[] = []
   constructor(
@@ -23,6 +29,7 @@ class FakeStdout extends EventEmitter {
   }
   write = (frame: string) => {
     this.frames.push(frame)
+    writes += 1
   }
   lastFrame = () => this.frames.at(-1) ?? ""
 }
@@ -67,8 +74,64 @@ const SECTIONS: Section[] = [
   { id: "open", label: "Open", items: [pr(1), pr(2)] },
 ]
 
-const settle = () => new Promise((resolve) => setImmediate(resolve))
+/*
+ * Wait for React, not for a number of event-loop turns.
+ *
+ * Both specs here used to count `setImmediate` turns: two after mounting, three
+ * after `d`. Ink mounts a LEGACY root, whose passive effects run on React's
+ * scheduler in 5ms slices measured on the real clock, so the number of turns
+ * any of it takes depends on how loaded the machine is. And one of those
+ * effects is `useInput` subscribing the browse list's key handler — a key
+ * emitted before it lands is not queued, it is dropped. On a loaded CI runner
+ * `d` went in before the list was listening, the drill never opened, and the
+ * spec read the list it started on.
+ *
+ * So `settle` waits until the tree is quiet: an idle-priority task, which the
+ * scheduler runs only once every pending effect has, then a turn for whatever
+ * render those effects scheduled, round again until a round draws nothing. It
+ * is the scheduler instance Ink's reconciler resolved; there is one in the tree.
+ */
+type Scheduler = {
+  unstable_scheduleCallback: (priority: number, task: () => void) => unknown
+  unstable_IdlePriority: number
+}
+const scheduler = createRequire(import.meta.url)("scheduler") as Scheduler
+const drainScheduler = () =>
+  new Promise<void>((resolve) => {
+    scheduler.unstable_scheduleCallback(scheduler.unstable_IdlePriority, () =>
+      resolve(),
+    )
+  })
+const settle = async () => {
+  let seen: number
+  do {
+    seen = writes
+    await drainScheduler()
+    await new Promise((resolve) => setImmediate(resolve))
+  } while (writes !== seen)
+}
+
+// Wait on what the screen says rather than on how long it might take to say
+// it. A lone `esc` is the reason this cannot be a single settle: Ink holds it
+// for 20ms of real time in case it starts an escape sequence, and only then
+// hands it to the app. The deadline only bounds a failure; a passing wait
+// returns at the first frame that matches.
+const frameWith = async (
+  stdout: FakeStdout,
+  ok: (frame: string) => boolean,
+  what: string,
+) => {
+  const deadline = performance.now() + 5000
+  await settle()
+  while (!ok(stripAnsi(stdout.lastFrame()))) {
+    if (performance.now() > deadline)
+      throw new Error(`no frame ${what}:\n${stdout.lastFrame()}`)
+    await settle()
+  }
+}
+
 const ESC = String.fromCharCode(27)
+const BREADCRUMB = "#1 · acme/api-gateway"
 
 const ANSI = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "g")
 const stripAnsi = (line: string) => line.replace(ANSI, "")
@@ -91,13 +154,18 @@ describe("PrView inside the persistent chrome", () => {
         patchConsole: false,
       },
     )
-    await settle()
-    await settle()
+    await frameWith(
+      stdout,
+      (f) => f.includes("pull request number 2"),
+      "with the list drawn",
+    )
 
     stdin.press("d")
-    await settle()
-    await settle()
-    await settle()
+    await frameWith(
+      stdout,
+      (f) => f.includes(BREADCRUMB),
+      "with the drill open",
+    )
     const frame = stripAnsi(stdout.lastFrame())
     instance.unmount()
     instance.cleanup()
@@ -110,7 +178,7 @@ describe("PrView inside the persistent chrome", () => {
     expect(frame).toMatch(/╰/)
     expect(frame).toContain("🚀 Cockpit")
     expect(frame).toContain("@kud")
-    expect(frame).toContain("#1 · acme/api-gateway")
+    expect(frame).toContain(BREADCRUMB)
     expect(frame).toMatch(/⌫ back.*q quit/)
     expect(frame).not.toContain("pull request number 2")
   })
@@ -132,25 +200,30 @@ describe("PrView inside the persistent chrome", () => {
         patchConsole: false,
       },
     )
-    await settle()
-    await settle()
+    await frameWith(
+      stdout,
+      (f) => f.includes("pull request number 2"),
+      "with the list drawn",
+    )
 
     stdin.press("d")
-    await settle()
-    await settle()
-    await settle()
-    expect(stripAnsi(stdout.lastFrame())).toContain("#1 · acme/api-gateway")
+    await frameWith(
+      stdout,
+      (f) => f.includes(BREADCRUMB),
+      "with the drill open",
+    )
 
     stdin.press(ESC)
-    await settle()
-    await settle()
-    await new Promise((r) => setTimeout(r, 20))
-    await settle()
+    await frameWith(
+      stdout,
+      (f) => !f.includes(BREADCRUMB),
+      "with the drill closed",
+    )
     const frame = stripAnsi(stdout.lastFrame())
     instance.unmount()
     instance.cleanup()
 
-    expect(frame).not.toContain("#1 · acme/api-gateway")
+    expect(frame).not.toContain(BREADCRUMB)
     expect(frame).toContain("pull request number 1")
     expect(frame).toContain("pull request number 2")
   })
