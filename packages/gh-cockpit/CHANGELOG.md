@@ -1,5 +1,13 @@
 # @kud/gh-cockpit
 
+## 0.11.8
+
+### Patch Changes
+
+- a928dff: Ticket keys are bold November purple. `taskKeyStyle` no longer takes the active flag.
+- Updated dependencies [a928dff]
+  - @kud/gh-ink@0.70.0
+
 ## 0.11.7
 
 ### Patch Changes
