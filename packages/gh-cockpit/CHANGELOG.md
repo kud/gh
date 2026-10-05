@@ -1,5 +1,22 @@
 # @kud/gh-cockpit
 
+## 0.11.3
+
+### Patch Changes
+
+- 1d40c2f: Built against `@kud/ink-ui` 0.34.0, whose command palette paints its whole box, so rows underneath no longer show through the launcher.
+- 4257f4a: `@kud/ink-ui` is now a peer dependency of gh-ink (`^0.33.0`) rather than a pinned dependency, so a host and gh-ink always share one copy. ink-ui keeps the icon mode in module state, and a second nested copy meant a host's `setIconMode("nerd")` never reached it. The CLIs move to ink-ui 0.33.2.
+- 76f3c35: The Jira move submenu used to offer a static list of transitions per ticket, with no idea what the ticket's workflow currently allows. Picking a transition the workflow does not offer from that state is a silent no-op — `jira issue move` matches nothing and the row simply does not budge — so the menu could confidently offer moves that cannot work.
+
+  A host can now pass `jiraTransitionsFor`, a `(ticket) => Promise<...>` hook alongside `jiraTransitions`. When present, opening the move submenu asks the workflow for that ticket's live transitions instead of listing the static set: known transitions keep their place, label and resolution step from the static list, anything else is still offered after them alphabetically, and the answer is cached per ticket and status for the session (dropped after a move lands). Failures open a retry row rather than falling back to the static list. Without the hook the submenu is byte-for-byte the static list it always was.
+
+- Updated dependencies [1d40c2f]
+- Updated dependencies [4257f4a]
+- Updated dependencies [76f3c35]
+- Updated dependencies [33ed15e]
+- Updated dependencies [e8f6bef]
+  - @kud/gh-ink@0.69.0
+
 ## 0.11.2
 
 ### Patch Changes
