@@ -1,5 +1,11 @@
 # @kud/gh-ink
 
+## 0.69.3
+
+### Patch Changes
+
+- 6742835: Ticket keys use a clearer sky blue instead of ANSI cyan.
+
 ## 0.69.2
 
 ### Patch Changes

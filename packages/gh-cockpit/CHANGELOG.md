@@ -1,5 +1,13 @@
 # @kud/gh-cockpit
 
+## 0.11.6
+
+### Patch Changes
+
+- 6742835: Ticket keys use a clearer sky blue instead of ANSI cyan.
+- Updated dependencies [6742835]
+  - @kud/gh-ink@0.69.3
+
 ## 0.11.5
 
 ### Patch Changes
