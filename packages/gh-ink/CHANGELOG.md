@@ -1,5 +1,20 @@
 # @kud/gh-ink
 
+## 0.74.0
+
+### Minor Changes
+
+- 91e7154: Closing a PR or an issue, and dropping your own review request, now go through the same patch layer Jira moves use. The row leaves on the keypress wearing `◌` until GitHub answers, and the patch is laid over every fetch, so a refetch that predates the close cannot put it back. It clears as soon as a fetch agrees. A refusal used to bounce the row straight back through a refresh, which read as the keypress having done nothing; it now keeps the row off the board and says so in the footer, `✗ Couldn't close #412: <reason>  w restore`, and `w` drops the patch and refetches. The `x` key takes the same path as the menu row it mirrors rather than keeping its own pessimistic copy. Closing a PR and deleting its branch patches only the close: a branch that will not delete gets its own flash, since the PR it belonged to really is closed. Merge is unchanged and still waits for GitHub.
+
+  The `◌` marker now draws on PR and issue rows as well as tickets, in the health cell, so the title does not move. And a tab's count pill drops the moment your own move or close takes a row out of it, rather than after the departing row's transit hold; the header total agrees with it. A refresh departure still counts until its hold ends, because there the pill is reporting news you have not read yet.
+
+  The action menu no longer crashes the inbox when the cursor is pushed past its first or last row.
+
+### Patch Changes
+
+- 0e20ef2: PR rows draw their `+N -N` diff counts in ink-ui's new `added` and `removed` colours: a more vivid green and a lifted red that no longer sinks into the grey repo and age columns. The `@kud/ink-ui` peer range moves to `>=0.38.0 <1`, where those two colours first exist.
+- 9548253: Built against `@kud/ink-ui` 0.37.0. A launcher lookup that fails (a `gh` error, a 502) used to draw as an extra red row, `✗ couldn't look up acme/api-gateway#2926 · <reason>`, with the cursor sitting on it so Enter could retry. It was a row only because the palette's message line had a single muted ink, and a failure dressed as a selectable row read as something to open. The failure now takes the message line in the palette's error tone, behind its `✗`, where every other launcher verdict already lands; the input keeps the query as typed and Enter still asks again. The `@kud/ink-ui` peer range moves to `>=0.37.0 <1`, because an older palette has no error tone and no way to retry from the message line.
+
 ## 0.73.0
 
 ### Minor Changes
