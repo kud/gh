@@ -44,16 +44,17 @@
     "access": "public"
   },
   "peerDependencies": {
+    "@kud/ink-ui": "^0.33.0",
     "ink": ">=7",
     "react": ">=19"
   },
   "dependencies": {
     "@kud/gh": "0.20.0",
     "@kud/gh-workflow": "0.14.1",
-    "@kud/ink-ui": "0.33.1",
     "zx": "8.8.5"
   },
   "devDependencies": {
+    "@kud/ink-ui": "0.33.2",
     "@types/node": "22.20.1",
     "@types/react": "19.2.17",
     "ink": "7.1.0",
