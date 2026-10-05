@@ -44,6 +44,13 @@ export type PrRowProps = {
   active: boolean
   login?: string
   /**
+   * The selection wash for this frame, resolved by the list — see
+   * `selectionBackground` in the inbox. A prop rather than an import because
+   * the constant lives next to the inbox's `OVERLAY_BG` and importing the inbox
+   * here would cycle back through this module. Absent the row draws no wash.
+   */
+  selectionBg?: string
+  /**
    * Columns available to this row, which is NOT always the frame width: a rail
    * beside the list takes its share, and a budget that does not know the rail is
    * there overflows by exactly the rail.
@@ -462,6 +469,7 @@ export const PrRow = ({
   active,
   login,
   cols,
+  selectionBg,
   icon: iconOverride,
   prefix = "",
   uniformLabels = [],
@@ -566,7 +574,9 @@ export const PrRow = ({
   })
 
   return (
-    <Box width={cols}>
+    // The wash paints every cell of the fixed-width row — an Ink Box's
+    // background covers its full measure, not just the inked cells.
+    <Box width={cols} backgroundColor={selectionBg}>
       <Text color={colors.info}>{active ? "❯ " : "  "}</Text>
       <Text dimColor>{prefix}</Text>
       <Text color={color as any} bold>

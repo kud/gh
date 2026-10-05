@@ -701,10 +701,7 @@ export const bandUrls = (items: readonly AnyItem[], i: number): string[] => {
  * no URL both answer `[]`, and the caller treats that as "do nothing" rather
  * than copying an empty string.
  */
-export const copyUrls = (
-  items: readonly AnyItem[],
-  i: number,
-): string[] => {
+export const copyUrls = (items: readonly AnyItem[], i: number): string[] => {
   const item = items[i]
   if (!item) return []
   if (item.kind === "repo-header") return groupUrls(items, i)
@@ -1075,6 +1072,38 @@ const ROW_MAX_COLS = 140
 // panel. A shade lighter than a dark terminal on purpose, so it reads as raised
 // against the dimmed backdrop rather than as a hole cut in it.
 const OVERLAY_BG = "#22222e"
+
+/*
+ * The wash behind the row under the cursor. Darker than the terminal ground
+ * (~#1e1f2b) rather than lighter, so it reads as a recessed track the row sits
+ * in rather than a second raised panel — the raised reading is the overlay's,
+ * and two raised planes would argue about which is in front. The ❯ and the bold
+ * stay: state is never colour alone, and a piped frame carries no tint at all.
+ */
+export const SELECTION_BG = "#16161f"
+
+/**
+ * What wash a row wears this frame. Pure so it can be pinned without rendering:
+ * chalk emits colour only for a TTY, so a spec that grepped a frame for the
+ * tint would pass vacuously wherever the suite is piped. Suppressed behind an
+ * overlay — a lit band under a dialog would read as something to act on while
+ * the dialog owns the keys.
+ */
+export const selectionBackground = (
+  active: boolean,
+  backdropped: boolean,
+): string | undefined => (active && !backdropped ? SELECTION_BG : undefined)
+
+/**
+ * What the task key wears, given whether its row is under the cursor. Bold when
+ * active, and no hue either way: it wore the accent until 2026-10-05, which
+ * read as selection turning the title orange, and the recessed band says where
+ * the cursor is now. A function rather than a bare prop so the absence stays
+ * pinnable — see `selectionBackground` for why a frame cannot assert it.
+ */
+export const taskKeyStyle = (active: boolean): { bold: boolean } => ({
+  bold: active,
+})
 
 /**
  * What the tab badge and the header total both count.
@@ -1969,16 +1998,29 @@ const RepoHeaderRow = ({
   repo,
   gap,
   active,
+  cols,
+  selectionBg,
 }: {
   repo: string
   gap: boolean
   active: boolean
+  /**
+   * The row's drawn width, capped like the PR rows' — see `rowCols`. Without it
+   * the Box stretches to the list's full width while a PR band ends at
+   * `ROW_MAX_COLS`, so on a wide window the two bands end on different columns.
+   * The fence itself is unchanged: only the wash runs wider.
+   */
+  cols: number
+  /** The selection wash, resolved by the row — see `selectionBackground`. */
+  selectionBg?: string
 }) => {
   const label = `── ${repo} `
   const fill = Math.max(4, FENCE_COLS - label.length)
   const rule = "─".repeat(fill)
+  // marginTop stays a margin, not padding: the gap row is unpainted either way,
+  // and padding would carry the wash into it.
   return (
-    <Box marginTop={gap ? 1 : 0}>
+    <Box marginTop={gap ? 1 : 0} width={cols} backgroundColor={selectionBg}>
       <Text color={colors.info}>{active ? "❯ " : "  "}</Text>
       <Text dimColor={!active}>{"── "}</Text>
       {/* The repo name is the answer to "what am I looking at"; the rules either
@@ -2415,6 +2457,9 @@ const ItemRow = ({
   // Read once for the row rather than at each of the four pill sites — a hook,
   // so it cannot sit inside the `repo-header` branch below.
   const backdropped = useBackdropped()
+  // The selection wash, resolved once and worn by every branch below — the PR
+  // row takes it as a prop because it lives across the module boundary.
+  const selBg = selectionBackground(active, backdropped)
   const transient: Transient | undefined = leaving ? "out" : refreshMark
   // Slower than the merge sparkle, off the same counter — see TRANSIT_FRAME_TICKS.
   const transitFrame = Math.floor(sparkFrame / TRANSIT_FRAME_TICKS)
@@ -2435,14 +2480,22 @@ const ItemRow = ({
   // The header carries that wording now, and the tab pulses to say where.
   const farewellLabel = leaving ? TRANSIT_LABEL.out : ""
   if (item.kind === "repo-header")
-    return <RepoHeaderRow repo={item.repo} gap={gap ?? false} active={active} />
+    return (
+      <RepoHeaderRow
+        repo={item.repo}
+        gap={gap ?? false}
+        active={active}
+        cols={cols}
+        selectionBg={selBg}
+      />
+    )
 
   // A band header is a selectable row like a fence, so it wears the same cursor
   // in the same column: a fixed two-column cell, so standing on it shifts
   // nothing sideways and leaving it draws byte-identical output to before.
   if (item.kind === "subgroup-header")
     return (
-      <Box marginTop={gap ? 1 : 0}>
+      <Box marginTop={gap ? 1 : 0} width={cols} backgroundColor={selBg}>
         <Text color={colors.info}>{active ? "❯ " : "  "}</Text>
         <Text color={colors.accent} bold>
           {"» "}
@@ -2453,7 +2506,7 @@ const ItemRow = ({
 
   if (item.kind === "show-more")
     return (
-      <Box>
+      <Box width={cols} backgroundColor={selBg}>
         <Text color={colors.info}>{active ? "❯ " : "  "}</Text>
         {/* The computed run, not a bare corner. A collapsed group under a
             non-last story still needs its ancestor stem, or its column breaks
@@ -2466,7 +2519,7 @@ const ItemRow = ({
 
   if (item.kind === "show-less")
     return (
-      <Box>
+      <Box width={cols} backgroundColor={selBg}>
         <Text color={colors.info}>{active ? "❯ " : "  "}</Text>
         <Text dimColor>{prefix}</Text>
         <Text dimColor>{active ? "↵ " : "  "}</Text>
@@ -2522,7 +2575,7 @@ const ItemRow = ({
         12,
     )
     return (
-      <Box marginTop={gap ? 1 : 0}>
+      <Box marginTop={gap ? 1 : 0} width={cols} backgroundColor={selBg}>
         <Text color={colors.info}>{active ? "❯ " : "  "}</Text>
         <Text dimColor>{prefix}</Text>
         {/* The branch this ticket opens, and it must come BEFORE the transit
@@ -2558,9 +2611,11 @@ const ItemRow = ({
             the ticket — and a dimmed key-only repeat was tried and dropped: it
             made the second band's heading harder to read for a duplication that
             was never actually confusing. */}
-        <Text color={colors.accent} bold={active}>
-          {item.key + "  "}
-        </Text>
+        {/* The key keeps its weight and its gutter, not its hue — see
+            `taskKeyStyle`. The PR number one branch down keeps its accent: it
+            is a reference on every row, where this orange used to mark the one
+            row under the cursor. */}
+        <Text {...taskKeyStyle(active)}>{item.key + "  "}</Text>
         <Text
           bold={active || (!!transient && isArrival(transient))}
           dimColor={!!transient && isDeparture(transient)}
@@ -2675,6 +2730,7 @@ const ItemRow = ({
       active={active}
       login={login}
       cols={cols}
+      selectionBg={selBg}
       prefix={prefix}
       uniformLabels={uniformLabels}
       columns={columns}
@@ -4472,8 +4528,7 @@ const BrowseScreen = ({
   // `copyUrls` rather than counted separately, so the hint and the key cannot
   // disagree about it.
   const headerLinks =
-    activeItem?.kind === "repo-header" ||
-    activeItem?.kind === "subgroup-header"
+    activeItem?.kind === "repo-header" || activeItem?.kind === "subgroup-header"
       ? copyUrls(section.items, cursor).length
       : 0
   const headerHint: [string, string] = [
@@ -4512,24 +4567,24 @@ const BrowseScreen = ({
             ["?", "help"],
             ["q", "quit"],
           ]
-      : [
-          ["↑↓", "nav"],
-          ["←→", "tab"],
-          ["↵/d", "open"],
-          ["m", "actions"],
-          // Only where Jira is configured: without it the launcher can only say
-          // so, and a footer key that opens an apology is a broken feature.
-          ...(jiraBase ? ([["⌃K", "launch"]] as [string, string][]) : []),
-          // Advertised only where it does something, and named for what it
-          // shows rather than for the furniture: nobody wants "a sidebar".
-          ...(showRail
-            ? ([["⇥", railTitle]] as [string, string][])
-            : hasRail
-              ? ([["i", railTitle]] as [string, string][])
-              : []),
-          ["?", "help"],
-          ["q", "quit"],
-        ]
+        : [
+            ["↑↓", "nav"],
+            ["←→", "tab"],
+            ["↵/d", "open"],
+            ["m", "actions"],
+            // Only where Jira is configured: without it the launcher can only say
+            // so, and a footer key that opens an apology is a broken feature.
+            ...(jiraBase ? ([["⌃K", "launch"]] as [string, string][]) : []),
+            // Advertised only where it does something, and named for what it
+            // shows rather than for the furniture: nobody wants "a sidebar".
+            ...(showRail
+              ? ([["⇥", railTitle]] as [string, string][])
+              : hasRail
+                ? ([["i", railTitle]] as [string, string][])
+                : []),
+            ["?", "help"],
+            ["q", "quit"],
+          ]
   const matchCount = section.items.filter(
     (i) => i.kind !== "repo-header" && i.kind !== "subgroup-header",
   ).length
@@ -4851,10 +4906,21 @@ const BrowseScreen = ({
                     depthOf(section.items[viewStart + i + 1]) > depthOf(item)
                   }
                   sparkFrame={sparkFrame}
-                  // The PR rows end at `ROW_MAX_COLS`; everything else keeps the
-                  // list's full width — see `rowCols`.
+                  // The PR rows end at `ROW_MAX_COLS`, and so do the two header
+                  // kinds, so every band ends on the same column — see
+                  // `rowCols` and `RepoHeaderRow`. Tasks and the show-more/less
+                  // rows join them now that the cursor paints a band: on the
+                  // list's full width theirs ran 40-odd columns past the rest on
+                  // a wide terminal. A task row budgets its title off this, so
+                  // its title loses the same columns.
                   cols={
-                    item.kind === "pr" || item.kind === "issue"
+                    item.kind === "pr" ||
+                    item.kind === "issue" ||
+                    item.kind === "repo-header" ||
+                    item.kind === "subgroup-header" ||
+                    item.kind === "task" ||
+                    item.kind === "show-more" ||
+                    item.kind === "show-less"
                       ? rowCols
                       : listCols
                   }
