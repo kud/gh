@@ -1,5 +1,11 @@
 # @kud/gh-ink
 
+## 0.69.4
+
+### Patch Changes
+
+- a3b36f4: Ticket keys use the November pink.
+
 ## 0.69.3
 
 ### Patch Changes
