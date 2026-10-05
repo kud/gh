@@ -127,15 +127,29 @@ describe("orderJiraMoves", () => {
       configured,
     )
     expect(ordered).toEqual([
-      { label: "Start", transition: "Start Progress" },
-      { label: "Finish", transition: "Done", resolutions: ["Done"] },
+      {
+        label: "Start",
+        transition: "Start Progress",
+        to: { name: "Start Progress" },
+      },
+      {
+        label: "Finish",
+        transition: "Done",
+        resolutions: ["Done"],
+        to: { name: "Done" },
+      },
     ])
   })
 
   it("filters out configured entries the workflow does not offer", () => {
     const ordered = orderJiraMoves([live("Done", "21")], configured)
     expect(ordered).toEqual([
-      { label: "Finish", transition: "Done", resolutions: ["Done"] },
+      {
+        label: "Finish",
+        transition: "Done",
+        resolutions: ["Done"],
+        to: { name: "Done" },
+      },
     ])
   })
 
@@ -145,16 +159,21 @@ describe("orderJiraMoves", () => {
       configured,
     )
     expect(ordered).toEqual([
-      { label: "Finish", transition: "Done", resolutions: ["Done"] },
-      { label: "Blocked", transition: "Blocked" },
-      { label: "On Hold", transition: "On Hold" },
+      {
+        label: "Finish",
+        transition: "Done",
+        resolutions: ["Done"],
+        to: { name: "Done" },
+      },
+      { label: "Blocked", transition: "Blocked", to: { name: "Blocked" } },
+      { label: "On Hold", transition: "On Hold", to: { name: "On Hold" } },
     ])
   })
 
   it("orders everything alphabetically without a static list", () => {
     expect(orderJiraMoves([live("Done"), live("Blocked")])).toEqual([
-      { label: "Blocked", transition: "Blocked" },
-      { label: "Done", transition: "Done" },
+      { label: "Blocked", transition: "Blocked", to: { name: "Blocked" } },
+      { label: "Done", transition: "Done", to: { name: "Done" } },
     ])
   })
 })
