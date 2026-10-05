@@ -1,5 +1,18 @@
 # @kud/gh-pr-comments
 
+## 0.1.130
+
+### Patch Changes
+
+- 1d40c2f: Built against `@kud/ink-ui` 0.34.0, whose command palette paints its whole box, so rows underneath no longer show through the launcher.
+- 4257f4a: `@kud/ink-ui` is now a peer dependency of gh-ink (`^0.33.0`) rather than a pinned dependency, so a host and gh-ink always share one copy. ink-ui keeps the icon mode in module state, and a second nested copy meant a host's `setIconMode("nerd")` never reached it. The CLIs move to ink-ui 0.33.2.
+- Updated dependencies [1d40c2f]
+- Updated dependencies [4257f4a]
+- Updated dependencies [76f3c35]
+- Updated dependencies [33ed15e]
+- Updated dependencies [e8f6bef]
+  - @kud/gh-ink@0.69.0
+
 ## 0.1.129
 
 ### Patch Changes

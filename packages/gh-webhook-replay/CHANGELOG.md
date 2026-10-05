@@ -1,5 +1,12 @@
 # @kud/gh-webhook-replay
 
+## 0.1.34
+
+### Patch Changes
+
+- 1d40c2f: Built against `@kud/ink-ui` 0.34.0, whose command palette paints its whole box, so rows underneath no longer show through the launcher.
+- 4257f4a: `@kud/ink-ui` is now a peer dependency of gh-ink (`^0.33.0`) rather than a pinned dependency, so a host and gh-ink always share one copy. ink-ui keeps the icon mode in module state, and a second nested copy meant a host's `setIconMode("nerd")` never reached it. The CLIs move to ink-ui 0.33.2.
+
 ## 0.1.33
 
 ### Patch Changes
