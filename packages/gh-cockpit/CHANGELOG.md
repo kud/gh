@@ -1,5 +1,15 @@
 # @kud/gh-cockpit
 
+## 0.10.4
+
+### Patch Changes
+
+- 1cddb18: Closing a pull request is the last thing in its action menu again. Actions a host contributes, such as Land and Submit, were appended after "Close PR" and "Close PR + Delete branch", so the one verb that cannot be taken back sat between you and the one you opened the menu for. Host actions now come before the close pair, and nothing else in the menu moves.
+- 5425c86: Switching tabs no longer shifts the list sideways. The `#n` cell and the trailing columns were measured over the tab on screen, so a tab holding `#1234` started its titles a column to the right of one holding `#157`, and the ages moved with them. Both are now measured once over every tab's pull requests and issues, so the columns stay put; which columns a narrow tab gives up is still decided per tab.
+- Updated dependencies [1cddb18]
+- Updated dependencies [5425c86]
+  - @kud/gh-ink@0.66.1
+
 ## 0.10.3
 
 ### Patch Changes
