@@ -70,7 +70,7 @@ import {
   failureNotice,
   pruneOverrides,
 } from "./overrides.js"
-import type { Override } from "./overrides.js"
+import type { Override, Patch } from "./overrides.js"
 import {
   SidePanel,
   railWidth,
@@ -332,6 +332,21 @@ export type OptimisticHandle = {
   settled: () => void
   failed: (err: unknown) => void
 }
+
+/**
+ * A row action said ahead of the server: the end state it leaves the row in,
+ * and the verb the failure line names it by — `close` reads back as
+ * "Couldn't close #412".
+ */
+export type OptimisticChange = { patch: Patch; action: string }
+
+/** How a row is named in the failure line: a ticket key, or `#412`. */
+export const rowLabelOf = (item: AnyItem): string =>
+  item.kind === "task"
+    ? item.ticket ?? item.key
+    : item.kind === "pr" || item.kind === "issue"
+    ? `#${item.number}`
+    : ""
 
 /**
  * Resolve the live transitions for a ticket, called lazily when its move
@@ -1547,6 +1562,39 @@ export const workCount = (s: Section): number => {
   return n
 }
 
+/**
+ * The sections as the counts should see them: without the rows your own action
+ * has already taken out of a tab.
+ *
+ * A row leaving still STANDS in the tab it left for the length of that tab's
+ * transit hold, which is right for the row — you watch it go — and was wrong
+ * for the pill: it went on counting the row for up to seven seconds after you
+ * had moved or closed it, so the number disagreed with what you had just done.
+ * A refresh departure keeps counting through its hold, because there the pill
+ * is reporting news you have not read yet; this is only for news you made.
+ *
+ * Keyed on where the patch SENDS the row rather than on the transit marks,
+ * because a sampled section draws no marks and its pills must drop all the
+ * same. A move to a tab the host did not send leaves the row in place (see
+ * `applyOverrides`), so there it still counts.
+ */
+export const countedSections = (
+  sections: Section[],
+  departing?: ReadonlyMap<string, string | null>,
+): Section[] => {
+  if (!departing?.size) return sections
+  const sent = new Set(sections.map((s) => s.id))
+  return sections.map((s) => {
+    const items = s.items.filter((item) => {
+      const key = keyOf(item)
+      if (!key || !departing.has(key)) return true
+      const to = departing.get(key)
+      return to != null && (to === s.id || !sent.has(to))
+    })
+    return items.length === s.items.length ? s : { ...s, items }
+  })
+}
+
 export const drillCmd = (item: AnyItem): string | null => {
   if (item.kind === "task")
     return item.ticket ? `jira issue view ${item.ticket}` : null
@@ -1672,6 +1720,10 @@ export const openInJira = (
   showFlash(`↗ Opened ${key} in Jira`)
 }
 
+// Named once because the `x` key finds the menu row by it rather than keeping
+// a second copy of what the row does.
+const REMOVE_ME_AS_REVIEWER = "Remove me as reviewer"
+
 export const buildActions = (
   item: AnyItem,
   login: string,
@@ -1708,6 +1760,18 @@ export const buildActions = (
      * the settlement signal.
      */
     onSettled?: (item: GHItem, result: SettledResult) => void
+    /**
+     * Take the row's action ahead of the server — see `OptimisticChange`. A
+     * handle back means the row is already where the action puts it, so the
+     * request's answer goes to the handle and a failure goes ONLY there: the
+     * failed patch has its own sticky line with `w` beside it, and a flash
+     * naming the same failure would be a second voice saying it less well.
+     * Absent, every action keeps the pessimistic shape it had.
+     */
+    optimistic?: (
+      item: AnyItem,
+      change: OptimisticChange,
+    ) => OptimisticHandle | undefined
     /**
      * Open the ticket's move submenu through the live-transitions hook. Passed
      * by the browse screen (which owns the menu the rows open into) only when
@@ -1861,6 +1925,54 @@ export const buildActions = (
     : [open, copyUrl]
   const closing: Action[] = []
 
+  /*
+   * One shape for every action that takes a row off the board: the patch goes
+   * down first, so a fetch landing mid-request cannot put the row back, then
+   * the row leaves wearing GONE as it always has, then the request runs.
+   *
+   * With a handle the answer belongs to the patch. Yes lets it wait for a
+   * fetch that agrees; no keeps the row off the board with the failure line
+   * and `w` — it used to bounce straight back through a refresh, which read as
+   * the keypress having done nothing. Without one (a host that mounts the list
+   * bare) it keeps exactly that older shape: flash, refresh, row returns.
+   */
+  const removeAhead = (opts: {
+    action: string
+    request: () => Promise<unknown>
+    taking: string
+    done?: string
+    refused: (e: unknown) => string
+    /** Report to `onSettled` — see its contract for which actions do. */
+    settles?: boolean
+    /** Refresh after a yes even when not held, as this action always has. */
+    refreshes?: boolean
+  }) => {
+    const row = item as GHItem
+    const held = ext?.optimistic?.(row, {
+      patch: { kind: "remove" },
+      action: opts.action,
+    })
+    onRemove?.(row)
+    showFlash(opts.taking)
+    void opts.request().then(
+      () => {
+        held?.settled()
+        if (opts.done) showFlash(opts.done)
+        if (held || opts.refreshes) ext?.onActed?.()
+        if (opts.settles) ext?.onSettled?.(row, { ok: true })
+      },
+      (e) => {
+        if (held) held.failed(e)
+        else {
+          showFlash(opts.refused(e))
+          onRefresh?.()
+        }
+        if (opts.settles)
+          ext?.onSettled?.(row, { ok: false, reason: firstLine(e) })
+      },
+    )
+  }
+
   actions.push({
     label: "Copy repo name",
     hint: "r",
@@ -1906,7 +2018,7 @@ export const buildActions = (
   // more notifications, no more review requests.
   if (item.kind === "pr" && item.standing === "queued" && login) {
     actions.push({
-      label: "Remove me as reviewer",
+      label: REMOVE_ME_AS_REVIEWER,
       hint: "x",
       // Quiet, beside Unsubscribe: both are "less of this PR for me" — no more
       // review requests, no more notifications. Guarded by the caller's own
@@ -1914,28 +2026,19 @@ export const buildActions = (
       // review request there is no such row, and none is invented here.
       group: "quiet",
       icon: "\uF468",
-      run: () => {
-        // Optimistic, then restored by a refresh if GitHub refuses — the same
-        // shape Close uses. A row that vanishes and returns reads as a failure;
-        // one that lingers for a round trip reads as a broken keypress.
-        onRemove?.(item as GHItem)
-        showFlash(`⋯ Removing you from #${item.number}…`)
-        void quietly`gh pr edit ${item.number} --repo ${item.repo} --remove-reviewer ${login}`.then(
-          () => {
-            showFlash(`✓ Removed you as reviewer on #${item.number}`)
-            ext?.onActed?.()
-            ext?.onSettled?.(item as GHItem, { ok: true })
-          },
-          (e) => {
-            showFlash(`✗ #${item.number}: ${explainGhAction(e)}`)
-            onRefresh?.()
-            ext?.onSettled?.(item as GHItem, {
-              ok: false,
-              reason: firstLine(e),
-            })
-          },
-        )
-      },
+      // Optimistic, the same shape Close uses. A row that lingers for a round
+      // trip reads as a broken keypress.
+      run: () =>
+        removeAhead({
+          action: "remove you from",
+          request: () =>
+            quietly`gh pr edit ${item.number} --repo ${item.repo} --remove-reviewer ${login}`,
+          taking: `⋯ Removing you from #${item.number}…`,
+          done: `✓ Removed you as reviewer on #${item.number}`,
+          refused: (e) => `✗ #${item.number}: ${explainGhAction(e)}`,
+          settles: true,
+          refreshes: true,
+        }),
     })
   }
 
@@ -2015,23 +2118,15 @@ export const buildActions = (
           label: `Close #${item.number}`,
           hint: "",
           group: "confirm",
-          run: () => {
-            onRemove?.(item as GHItem)
-            showFlash(`✓ Closed #${item.number}`)
-            void quietly`gh issue close ${item.number} --repo ${item.repo}`.then(
-              () => {
-                ext?.onSettled?.(item as GHItem, { ok: true })
-              },
-              (e) => {
-                showFlash(`✗ Close failed — restoring #${item.number}`)
-                onRefresh?.()
-                ext?.onSettled?.(item as GHItem, {
-                  ok: false,
-                  reason: firstLine(e),
-                })
-              },
-            )
-          },
+          run: () =>
+            removeAhead({
+              action: "close",
+              request: () =>
+                quietly`gh issue close ${item.number} --repo ${item.repo}`,
+              taking: `✓ Closed #${item.number}`,
+              refused: () => `✗ Close failed — restoring #${item.number}`,
+              settles: true,
+            }),
         },
         { label: "Cancel", hint: "", group: "confirm", run: () => {} },
       ],
@@ -2096,23 +2191,15 @@ export const buildActions = (
           label: `Close #${item.number}`,
           hint: "",
           group: "confirm",
-          run: () => {
-            onRemove?.(item as GHItem)
-            showFlash(`✓ Closed #${item.number}`)
-            void quietly`gh pr close ${item.number} --repo ${item.repo}`.then(
-              () => {
-                ext?.onSettled?.(item as GHItem, { ok: true })
-              },
-              (e) => {
-                showFlash(`✗ Close failed — restoring #${item.number}`)
-                onRefresh?.()
-                ext?.onSettled?.(item as GHItem, {
-                  ok: false,
-                  reason: firstLine(e),
-                })
-              },
-            )
-          },
+          run: () =>
+            removeAhead({
+              action: "close",
+              request: () =>
+                quietly`gh pr close ${item.number} --repo ${item.repo}`,
+              taking: `✓ Closed #${item.number}`,
+              refused: () => `✗ Close failed — restoring #${item.number}`,
+              settles: true,
+            }),
         },
         { label: "Cancel", hint: "", group: "confirm", run: () => {} },
       ],
@@ -2132,19 +2219,25 @@ export const buildActions = (
             label: `Close #${item.number} and delete ${item.branch}`,
             hint: "",
             group: "confirm",
-            run: () => {
-              onRemove?.(item as GHItem)
-              showFlash(`✓ Closed #${item.number} and deleted ${item.branch}`)
-              void quietly`gh pr close ${item.number} --repo ${item.repo}`
-                .then(
-                  () =>
-                    quietly`gh api -X DELETE ${`repos/${item.repo}/git/refs/heads/${item.branch}`}`,
-                )
-                .catch(() => {
-                  showFlash(`✗ Close + delete failed — restoring`)
-                  onRefresh?.()
-                })
-            },
+            // The patch covers the close and nothing else. A branch that will
+            // not delete leaves a PR that IS closed, so reporting "Couldn't
+            // close #412" and offering `w` would restore a row the server no
+            // longer has; the branch gets its own flash instead.
+            run: () =>
+              removeAhead({
+                action: "close",
+                request: async () => {
+                  await quietly`gh pr close ${item.number} --repo ${item.repo}`
+                  void quietly`gh api -X DELETE ${`repos/${item.repo}/git/refs/heads/${item.branch}`}`.catch(
+                    () =>
+                      showFlash(
+                        `✗ Closed #${item.number}, but couldn't delete ${item.branch}`,
+                      ),
+                  )
+                },
+                taking: `✓ Closed #${item.number} and deleted ${item.branch}`,
+                refused: () => `✗ Close + delete failed — restoring`,
+              }),
           },
           { label: "Cancel", hint: "", group: "confirm", run: () => {} },
         ],
@@ -3198,11 +3291,19 @@ const ItemRow = ({
   // to announce that it changed is the one substitution that costs information,
   // which is why it names the health glyph explicitly rather than passing no
   // override: it wants that glyph in the transit colour, not the health one.
+  //
+  // Pending takes the same cell, and outranks the ramp for the reason it does on
+  // a task row: the ramp says where the row went, `◌` says the server has not
+  // yet agreed it went anywhere. Muted rather than coloured, as the task row's
+  // is dimmed — it is the frame before anything has happened. Only a merge
+  // outranks it, and the two never meet: a merge is not taken optimistically.
   const icon = merged
     ? {
         glyph: MERGED_FRAMES[sparkFrame % MERGED_FRAMES.length] as string,
         color: MERGED_COLOUR,
       }
+    : pending
+    ? { glyph: PENDING_GLYPH, color: colors.muted }
     : transient
     ? {
         glyph: isDeparture(transient)
@@ -3337,17 +3438,23 @@ export const useActionMenu = () => {
     if (!actions) return false
     // The cursor never stands on a gap: steps land on the next live row, and a
     // run of gaps at the edge holds position rather than wrapping.
+    //
+    // The edges hold too. Stepping off either end used to read `actions[-1]` or
+    // `actions[length]` and throw inside the state updater, which took the
+    // whole inbox down on an ↑ at the top row or a ↓ at the bottom one.
+    const live = (n: number) =>
+      n >= 0 && n < actions.length && !isMenuGap(actions[n]!)
     if (key.upArrow)
       setCursor((c) => {
         let n = c - 1
         while (n > 0 && isMenuGap(actions[n]!)) n -= 1
-        return isMenuGap(actions[n]!) ? c : n
+        return live(n) ? n : c
       })
     if (key.downArrow)
       setCursor((c) => {
         let n = c + 1
         while (n < actions.length - 1 && isMenuGap(actions[n]!)) n += 1
-        return isMenuGap(actions[n]!) ? c : n
+        return live(n) ? n : c
       })
     if (key.return) {
       const row = actions[cursor]
@@ -4038,6 +4145,8 @@ const BrowseScreen = ({
   sidebar,
   liveLabel,
   optimisticMove,
+  optimistic,
+  departing,
   pendingKeys,
   failure,
   onRestore,
@@ -4177,6 +4286,19 @@ const BrowseScreen = ({
     task: TaskRow,
     to: { name: string; category?: string },
   ) => OptimisticHandle | undefined
+  /**
+   * Take any other row action optimistically — a close, dropping your review
+   * request. Absent, those actions keep their pessimistic flashes and refresh.
+   */
+  optimistic?: (
+    item: AnyItem,
+    change: OptimisticChange,
+  ) => OptimisticHandle | undefined
+  /**
+   * Rows a patch has taken out of their tab, by row key, to where they went:
+   * a section id for a move, null for a remove. Read only by the counts.
+   */
+  departing?: ReadonlyMap<string, string | null>
   /** Rows whose patch is still waiting on its request, by row key — drawn `◌`. */
   pendingKeys?: ReadonlySet<string>
   /**
@@ -4464,6 +4586,16 @@ const BrowseScreen = ({
     return () => clearTimeout(timer)
   }, [failure?.seq])
 
+  // What the tab pills and the header total count — see `countedSections`.
+  const counted = useMemo(
+    () => countedSections(localSections, departing),
+    [localSections, departing],
+  )
+  const countOf = (id: string): number => {
+    const s = counted.find((c) => c.id === id)
+    return s ? workCount(s) : 0
+  }
+
   // Which tabs are still holding news nobody has read. The marker itself lives
   // on the row, in a tab that may not be open — so without this the hold keeps
   // its promise perfectly and nothing ever tells you to go and collect on it.
@@ -4727,20 +4859,11 @@ const BrowseScreen = ({
     })
   }
 
-  const openMenu = () => {
-    if (
-      !activeItem ||
-      activeItem.kind === "repo-header" ||
-      activeItem.kind === "subgroup-header"
-    )
-      return
-    const actions = buildActions(
-      activeItem,
+  const actionsFor = (item: AnyItem, flash: (msg: string) => void) =>
+    buildActions(
+      item,
       login,
-      (msg) => {
-        menu.close()
-        showFlash(msg)
-      },
+      flash,
       jiraBase,
       jiraKeyRe,
       jiraTransitions,
@@ -4752,10 +4875,24 @@ const BrowseScreen = ({
         onOpenExt,
         onActed,
         onSettled,
+        optimistic,
         onOpenMove: jiraTransitionsFor ? openMoveFor : undefined,
       },
     )
-    menu.open(actions)
+
+  const openMenu = () => {
+    if (
+      !activeItem ||
+      activeItem.kind === "repo-header" ||
+      activeItem.kind === "subgroup-header"
+    )
+      return
+    menu.open(
+      actionsFor(activeItem, (msg) => {
+        menu.close()
+        showFlash(msg)
+      }),
+    )
   }
 
   useInput((input, key) => {
@@ -5220,20 +5357,11 @@ const BrowseScreen = ({
       activeItem.standing === "queued" &&
       login
     ) {
-      dismissItem(activeItem)
-      showFlash(`⋯ Removing you from #${activeItem.number}…`)
-      void quietly`gh pr edit ${activeItem.number} --repo ${activeItem.repo} --remove-reviewer ${login}`.then(
-        () => {
-          showFlash(`✓ Removed you as reviewer on #${activeItem.number}`)
-          onActed?.()
-          onSettled?.(activeItem, { ok: true })
-        },
-        (e) => {
-          showFlash(`✗ #${activeItem.number}: ${explainGhAction(e)}`)
-          onRefresh?.()
-          onSettled?.(activeItem, { ok: false, reason: firstLine(e) })
-        },
-      )
+      // The menu row's own run, not a second copy of it: this used to be one,
+      // and the copy was exactly the half that would have stayed pessimistic.
+      actionsFor(activeItem, showFlash)
+        .find((a) => a.label === REMOVE_ME_AS_REVIEWER)
+        ?.run()
       return
     }
     if (input === "b" && activeItem.kind === "pr" && activeItem.branch) {
@@ -5629,7 +5757,7 @@ const BrowseScreen = ({
     >
       <InboxHeader
         brand={brand}
-        sections={localSections}
+        sections={counted}
         login={login}
         // Inside an overlay the breadcrumb names the open item; on browse, the
         // host's scope. The counts, the login and the freshness never leave.
@@ -5677,7 +5805,7 @@ const BrowseScreen = ({
             items={localSections.map((s) => ({
               value: s.id,
               label: s.label,
-              count: workCount(s),
+              count: countOf(s.id),
               /*
                * The denominator, and only where it can still be true.
                *
@@ -6657,6 +6785,47 @@ export const App = ({
     : undefined
 
   /*
+   * Every other row action, through the same hold. Unlike a move it needs
+   * nothing from the host: a close names its end state (off the board) without
+   * knowing how the host lays out its tabs, so there is no prop to gate it on.
+   * Merge is deliberately NOT routed here — see `markMerged`, which waits for
+   * GitHub's yes before it celebrates.
+   */
+  const optimistic = (
+    item: AnyItem,
+    change: OptimisticChange,
+  ): OptimisticHandle | undefined => {
+    const key = keyOf(item)
+    if (!key) return undefined
+    return hold(key, {
+      patch: change.patch,
+      action: change.action,
+      label: rowLabelOf(item),
+      since: Date.now(),
+      phase: "inflight",
+    })
+  }
+
+  // Where each row a patch has taken out of its tab now belongs: the target tab
+  // for a move, null for a remove. The tab it left stops counting it at once —
+  // see `countedSections`.
+  const departing = useMemo(
+    () =>
+      new Map<string, string | null>(
+        [...overrides.current].flatMap(
+          ([key, { patch }]): [string, string | null][] =>
+            patch.kind === "remove"
+              ? [[key, null]]
+              : patch.kind === "move"
+              ? [[key, patch.toSection]]
+              : [],
+        ),
+      ),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [overrideRev],
+  )
+
+  /*
    * `w`: drop the newest failed patch and ask the server where the row really
    * is. Never a replay of the list from before the action — that list is as
    * old as the action, and anything else that moved meanwhile would move back
@@ -6995,11 +7164,10 @@ export const App = ({
   // delay rather than at once, so the removal happens where you can watch it:
   // the row dissolves in place wearing GONE, then drops.
   //
-  // Same shape as markMerged, including its one rough edge — a close that
-  // GitHub then refuses removes the row anyway and lets the failure's refresh
-  // put it back, so the bounce is longer than it used to be. That path already
-  // says "restoring #412" out loud, and paying for it costs a cancellation seam
-  // through every caller of an action that never normally fails.
+  // Same shape as markMerged. This is only the farewell: a close taken from the
+  // menu has already laid its patch through `optimistic`, which is what keeps a
+  // refused close off the board with the failure line and `w`. A drill view's
+  // close reaches here only after GitHub said yes.
   const markLeaving = (target: GHItem) => {
     // Only when there is something to come back FROM. In browse this would swap
     // `sections` for an identical copy, and BrowseScreen resyncs off that prop
@@ -7076,6 +7244,8 @@ export const App = ({
         jiraTransitions={jiraTransitions}
         jiraTransitionsFor={jiraTransitionsFor}
         optimisticMove={optimisticMove}
+        optimistic={optimistic}
+        departing={departing}
         pendingKeys={pendingKeys}
         failure={failure}
         onRestore={restore}
