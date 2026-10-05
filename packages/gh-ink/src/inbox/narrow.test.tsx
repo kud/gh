@@ -189,19 +189,19 @@ describe("a row given less width than it wants", () => {
     const tight = await frameAt(COLS + 4, true)
     // Room for everything: the repo and the author are context worth having.
     expect(roomy).toContain("acme/web-app")
-    expect(roomy).toContain("by someone-else")
+    expect(roomy).toContain("@someone-else")
     // A rail's width poorer, the same row sheds them and keeps its subject. The
     // title is elided in the MIDDLE, so this asserts its head rather than a span
     // that truncation would cut through — and only as far in as the narrowest
     // rail this suite runs against leaves standing, since the assertion is that
     // the subject SURVIVES, not how much of it does.
     expect(tight).not.toContain("acme/web-app")
-    expect(tight).not.toContain("by someone-else")
+    expect(tight).not.toContain("@someone-else")
     expect(tight).toContain("PROJ-1125: Wire")
   })
 
   // Size sits between the author and the thread count on the ladder: it is an
-  // aid to deciding whether to open the PR, so it outlives "by X" and dies before
+  // aid to deciding whether to open the PR, so it outlives "@X" and dies before
   // a thread that is a claim on you now. The tight frame here is past both.
   it("shows the diff size while there is room and sheds it before the title", async () => {
     const roomy = await frameAt(COLS + 4, false)

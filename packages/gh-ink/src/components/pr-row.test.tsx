@@ -262,6 +262,136 @@ describe("PrRow", () => {
   })
 })
 
+describe("PrRow author column", () => {
+  /*
+   * THE POINT OF THE AUTHOR COLUMN. `by <login>` used to sit right after the
+   * title, so its position floated with title length and finding one author's
+   * rows meant reading each line. Measured once over the section and drawn as
+   * the first trailing cell, the sigils land in one column whatever the title
+   * is called — the same move the 2026-09-30 alignment made for the numbers.
+   */
+  it("lines up authors across rows with different title lengths", () => {
+    const rows = [
+      pr({
+        title: "short",
+        author: "al",
+        unresolved: 3,
+        additions: 84,
+        deletions: 12,
+      }),
+      pr({
+        number: 88,
+        title: "a rather longer title that runs on",
+        author: "longer-login",
+        additions: 6,
+        deletions: 1,
+      }),
+    ]
+    const columns = trailingColumnsOf(rows)
+    const [a, b] = rows.map((item) =>
+      frameOf(
+        <PrRow item={item} active={false} cols={100} columns={columns} />,
+      ),
+    )
+    // Left-aligned names: the sigils start in the same column.
+    expect(a.indexOf("@al")).toBe(b.indexOf("@longer-login"))
+    // First of the trailing cells, ahead of the numbers.
+    expect(a.indexOf("@al")).toBeLessThan(a.indexOf("-12"))
+    // No "by": the sigil is the whole channel.
+    expect(a).not.toContain("by al")
+  })
+
+  // 16 cells including the `@`, tail-truncated: a login reads left to right
+  // and its front is the discriminating part.
+  it("caps the author cell at 16 cells with a tail ellipsis", () => {
+    const item = pr({ author: "yaroslav-mokletsov-extra" })
+    const columns = trailingColumnsOf([item])
+    expect(columns.author).toBe(16)
+    const frame = frameOf(
+      <PrRow item={item} active={false} cols={120} columns={columns} />,
+    )
+    expect(frame).toContain("@yaroslav-mokle…")
+    expect(frame).not.toContain("yaroslav-mokletsov-extra")
+  })
+
+  /*
+   * Hide "by me": on a My PRs tab every row would carry the same name, so the
+   * column would classify nothing — the same reason uniform labels are
+   * suppressed. The condition is unchanged, only the cell moved.
+   */
+  it("shows no author on the viewer's own PRs", () => {
+    const frame = frameOf(
+      <PrRow
+        item={pr({ author: "kud" })}
+        active={false}
+        cols={120}
+        login="kud"
+      />,
+    )
+    expect(frame).not.toContain("@kud")
+    expect(frame).not.toContain("by kud")
+  })
+
+  /*
+   * First rung of the ladder: on a review queue `@X` is the least
+   * discriminating thing on the row, while the size still aids triage — so the
+   * author goes before the size, as it already did inline.
+   */
+  it("sheds the author before the size", () => {
+    const item = pr({ author: "alice", additions: 84, deletions: 12 })
+    expect(layoutOf({ item, cols: 120 }).givingUp.author).toBe(false)
+    // Walk down until the author goes: the size must still be standing there.
+    let cols = 120
+    for (; cols > 0; cols--) {
+      if (layoutOf({ item, cols }).givingUp.author) break
+    }
+    expect(cols).toBeGreaterThan(0)
+    expect(layoutOf({ item, cols }).givingUp.size).toBe(false)
+    const frame = frameOf(
+      <PrRow
+        item={item}
+        active={false}
+        cols={cols}
+        columns={trailingColumnsOf([item])}
+      />,
+    )
+    expect(frame).not.toContain("@alice")
+    expect(frame).toContain("+84")
+  })
+
+  /*
+   * A hole in an aligned column reads as "none". So when one row needs its
+   * author cell gone to keep a readable title, the section gives the column up
+   * for every row — the same union the other trailing columns already get.
+   */
+  it("gives the author up for the whole section, not one row", () => {
+    const roomy = pr({ author: "alice" })
+    const cramped = pr({
+      number: 9,
+      repo: "acme/a-repository-with-a-very-long-name-indeed",
+      author: "bob",
+      additions: 2140,
+      deletions: 388,
+      labels: ["needs-review", "backend"],
+    })
+    const columns = trailingColumnsOf([roomy, cramped])
+    const numberCols = numberColumnsOf([roomy, cramped])
+    const context = { cols: 69, columns, numberCols }
+    const shed = sectionShedOf(
+      [
+        { item: roomy, prefix: "" },
+        { item: cramped, prefix: "└─ " },
+      ],
+      context,
+    )
+    expect(shed.author).toBe(true)
+    const frame = frameOf(
+      <PrRow item={roomy} active={false} {...context} shed={shed} />,
+    )
+    expect(frame).not.toContain("@alice")
+  })
+})
+
 describe("PrRow gutter", () => {
   // A host that draws its own cursor further left — a board hanging PRs under
   // tickets — would otherwise put two `❯` on the selected line.

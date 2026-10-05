@@ -146,11 +146,17 @@ const ageLabelOf = (item: GHItem): string => {
 }
 
 /**
- * The trailing block, in reading order: how contested, how big, how recent.
- * Threads lead because they are the one cell that makes a claim on you; age
- * ends the row so every row ends on the date.
+ * The trailing block, in reading order: whose, how contested, how big, how
+ * recent. Author leads because it is read as a column of names rather than
+ * scanned per row; threads follow because they are the one cell that makes a
+ * claim on you; age ends the row so every row ends on the date.
+ *
+ * Fixed columns rather than inline text: `by <login>` used to sit right after
+ * the title, so its position floated with title length and finding one
+ * author's rows meant reading each line. Aligned, the eye runs down a column
+ * instead — the same move the 2026-09-30 alignment made for the other three.
  */
-const TRAILING = ["threads", "size", "age"] as const
+const TRAILING = ["author", "threads", "size", "age"] as const
 
 /** Width of each trailing column, in terminal cells. Zero draws no column. */
 export type TrailingColumns = Record<(typeof TRAILING)[number], number>
@@ -159,6 +165,19 @@ export type TrailingColumns = Record<(typeof TRAILING)[number], number>
 export type TrailingShed = Partial<Record<(typeof TRAILING)[number], boolean>>
 
 const cellsOf = (s: string) => [...s].length
+
+// `@<login>`, capped at 16 cells including the `@`. Tail-truncated, not
+// middle: a login is read left to right and its front is the discriminating
+// part, where `truncate`'s middle elision exists for titles that carry their
+// sense in both halves. Logins are ASCII on GitHub, so slice and cells agree.
+const AUTHOR_CELL_MAX = 16
+const authorLabelOf = (item: GHItem): string => {
+  if (!item.author) return ""
+  const full = `@${item.author}`
+  return full.length <= AUTHOR_CELL_MAX
+    ? full
+    : `${full.slice(0, AUTHOR_CELL_MAX - 1)}…`
+}
 
 /**
  * The widest value each trailing column holds across these rows, measured once
@@ -175,11 +194,12 @@ const cellsOf = (s: string) => [...s].length
 export const trailingColumnsOf = (items: readonly GHItem[]): TrailingColumns =>
   items.reduce(
     (w, item) => ({
+      author: Math.max(w.author, cellsOf(authorLabelOf(item))),
       threads: Math.max(w.threads, cellsOf(threadsLabelOf(item))),
       size: Math.max(w.size, cellsOf(sizeOf(item) ?? "")),
       age: Math.max(w.age, cellsOf(ageLabelOf(item) ?? "")),
     }),
-    { threads: 0, size: 0, age: 0 } as TrailingColumns,
+    { author: 0, threads: 0, size: 0, age: 0 } as TrailingColumns,
   )
 
 /**
@@ -232,6 +252,7 @@ export const sectionShedOf = (
   rows.reduce<TrailingShed>((shed, row) => {
     const { givingUp } = layoutOf({ ...context, ...row })
     return {
+      author: shed.author || givingUp.author,
       threads: shed.threads || givingUp.threads,
       size: shed.size || givingUp.size,
       age: shed.age || givingUp.age,
@@ -258,8 +279,12 @@ export const layoutOf = ({
 }: LayoutInput) => {
   const numCols = numberCols ?? numberColumnsOf([item])
   const numStr = `#${item.number}`.padEnd(numCols)
-  // Hide "by me" — the author suffix is only signal when it's someone else.
+  // Hide "by me" — the author column is only signal when it's someone else.
+  // The width is still charged at the section's column below, blank on rows
+  // that hide it: a hole in an aligned column reads as "none", and a tab
+  // switch that moved every number would be the 2026-09-30 bug coming back.
   const showAuthor = !!item.author && item.author !== login
+  const authorLabel = authorLabelOf(item)
   // `+18 -4`, on every PR row that carries it. It was gated on `showAuthor`
   // for one morning (2026-09-11) on the argument that you know the size of
   // your own — and Erwann overruled it the same afternoon: the number is how
@@ -335,7 +360,7 @@ export const layoutOf = ({
   // (`shed`), so a column the list dropped for one row is dropped for all of
   // them — a hole in an aligned column reads as "none", which is a lie.
   const givingUp = {
-    author: false,
+    author: !!shed.author,
     size: !!shed.size,
     threads: !!shed.threads,
     age: !!shed.age,
@@ -382,12 +407,12 @@ export const layoutOf = ({
     // The trailing block is charged at the SECTION's column widths, not at this
     // row's own values: a row with no threads still pays for the column, because
     // the column is drawn on it too — blank, which is how absence reads here.
+    // The author is one of those columns now, not a per-row suffix after the
+    // title: its width moves neither with title length nor with whose row it is.
     const block = TRAILING.reduce(
       (w, k) => (givingUp[k] || own[k] === 0 ? w : w + 2 + own[k]),
       0,
     )
-    const author =
-      showAuthor && !givingUp.author ? `  by ${item.author}`.length : 0
     const pills = announcements.reduce((w, a) => w + 2 + a.label.length, 0)
     // Charged apart from the block because it sits BETWEEN the title and the
     // repo, not in the trailing group — same as repoLabel.
@@ -410,7 +435,6 @@ export const layoutOf = ({
       numCols +
       (cell ? 2 + cell.length + 1 : 0) +
       (givingUp.repo ? 0 : repoLabel.length) +
-      author +
       block +
       pills +
       pillCaps +
@@ -428,7 +452,7 @@ export const layoutOf = ({
   // Assignment rather than `+= 1`, so each rung states the resulting count
   // outright and reordering this array cannot silently produce the wrong one.
   //
-  // Size outlives the author — on a review queue "by X" is the least
+  // Size outlives the author — on a review queue `@X` is the least
   // discriminating thing on the row — and the speculative second label, and
   // dies before the thread count: a thread is a claim on you NOW, a size is an
   // aid to deciding WHETHER to engage, and the PR header still holds it.
@@ -452,6 +476,7 @@ export const layoutOf = ({
   return {
     numStr,
     showAuthor,
+    authorLabel,
     sizeParts,
     unresolvedLabel,
     agePair,
@@ -563,6 +588,7 @@ export const PrRow = ({
   const {
     numStr,
     showAuthor,
+    authorLabel,
     sizeParts,
     unresolvedLabel,
     agePair,
@@ -638,16 +664,14 @@ export const PrRow = ({
         <Text color={colors.secondary}>{labelLabel + "  "}</Text>
       ) : null}
       {repoLabel && !givingUp.repo ? <Text dimColor>{repoLabel}</Text> : null}
-      {showAuthor && !givingUp.author ? (
-        <Text dimColor italic>
-          {"  by " + item.author}
-        </Text>
-      ) : null}
-      {/* THE TRAILING BLOCK, pinned to the right edge: threads, size, age, each
-          in a column as wide as the section's widest value. Before 2026-09-30
-          these cells ran straight on from the title, so they started somewhere
-          different on every row and finding "which PR has threads" meant reading
-          each line. Aligned, the eye runs down a column instead.
+      {/* THE TRAILING BLOCK, pinned to the right edge: author, threads, size,
+          age, each in a column as wide as the section's widest value. Before
+          2026-09-30 these cells ran straight on from the title, so they started
+          somewhere different on every row and finding "which PR has threads"
+          meant reading each line. Aligned, the eye runs down a column instead.
+          The author lived inline after the title (`by <login>`) until its own
+          column, floating with title length for the same reason — one author's
+          rows could not be run down either.
 
           Box widths rather than padStart: padStart counts UTF-16 units, Ink lays
           out in terminal cells, and the Box is sized by the same measure Ink
@@ -657,6 +681,20 @@ export const PrRow = ({
           way absence reads everywhere on this row — so the columns stay
           aligned. */}
       <Box flexGrow={1} />
+      {/* First of the trailing columns, so every author's rows can be run down
+          one edge rather than found after each title. `@login`, no "by": the
+          sigil is the channel a colourblind reader and a piped frame share, and
+          `secondary` is the middle neutral the label cell and the answered
+          thread count already spend — no new token, no hue, no italic. Left-
+          aligned inside its column so the sigils line up; blank on the viewer's
+          own rows, which is how absence reads everywhere else on this row. */}
+      {block.author > 0 && !givingUp.author ? (
+        <Box marginLeft={2} width={block.author} flexShrink={0}>
+          {showAuthor ? (
+            <Text color={colors.secondary}>{authorLabel}</Text>
+          ) : null}
+        </Box>
+      ) : null}
       {/* Follows the turn arrow, because an unresolved thread is not by itself
           a claim on you: GitHub keeps a thread open until someone clicks
           Resolve conversation, so replying leaves the count exactly where it
