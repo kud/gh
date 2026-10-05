@@ -1,5 +1,13 @@
 # @kud/gh-pr-comments
 
+## 0.1.136
+
+### Patch Changes
+
+- 89c8768: Sections can declare an optional `group`; the inbox tab strip draws a divider where it changes. Requires @kud/ink-ui 0.35.0.
+- Updated dependencies [89c8768]
+  - @kud/gh-ink@0.71.0
+
 ## 0.1.135
 
 ### Patch Changes
