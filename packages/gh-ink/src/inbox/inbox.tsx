@@ -4367,10 +4367,19 @@ const BrowseScreen = ({
       return
     }
 
-    // While the field is open the hook owns every key but ↑↓, which fall
-    // through to the list below so you can walk the matches without leaving
-    // the query. `/` itself is the hook's too, in both modes.
-    if (searchInput && !key.upArrow && !key.downArrow) return
+    // While the field is open the hook owns every key but the arrows: ↑↓ fall
+    // through to the list so you can walk the matches, ←→ to the tab ring so
+    // you can carry the query across tabs, without leaving it. The field has
+    // no caret to move, so ←→ would otherwise do nothing. `/` itself is the
+    // hook's too, in both modes.
+    if (
+      searchInput &&
+      !key.upArrow &&
+      !key.downArrow &&
+      !key.leftArrow &&
+      !key.rightArrow
+    )
+      return
     if (input === "f" && allRepos.length > 0) {
       setRepoCursor(0)
       setRepoPicker(true)
