@@ -6,6 +6,8 @@
 // own vocabulary — cockpit splits home from work, a web dashboard may group by
 // project — so nothing here decides what a section is.
 
+import { ghGraphql } from "./gh.js"
+
 /**
  * How much of each row to ask for.
  *
@@ -23,7 +25,7 @@
  * axis is unchanged: the multiplication is what `minimal` exists to drop.
  */
 /**
- * How many of your own open PRs to ask for.
+ * How many of your own open PRs to ask for on the first page.
  *
  * This is the single biggest lever on the query's cost, because connections
  * MULTIPLY: the health and conversation fragments hang ~60 nodes off each PR
@@ -40,11 +42,37 @@
  * At 30 this search costs 2,400 nodes instead of 8,000, roughly halving the whole
  * query.
  *
+ * It is 100 again since 2026-10-05, and the history above is why that needs a
+ * reason rather than being a revert. The 30-row window dropped real PRs in
+ * silence for one host shape: a host hiding one org's repos client-side lost
+ * visible rows whenever the hidden org filled the window (39 open PRs, 21 in the
+ * hidden org, 30 fetched — the personal view showed 9 of 18). A server-side
+ * `-user:` exclusion was measured and rejected: GitHub search then drops the
+ * viewer's own private-repo PRs. So the window has to hold the whole set, and
+ * `fetchInbox` pages past it when it does not — see `MY_PRS_MAX_PAGES`.
+ *
+ * The cost per page rises with this, roughly back toward the 111 points the old
+ * note measured. That is visible rather than hidden: `rateLimit { cost }` rides
+ * on every document this file builds, including the follow-up pages, so a host
+ * watching the budget sees what the wider window spends.
+ *
  * `issueCount` is fetched alongside so the cap can never drop rows in silence: a
  * scalar costs nothing, and a host that knows the true total can say what it is
  * not showing.
  */
-export const MY_PRS_LIMIT = 30
+export const MY_PRS_LIMIT = 100
+
+/**
+ * How many pages of `myPRs` one `fetchInbox` may hold, first page included.
+ *
+ * The first page covers almost every account on its own — `MY_PRS_LIMIT` is the
+ * search API's maximum — and each further page is one more full-cost request, so
+ * the loop stops at five (500 rows) with more still available rather than
+ * chasing an unbounded set. Past the ceiling the tab is still marked sampled —
+ * `sourceCoverage` reads `pageInfo.hasNextPage`, not the row count — so the
+ * dim "shown/total" note keeps describing the same situation it always did.
+ */
+export const MY_PRS_MAX_PAGES = 5
 
 /**
  * How many rows each source asks for — the cap, as DATA rather than a literal
@@ -90,8 +118,10 @@ export const MY_PRS_LIMIT = 30
  * hence 6,100 for 38 rows. A day spent with fifty PRs assigned would make this
  * the heaviest search in the query.
  *
- * The PR sources keep their caps. There the outer number really does multiply
- * ~80 nested nodes, and `myPRs` at 30 is already half the cost of the whole call.
+ * The other PR sources keep their caps. There the outer number really does
+ * multiply ~80 nested nodes. `myPRs` is the exception since 2026-10-05: its
+ * window has to hold its whole set (see `MY_PRS_LIMIT`), and `fetchInbox`
+ * pages past the first window when it does not.
  */
 export const SOURCE_LIMITS: Record<InboxSource, number> = {
   myPRs: MY_PRS_LIMIT,
@@ -419,13 +449,25 @@ type Selections = {
  * ask for any subset without this file growing a second copy of the query text.
  * Each value is the whole `alias: search(…) { … }` selection, indented as it
  * appears in the document.
+ *
+ * `after` is how `fetchInbox` pages `myPRs` past its first window, and only
+ * `myPRs` takes it — it is the one source whose window has to hold its whole
+ * set (see `MY_PRS_LIMIT`), so it is the one source that selects `pageInfo`.
+ * The other entries ignore the parameter; giving every entry its own cursor
+ * would invite paging a source whose cap is a cost decision rather than a
+ * completeness one.
  */
-const SOURCES: Record<InboxSource, (s: Selections, first: number) => string> = {
+const SOURCES: Record<
+  InboxSource,
+  (s: Selections, first: number, after?: string) => string
+> = {
   myPRs: (
     { scope, health, size, conversation, prLabels },
     first,
-  ) => `  myPRs: search(query: "${scope}is:pr is:open author:@me", type: ISSUE, first: ${first}) {
+    after,
+  ) => `  myPRs: search(query: "${scope}is:pr is:open author:@me", type: ISSUE, first: ${first}${after ? `, after: ${JSON.stringify(after)}` : ""}) {
     issueCount
+    pageInfo { hasNextPage endCursor }
     nodes { __typename ... on PullRequest {
       id number title createdAt url headRefName isDraft
       repository { nameWithOwner }
@@ -795,6 +837,86 @@ export const mergeInboxData = (parts: any[]): any => {
   }
 }
 
+/*
+ * One further page of `myPRs` alone, past the cursor the last page ended on.
+ *
+ * Built from the same `SOURCES.myPRs` entry as the first page rather than a
+ * second copy of its text, so the two cannot drift — a field added to one is on
+ * both. `rateLimit` and `viewer` ride along for the same reason they do on every
+ * subset `buildInboxQuery` emits: the parts are merged with `mergeInboxData`,
+ * which needs the envelope on each one to keep the cost honest.
+ */
+const buildMyPRsPageQuery = (
+  options: InboxQueryOptions,
+  first: number,
+  after: string,
+): string => `{
+  rateLimit { cost nodeCount remaining resetAt }
+  viewer { login }
+${SOURCES.myPRs(selectionsFor(options), first, after)}
+}
+`
+
+/** What runs one inbox document against GitHub. Defaults to the live CLI. */
+export type InboxRunner = (query: string) => Promise<any>
+
+/**
+ * Fetch the whole inbox: every source in parallel, merged, with `myPRs`
+ * paged to its `issueCount`.
+ *
+ * This is the function a host should call to get the paginated inbox. Building
+ * documents with `buildInboxQueries` and merging them with `mergeInboxData`
+ * still works, but it leaves `myPRs` at its first window — this is the only
+ * entry point that follows `pageInfo` past it, so every host fetching through
+ * here gets the fix with no change at its own layer.
+ *
+ * Only `myPRs` pages. The other sources keep their caps as cost decisions (see
+ * `SOURCE_LIMITS`): their windows are priced, and `sourceCoverage` already tells
+ * a host what they are not showing. `myPRs` is different — its window has to
+ * hold its whole set, because a host filtering repos client-side cannot tell a
+ * row outside the window from a row that does not exist.
+ *
+ * `run` is the seam tests hold: pass a fake returning canned pages, read the
+ * real `gh api graphql` by passing nothing.
+ */
+export const fetchInbox = async (
+  options: InboxQueryOptions & { sourcesPerQuery?: number } = {},
+  run: InboxRunner = ghGraphql,
+): Promise<any> => {
+  const parts = await Promise.all(buildInboxQueries(options).map(run))
+  let data = mergeInboxData(parts)
+  if (!data || !sourcesFor(options).includes("myPRs")) return data
+
+  const pageSize = limitsFor(options).myPRs
+  let pages = 1
+  let cursor: { hasNextPage?: unknown; endCursor?: unknown } | undefined =
+    data.myPRs?.pageInfo
+  while (
+    pages < MY_PRS_MAX_PAGES &&
+    cursor?.hasNextPage === true &&
+    typeof cursor?.endCursor === "string"
+  ) {
+    const page = await run(buildMyPRsPageQuery(options, pageSize, cursor.endCursor))
+    if (!page?.myPRs) break
+    const envelope = mergeInboxData([data, page])
+    data = {
+      ...envelope,
+      myPRs: {
+        ...page.myPRs,
+        issueCount:
+          typeof page.myPRs.issueCount === "number"
+            ? page.myPRs.issueCount
+            : data.myPRs?.issueCount,
+        pageInfo: page.myPRs.pageInfo,
+        nodes: [...(data.myPRs?.nodes ?? []), ...(page.myPRs.nodes ?? [])],
+      },
+    }
+    pages += 1
+    cursor = data.myPRs?.pageInfo
+  }
+  return data
+}
+
 /**
  * What a source matched, against what it was allowed to return.
  *
@@ -818,7 +940,10 @@ export type SourceCoverage = {
    * We asked for N and got N, so the rows are a sample of the set.
    *
    * Derived from our own request rather than from `total`, which is the entire
-   * point: a cap is a fact we hold, and it cannot be wrong about itself.
+   * point: a cap is a fact we hold, and it cannot be wrong about itself. Where
+   * the source selected `pageInfo`, `hasNextPage` answers instead — a paged
+   * fetch holds more than any one window asked for, so the window is the wrong
+   * thing to measure against.
    */
   capped: boolean
   /**
@@ -901,11 +1026,25 @@ export const sourceCoverage = (
     const total =
       typeof answered.issueCount === "number" ? answered.issueCount : shown
     const cap = caps[source]
+    /*
+     * A source carrying `pageInfo` answers the cap question itself, and its
+     * answer wins over the row count. `fetchInbox` pages `myPRs` to its whole
+     * set, so a complete fetch holds MORE rows than the first page asked for —
+     * and measuring those against the first page's cap would call every large
+     * account sampled forever. `hasNextPage: false` means the set is whole
+     * whatever the count says; `true` means rows exist past what is held, which
+     * is exactly what `capped` claims. Sources without it keep the old rule.
+     */
+    const paging = answered.pageInfo
+    const capped =
+      typeof paging?.hasNextPage === "boolean"
+        ? paging.hasNextPage
+        : shown >= cap
     out[source] = {
       total,
       shown,
       cap,
-      capped: shown >= cap,
+      capped,
       partial: shown < cap && total > shown,
     }
   }

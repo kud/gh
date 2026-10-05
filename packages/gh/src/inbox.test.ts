@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest"
 import {
   HEALTH_BATCH_SIZE,
   INBOX_SOURCES,
+  MY_PRS_MAX_PAGES,
   SOURCE_LIMITS,
   sourceCoverage,
   cappedSources,
@@ -10,6 +11,7 @@ import {
   buildHealthQuery,
   buildInboxQueries,
   buildInboxQuery,
+  fetchInbox,
   healthIdsFrom,
   limitsFor,
   mergeHealth,
@@ -472,9 +474,137 @@ describe("mergeInboxData", () => {
   })
 })
 
+/* One myPRs row, addressed by number so order is assertable. */
+const myPrNode = (number: number) => ({
+  __typename: "PullRequest",
+  id: `PR_${number}`,
+  number,
+  title: `pr ${number}`,
+  isDraft: false,
+})
+
+const myPRsPage = (
+  numbers: number[],
+  pageInfo: { hasNextPage: boolean; endCursor: string | null },
+  issueCount: number,
+) => ({
+  rateLimit: {
+    cost: 8,
+    nodeCount: 1950,
+    remaining: 4000,
+    resetAt: "2026-08-28T10:00:00Z",
+  },
+  viewer: { login: "kud" },
+  myPRs: { issueCount, pageInfo, nodes: numbers.map(myPrNode) },
+})
+
+/* A runner serving canned pages in order, keeping the queries it was given. */
+const scripted = (pages: unknown[]) => {
+  const queries: string[] = []
+  return {
+    queries,
+    run: async (query: string) => {
+      queries.push(query)
+      return pages[Math.min(queries.length - 1, pages.length - 1)]
+    },
+  }
+}
+
+describe("fetchInbox", () => {
+  it("merges follow-up pages of myPRs in order, past the cursor", async () => {
+    const { queries, run } = scripted([
+      myPRsPage([1, 2], { hasNextPage: true, endCursor: "c1" }, 4),
+      myPRsPage([3, 4], { hasNextPage: false, endCursor: null }, 4),
+    ])
+    const data = await fetchInbox({ sources: ["myPRs"] }, run)
+    expect(data.myPRs.nodes.map((n: any) => n.number)).toEqual([1, 2, 3, 4])
+    expect(queries).toHaveLength(2)
+    expect(queries[1]).toContain('after: "c1"')
+  })
+
+  it("stops when the last page says there is no more, and reads as whole", async () => {
+    const { queries, run } = scripted([
+      myPRsPage([1, 2], { hasNextPage: true, endCursor: "c1" }, 4),
+      myPRsPage([3, 4], { hasNextPage: false, endCursor: null }, 4),
+    ])
+    const data = await fetchInbox(
+      { sources: ["myPRs"], limits: { myPRs: 2 } },
+      run,
+    )
+    expect(queries).toHaveLength(2)
+    // Four rows past a window of two, and still not a sample: the set is whole.
+    expect(sourceCoverage(data).myPRs).toMatchObject({
+      shown: 4,
+      capped: false,
+      partial: false,
+    })
+    expect(cappedSources(data)).not.toContain("myPRs")
+  })
+
+  // Five pages is the whole budget: the first plus four follow-ups, however
+  // much is still behind the cursor. Past it the tab stays honestly sampled,
+  // so the dim "shown/total" note keeps describing a real situation.
+  it("stops at the five-page ceiling and marks the tab sampled", async () => {
+    const queries: string[] = []
+    const run = async (query: string) => {
+      queries.push(query)
+      const n = queries.length - 1
+      return myPRsPage([n], { hasNextPage: true, endCursor: `c${n}` }, 999)
+    }
+    const data = await fetchInbox(
+      { sources: ["myPRs"], limits: { myPRs: 2 } },
+      run,
+    )
+    expect(queries).toHaveLength(MY_PRS_MAX_PAGES)
+    expect(data.myPRs.nodes).toHaveLength(MY_PRS_MAX_PAGES)
+    expect(sourceCoverage(data).myPRs).toMatchObject({
+      capped: true,
+    })
+    expect(cappedSources(data)).toContain("myPRs")
+  })
+
+  it("leaves a single whole page exactly as the merge left it", async () => {
+    const page = myPRsPage([1, 2], { hasNextPage: false, endCursor: null }, 2)
+    const { queries, run } = scripted([page])
+    const data = await fetchInbox({ sources: ["myPRs"] }, run)
+    expect(queries).toHaveLength(1)
+    expect(data).toEqual(mergeInboxData([page]))
+  })
+
+  it("asks for nothing more when myPRs was not requested", async () => {
+    const part = {
+      rateLimit: {
+        cost: 11,
+        nodeCount: 2480,
+        remaining: 4000,
+        resetAt: "2026-08-28T10:00:00Z",
+      },
+      viewer: { login: "kud" },
+      reviewRequests: { issueCount: 1, nodes: [myPrNode(7)] },
+    }
+    const { queries, run } = scripted([part])
+    const data = await fetchInbox({ sources: ["reviewRequests"] }, run)
+    expect(queries).toHaveLength(1)
+    expect(queries[0]).not.toContain("after:")
+    expect(data.reviewRequests.nodes).toHaveLength(1)
+  })
+})
+
 describe("source coverage", () => {
-  it("every source asks for issueCount", () => {
-    // The guard this pins used to exist only in a comment. `issueCount` was
+  // Only `myPRs` pages past its first window, so only it selects a cursor.
+  // Without this, `fetchInbox` cannot tell a whole set from a full window,
+  // and a host filtering repos client-side is back to losing rows in silence.
+  it("myPRs — and only myPRs — selects pageInfo for the follow-up pages", () => {
+    const query = buildInboxQuery()
+    expect(blockFor(query, "myPRs")).toContain(
+      "pageInfo { hasNextPage endCursor }",
+    )
+    for (const source of INBOX_SOURCES)
+      if (source !== "myPRs")
+        expect(blockFor(query, source)).not.toContain("pageInfo")
+  })
+
+  it("every source asks for issueCount", () => {    // The guard this pins used to exist only in a comment. `issueCount` was
     // fetched for `myPRs` and nothing else, so seven of eight sources could
     // truncate with nothing anywhere able to notice — which is what turned a
     // 30-row window over 95 issues into a stream of invented arrivals and
@@ -516,7 +646,7 @@ describe("source coverage", () => {
     expect(
       sourceCoverage({ myPRs: { issueCount: 8, nodes: new Array(8).fill({}) } })
         .myPRs,
-    ).toEqual({ total: 8, shown: 8, cap: 30, capped: false, partial: false })
+    ).toEqual({ total: 8, shown: 8, cap: 100, capped: false, partial: false })
   })
 
   /*

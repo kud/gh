@@ -141,9 +141,11 @@ import {
 } from "@kud/gh-ink"
 import {
   type Health,
+  type InboxRunner,
   type InboxSource,
   buildInboxQueries,
   buildInboxQuery,
+  fetchInbox,
   mergeInboxData,
   computeHealth as ghComputeHealth,
   latestChecks,
@@ -152,8 +154,8 @@ import {
   isPendingCheck,
 } from "@kud/gh"
 
-export { buildInboxQueries, buildInboxQuery, mergeInboxData }
-export type { InboxSource }
+export { buildInboxQueries, buildInboxQuery, fetchInbox, mergeInboxData }
+export type { InboxRunner, InboxSource }
 
 export const withRetry = async <T,>(
   fn: () => Promise<T>,
