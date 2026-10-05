@@ -1,5 +1,13 @@
 # @kud/gh-cockpit
 
+## 0.11.7
+
+### Patch Changes
+
+- a3b36f4: Ticket keys use the November pink.
+- Updated dependencies [a3b36f4]
+  - @kud/gh-ink@0.69.4
+
 ## 0.11.6
 
 ### Patch Changes
