@@ -431,6 +431,23 @@ export const reposInSections = (sections: Section[]): string[] =>
   ].sort()
 
 /**
+ * The `#n` cell and trailing column widths, measured over the PR and issue
+ * rows of every section at once, so a tab switch never moves a column. See
+ * `numberColumnsOf`.
+ */
+export const listColumnsOf = (
+  sections: readonly Section[],
+): { numberCols: number; trailingColumns: TrailingColumns } => {
+  const rows = sections
+    .flatMap((s) => s.items)
+    .filter((i): i is GHItem => i.kind === "pr" || i.kind === "issue")
+  return {
+    numberCols: numberColumnsOf(rows),
+    trailingColumns: trailingColumnsOf(rows),
+  }
+}
+
+/**
  * The next selectable row in `dir`, or `current` when there is none.
  *
  * Both header kinds are STOPS. A repo-header names a thing you can act on —
@@ -3806,13 +3823,15 @@ const BrowseScreen = ({
   const railCols = railWidth(COLS)
   const listCols = showRail ? COLS - railCols : COLS
   /*
-   * The trailing block's column widths and drops, over the whole section for
-   * the reason `markerCols` gives: a column that widens as you scroll moves
-   * every number under the cursor. Drops are decided here, once, so a column
-   * is gone from every row or from none — see `sectionShedOf`.
+   * The trailing block's column widths, over EVERY section the inbox holds
+   * rather than the one on screen: a column that widens as you scroll moves
+   * every number under the cursor, and one measured per tab moved the titles
+   * and the ages sideways on every tab switch — `#1234` in one tab and `#157`
+   * in the next put them a column apart. Drops stay per section and are decided
+   * here, once, so a column is gone from every row or from none — see
+   * `sectionShedOf`.
    */
-  const trailingColumns = trailingColumnsOf(labelBearing)
-  const numberCols = numberColumnsOf(labelBearing)
+  const { trailingColumns, numberCols } = listColumnsOf(localSections)
   // What a PR row gets of `listCols`: all of it on a narrow frame, never more
   // than `ROW_MAX_COLS` on a wide one. The shed ladder budgets against this too,
   // so a column is given up for the line the row is actually drawn on.

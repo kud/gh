@@ -184,14 +184,15 @@ export const trailingColumnsOf = (items: readonly GHItem[]): TrailingColumns =>
 
 /**
  * Width of the `#n` cell across these rows: the widest number plus a two-cell
- * gutter, left-aligned. Measured once by the list over the whole section, the
- * same move as `markerCols` and `trailingColumnsOf`, so the titles start on one
- * column and that column does not move as you scroll.
+ * gutter, left-aligned. The inbox measures it once over the rows of EVERY tab
+ * (`listColumnsOf`), the same move as `markerCols` and `trailingColumnsOf`, so
+ * the titles start on one column and that column moves neither as you scroll
+ * nor as you switch tabs. Measured per tab, it put `#1234`'s titles a column
+ * right of `#157`'s in the next tab, and every switch shifted the list.
  *
  * It replaced `padEnd(7)`, a constant that fitted the repos it was written
  * against and nothing else: `#31805` left a one-cell gutter where `#172` left
- * three, and a six-digit number would have run straight into its title. A
- * section of short numbers no longer pays for a long one it does not hold.
+ * three, and a six-digit number would have run straight into its title.
  */
 export const numberColumnsOf = (items: readonly GHItem[]): number =>
   items.reduce((w, item) => Math.max(w, cellsOf(`#${item.number}`)), 0) + 2
@@ -588,9 +589,7 @@ export const PrRow = ({
     // The wash paints every cell of the fixed-width row — an Ink Box's
     // background covers its full measure, not just the inked cells.
     <Box width={cols} backgroundColor={selectionBg}>
-      {gutter ? (
-        <Text color={colors.info}>{active ? "❯ " : "  "}</Text>
-      ) : null}
+      {gutter ? <Text color={colors.info}>{active ? "❯ " : "  "}</Text> : null}
       <Text dimColor>{prefix}</Text>
       <Text color={color as any} bold>
         {icon + " "}
