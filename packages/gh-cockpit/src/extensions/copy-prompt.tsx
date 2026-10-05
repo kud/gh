@@ -38,6 +38,8 @@ export const copyPromptExtension: InboxExtension = {
   key: "y",
   hint: "copy prompt",
   scope: "item",
+  // No `menuGroup`: unmarked item extensions land with the quiet verbs at the
+  // menu's end. The menu capitalises the hint for the row's label.
   body: (onExit, target) => (
     <CopyPromptScreen item={target?.item} onExit={onExit} />
   ),

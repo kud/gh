@@ -7,6 +7,8 @@ import React, {
   useEffect,
   useRef,
   useMemo,
+  useCallback,
+  useContext,
   type ReactNode,
 } from "react"
 import { Box, useInput, useWindowSize } from "ink"
@@ -33,6 +35,8 @@ import {
   type RowMotion,
 } from "../components/pr-row.js"
 import type { Command, InboxExtension, ExtensionTarget } from "./extension.js"
+import { InboxChromeContext } from "./extension.js"
+import type { ChromeSpec, ChromeState } from "./extension.js"
 import {
   invalidateCache,
   isFresh,
@@ -69,6 +73,7 @@ import {
   colors,
   CommandPalette,
   FooterHints,
+  getIconMode,
   LoadingScreen,
   Pill,
   pillWidth,
@@ -217,12 +222,35 @@ export type DetailContext = {
 
 export type SettledResult = { ok: true } | { ok: false; reason: string }
 
+// Which band of the action menu a row belongs to. The menu renders one blank
+// row between bands and never a heading; `confirm` is the close-confirmation
+// sub-menu, whose rows the cursor deliberately lands on last.
+export type ActionGroup =
+  | "act"
+  | "open"
+  | "switch"
+  | "copy"
+  | "quiet"
+  | "close"
+  | "confirm"
+
 export type Action = {
   label: string
   hint: string
   run: () => void
   subActions?: Action[]
+  group?: ActionGroup
+  // The row's glyph in nerd-font terminals, as a `"\uF4FA"` escape. Rendered
+  // only when ink-ui's `getIconMode()` is `"nerd"` — in text mode the column
+  // goes away entirely, so the label always says it alone.
+  icon?: string
 }
+
+// One row of an open menu: an action, or the blank row between two groups.
+// The cursor never stands on a gap; `useActionMenu` steps over them.
+export type MenuGap = { gap: true }
+export type MenuRow = Action | MenuGap
+export const isMenuGap = (row: MenuRow): row is MenuGap => "gap" in row
 
 export type JiraTransition = {
   /** What the action menu shows. Yours to word; nothing matches on it. */
@@ -1212,6 +1240,21 @@ const drillLabel = (item: AnyItem): string => {
   return "Drill in"
 }
 
+// Whether two chrome claims say the same thing, so setting what is already set
+// is a no-op rather than a render. Compared by value, not identity: a body
+// builds its hints array inline, so the reference is new on every one of its
+// renders while the verbs are unchanged — and a setter that compared pointers
+// would re-render the shell on every one of those, which re-renders the body,
+// which sets again.
+const sameChrome = (a: ChromeSpec, b: ChromeSpec): boolean => {
+  if (a.scope !== b.scope) return false
+  if (a.hints === b.hints) return true
+  if (!a.hints || !b.hints || a.hints.length !== b.hints.length) return false
+  return a.hints.every(
+    ([key, label], i) => b.hints![i]?.[0] === key && b.hints![i]?.[1] === label,
+  )
+}
+
 // Your own notification switch on one item, which GitHub exposes only as a
 // GraphQL mutation over the node id. The inbox query does not carry one, and
 // adding an id to every row to serve a single action is the wrong trade — so it
@@ -1355,6 +1398,8 @@ export const buildActions = (
   const open: Action = {
     label: "Open in browser",
     hint: "o",
+    group: "open",
+    icon: "\uF465",
     run: () => {
       quietly`open ${item.url}`.catch(() => {})
       showFlash("↗ Opened in browser")
@@ -1364,6 +1409,8 @@ export const buildActions = (
   const copyUrl: Action = {
     label: "Copy URL",
     hint: "c",
+    group: "copy",
+    icon: "\uF44C",
     run: () => {
       clipboard(item.url)
       const label = item.kind === "task" ? item.key : `#${item.number}`
@@ -1383,6 +1430,11 @@ export const buildActions = (
       ? {
           label: drillLabel(item),
           hint: "d",
+          group: "open",
+          // Only the PR drill names its glyph: "View issue" and "View ticket"
+          // have no nerd-font verb of their own, and an icon that says nothing
+          // the label does not already say is decoration, not information.
+          icon: item.kind === "pr" ? "\uF440" : undefined,
           run: () => {
             if (onOpenView?.(item)) return
             if (drill) {
@@ -1401,6 +1453,10 @@ export const buildActions = (
       base.push({
         label: "Move status",
         hint: "t",
+        // The task's act: changing its state, the one mutation this menu owns.
+        // Guarded by the caller's own condition above — without configured
+        // transitions there is no such row, and none is invented here.
+        group: "act",
         run: () => {},
         subActions: jiraTransitions.map(({ label, transition, resolutions }) =>
           resolutions && resolutions.length > 0
@@ -1442,7 +1498,9 @@ export const buildActions = (
         ),
       })
     }
-    return base
+    // Display order is group order (Act first); the menu sorts defensively as
+    // well, so this return already reads as drawn. See `menuRowsOf`.
+    return byGroup(base)
   }
 
   const actions: Action[] = drillAction
@@ -1453,9 +1511,27 @@ export const buildActions = (
   actions.push({
     label: "Copy repo name",
     hint: "r",
+    group: "copy",
+    icon: "\uF401",
     run: () => {
       clipboard(item.repo)
       showFlash(`✓ Copied ${item.repo}`)
+    },
+  })
+
+  // Quiet's head verb, ahead of "Remove me as reviewer": first stop the
+  // notifications, then withdraw the request. Both are "less of this PR for
+  // me", which is what the band is.
+  actions.push({
+    label: "Unsubscribe",
+    hint: "u",
+    group: "quiet",
+    icon: "\uF478",
+    run: () => {
+      showFlash(`⋯ Unsubscribing from #${item.number}…`)
+      void unsubscribeFrom(item as GHItem)
+        .then(() => showFlash(`✓ Unsubscribed from #${item.number}`))
+        .catch((e) => showFlash(`✗ #${item.number}: ${explainGhAction(e)}`))
     },
   })
 
@@ -1472,10 +1548,19 @@ export const buildActions = (
   // Two things can undo it, and neither is a bug here: a CODEOWNERS rule
   // covering the touched paths re-requests you on the next push, and a request
   // that arrived through a TEAM cannot be withdrawn for you alone.
+  //
+  // After Unsubscribe within Quiet: both are "less of this PR for me" — no
+  // more notifications, no more review requests.
   if (item.kind === "pr" && item.standing === "queued" && login) {
     actions.push({
       label: "Remove me as reviewer",
       hint: "x",
+      // Quiet, beside Unsubscribe: both are "less of this PR for me" — no more
+      // review requests, no more notifications. Guarded by the caller's own
+      // condition above, like "Move status" is by its: without a standing
+      // review request there is no such row, and none is invented here.
+      group: "quiet",
+      icon: "\uF468",
       run: () => {
         // Optimistic, then restored by a refresh if GitHub refuses — the same
         // shape Close uses. A row that vanishes and returns reads as a failure;
@@ -1501,21 +1586,12 @@ export const buildActions = (
     })
   }
 
-  actions.push({
-    label: "Unsubscribe",
-    hint: "u",
-    run: () => {
-      showFlash(`⋯ Unsubscribing from #${item.number}…`)
-      void unsubscribeFrom(item as GHItem)
-        .then(() => showFlash(`✓ Unsubscribed from #${item.number}`))
-        .catch((e) => showFlash(`✗ #${item.number}: ${explainGhAction(e)}`))
-    },
-  })
-
   if (item.kind === "pr" && item.branch) {
     actions.push({
       label: "Copy branch name",
       hint: "b",
+      group: "copy",
+      icon: "\uF418",
       run: () => {
         clipboard(item.branch!)
         showFlash(`✓ Copied ${item.branch}`)
@@ -1527,6 +1603,8 @@ export const buildActions = (
     actions.push({
       label: "Switch here",
       hint: "s",
+      group: "switch",
+      icon: "\uEBCB",
       run: () => {
         const script = [
           "delay 0.5",
@@ -1547,9 +1625,13 @@ export const buildActions = (
   }
 
   if (item.kind === "issue") {
+    // "Open in", not "Open project in": the row already names the repo in the
+    // title above, and the verb is the switch to its checkout.
     actions.push({
-      label: "Open project in new tab",
+      label: "Open in new tab",
       hint: "j",
+      group: "switch",
+      icon: "\uEAE4",
       run: () => {
         showFlash(`⋯ Opening ${item.repo}…`)
         void jumpToRepo(item.repo, "", login)
@@ -1558,8 +1640,10 @@ export const buildActions = (
       },
     })
     actions.push({
-      label: "Open project in new pane",
+      label: "Open in new pane",
       hint: "p",
+      group: "switch",
+      icon: "\uEB56",
       run: () => {
         showFlash(`⋯ Opening pane for ${item.repo}…`)
         void jumpToRepoPane(item.repo, "", login)
@@ -1570,11 +1654,14 @@ export const buildActions = (
     actions.push({
       label: "Close issue",
       hint: "",
+      group: "close",
+      icon: "\uF41D",
       run: () => {},
       subActions: [
         {
           label: `Close #${item.number}`,
           hint: "",
+          group: "confirm",
           run: () => {
             onRemove?.(item as GHItem)
             showFlash(`✓ Closed #${item.number}`)
@@ -1593,7 +1680,7 @@ export const buildActions = (
             )
           },
         },
-        { label: "Cancel", hint: "", run: () => {} },
+        { label: "Cancel", hint: "", group: "confirm", run: () => {} },
       ],
     })
   }
@@ -1602,6 +1689,8 @@ export const buildActions = (
     actions.push({
       label: "Switch in new tab",
       hint: "j",
+      group: "switch",
+      icon: "\uEAE4",
       run: () => {
         showFlash(`⋯ Jumping to ${item.repo}…`)
         void jumpToRepo(item.repo, item.branch ?? "", login)
@@ -1612,6 +1701,8 @@ export const buildActions = (
     actions.push({
       label: "Switch in new pane",
       hint: "p",
+      group: "switch",
+      icon: "\uEB56",
       run: () => {
         showFlash(`⋯ Opening pane for ${item.repo}…`)
         void jumpToRepoPane(item.repo, item.branch ?? "", login)
@@ -1629,6 +1720,7 @@ export const buildActions = (
         actions.push({
           label: `Open ${jiraKey} in Jira`,
           hint: "t",
+          group: "open",
           run: () => openInJira(jiraBase, jiraKey, showFlash),
         })
       }
@@ -1637,15 +1729,20 @@ export const buildActions = (
     // Held back and appended after the item extensions, so the destructive
     // pair is always the last thing in the menu — Land and Submit came after
     // "Close PR" until 2026-10-05, which put the one verb you cannot take back
-    // between the reader and the one they came for.
+    // between the reader and the one they came for. The group sort below keeps
+    // that promise structurally now; the hold-back stays so `buildActions`
+    // already returns display order.
     closing.push({
       label: "Close PR",
       hint: "",
+      group: "close",
+      icon: "\uF4DC",
       run: () => {},
       subActions: [
         {
           label: `Close #${item.number}`,
           hint: "",
+          group: "confirm",
           run: () => {
             onRemove?.(item as GHItem)
             showFlash(`✓ Closed #${item.number}`)
@@ -1664,19 +1761,24 @@ export const buildActions = (
             )
           },
         },
-        { label: "Cancel", hint: "", run: () => {} },
+        { label: "Cancel", hint: "", group: "confirm", run: () => {} },
       ],
     })
 
     if (item.branch) {
       closing.push({
-        label: "Close PR + Delete branch",
+        // "and", not "+": the row is a sentence like every other, and the key
+        // column carries the hint — symbols are not shortcuts here.
+        label: "Close PR and delete branch",
         hint: "",
+        group: "close",
+        icon: "\uF48E",
         run: () => {},
         subActions: [
           {
-            label: `Close #${item.number} + delete ${item.branch}`,
+            label: `Close #${item.number} and delete ${item.branch}`,
             hint: "",
+            group: "confirm",
             run: () => {
               onRemove?.(item as GHItem)
               showFlash(`✓ Closed #${item.number} and deleted ${item.branch}`)
@@ -1691,20 +1793,33 @@ export const buildActions = (
                 })
             },
           },
-          { label: "Cancel", hint: "", run: () => {} },
+          { label: "Cancel", hint: "", group: "confirm", run: () => {} },
         ],
       })
     }
   }
 
-  // Item-scoped extensions, appended last so a domain contribution never displaces
-  // the row's own actions. Reached only on GitHub rows — a Jira row returns from its
-  // own branch above, and listing "Delegate to an agent" there would offer an action
-  // whose only possible outcome is bouncing straight back.
+  // Item-scoped extensions, grouped by what they do rather than appended last:
+  // an "act" verb (Submit) stands with the row's own acts up top, an "open"
+  // verb (Open ticket) with the opens, and anything unmarked ("other", the
+  // default — Mute) with the quiet verbs at the end. Reached only on GitHub
+  // rows — a Jira row returns from its own branch above, and listing "Delegate
+  // to an agent" there would offer an action whose only possible outcome is
+  // bouncing straight back.
+  //
+  // The row's label is the extension's `hint` capitalised ("submit" →
+  // "Submit"), falling back to the full `title`; the `?` legend keeps the
+  // title either way. The key column carries `key`.
+  const extensionLabel = (e: InboxExtension): string =>
+    e.hint ? e.hint.charAt(0).toUpperCase() + e.hint.slice(1) : e.title
+  const extensionGroup = (e: InboxExtension): Action["group"] =>
+    e.menuGroup === "act" ? "act" : e.menuGroup === "open" ? "open" : "quiet"
   for (const e of itemExtensions(ext?.extensions))
     actions.push({
-      label: e.title,
+      label: extensionLabel(e),
       hint: e.key,
+      group: extensionGroup(e),
+      icon: e.icon,
       run: () =>
         ext?.onOpenExt?.(e.id, {
           item,
@@ -1716,7 +1831,10 @@ export const buildActions = (
 
   actions.push(...closing)
 
-  return actions
+  // Display order already: Act, Open, Switch, Copy, Quiet, Close. The menu
+  // sorts defensively as well (a host may append rows of its own, as the drill
+  // does with Delegate), so this is the order pinned, not a hope.
+  return byGroup(actions)
 }
 
 const agoText = (ms: number): string => {
@@ -2772,14 +2890,69 @@ const ItemRow = ({
 // hand-rolled copy would drift the first time one grew a case the other lacked.
 // handleKey reports whether it consumed the key, so a host can bail out of its
 // own keymap while the menu is up.
+//
+// Rows arrive grouped (`Action.group`) and are laid out in group order — Act,
+// Open, Switch, Copy, Quiet, Close — with one blank row between groups. The
+// sort is stable, so rows the builder already ordered (and rows a host appends
+// ad hoc, like the drill's Delegate pair) keep their relative order inside a
+// group, and ungrouped rows (Jira transitions) never move at all.
+const GROUP_RANK: Record<ActionGroup, number> = {
+  act: 0,
+  open: 1,
+  switch: 2,
+  copy: 3,
+  quiet: 4,
+  close: 5,
+  confirm: 6,
+}
+
+const groupRank = (action: Action): number =>
+  action.group === undefined ? 7 : GROUP_RANK[action.group]
+
+export const menuRowsOf = (actions: Action[]): MenuRow[] => {
+  const sorted = byGroup(actions)
+  const rows: MenuRow[] = []
+  sorted.forEach((action, i) => {
+    if (i > 0 && sorted[i - 1]!.group !== action.group) rows.push({ gap: true })
+    rows.push(action)
+  })
+  return rows
+}
+
+// Display order for a top-level menu: grouped Act → Open → Switch → Copy →
+// Quiet → Close, stable within a group so the builder's own order (and the
+// relative order of anything a host appends) survives. `menuRowsOf` is this
+// plus the blank rows; `useActionMenu.open` applies that again defensively.
+export const byGroup = (actions: Action[]): Action[] =>
+  [...actions].sort((a, b) => groupRank(a) - groupRank(b))
+
+// A sub-menu of close confirmations, whose cursor starts on the safe row
+// rather than on the destructive one. Every other sub-menu (Jira transitions
+// and their resolutions) starts at the top, as it always has.
+const isConfirmRows = (rows: MenuRow[]): boolean =>
+  rows.length > 0 &&
+  rows.every((row) => isMenuGap(row) || row.group === "confirm")
+
+/**
+ * What tone a menu row wears: `"error"` for the close rows (top-level and
+ * confirm alike, never `Cancel`), nothing for everything else. The menu's one
+ * meaningful colour, and the only one — every other distinction on the menu
+ * is glyph, word or weight, never hue alone.
+ */
+export const menuTone = (row: Action): "error" | undefined =>
+  row.group === "close" ||
+  (row.group === "confirm" && row.label !== "Cancel")
+    ? "error"
+    : undefined
+
 export const useActionMenu = () => {
-  const [actions, setActions] = useState<Action[] | null>(null)
+  const [actions, setActions] = useState<MenuRow[] | null>(null)
   const [cursor, setCursor] = useState(0)
 
   const open = (next: Action[]) => {
     if (next.length === 0) return
     setCursor(0)
-    setActions(next)
+    setActions(menuRowsOf(next))
   }
 
   const handleKey = (key: {
@@ -2789,16 +2962,30 @@ export const useActionMenu = () => {
     escape?: boolean
   }): boolean => {
     if (!actions) return false
-    if (key.upArrow) setCursor((c) => Math.max(0, c - 1))
-    if (key.downArrow) setCursor((c) => Math.min(actions.length - 1, c + 1))
+    // The cursor never stands on a gap: steps land on the next live row, and a
+    // run of gaps at the edge holds position rather than wrapping.
+    if (key.upArrow)
+      setCursor((c) => {
+        let n = c - 1
+        while (n > 0 && isMenuGap(actions[n]!)) n -= 1
+        return isMenuGap(actions[n]!) ? c : n
+      })
+    if (key.downArrow)
+      setCursor((c) => {
+        let n = c + 1
+        while (n < actions.length - 1 && isMenuGap(actions[n]!)) n += 1
+        return isMenuGap(actions[n]!) ? c : n
+      })
     if (key.return) {
-      const action = actions[cursor]
-      if (action?.subActions) {
-        setCursor(0)
-        setActions(action.subActions)
+      const row = actions[cursor]
+      if (!row || isMenuGap(row)) return true
+      if (row.subActions) {
+        const rows = menuRowsOf(row.subActions)
+        setCursor(isConfirmRows(rows) ? rows.length - 1 : 0)
+        setActions(rows)
       } else {
         setActions(null)
-        action?.run()
+        row.run()
       }
     }
     if (key.escape) setActions(null)
@@ -2812,17 +2999,87 @@ export const ActionMenu = ({
   item,
   actions,
   cursor,
+  cols = COLS,
 }: {
   item: AnyItem
-  actions: Action[]
+  actions: MenuRow[]
   cursor: number
+  /**
+   * Content columns the menu may take. The width is fixed from the longest
+   * row — clamp(longest + 4, 40, 56), capped at `cols - 4` — so it never
+   * resizes as the cursor moves. A host beside a rail passes what the list
+   * has; everywhere else the frame's own width is the right answer.
+   */
+  cols?: number
 }) => {
-  const title =
+  // Nerd glyphs are PUA codepoints: two cells wide in the terminal, invisible
+  // anywhere else. The column exists only when some row brings an icon AND the
+  // host opted into nerd mode — otherwise it is dropped completely, no
+  // stand-in, and the labels shift left by exactly its width.
+  const showIcons =
+    getIconMode() === "nerd" &&
+    actions.some((row) => !isMenuGap(row) && row.icon !== undefined)
+  const keyWidth = Math.max(
+    0,
+    ...actions.flatMap((row) =>
+      isMenuGap(row) ? [] : [[...(row.hint ?? "")].length],
+    ),
+  )
+  const contentWidth = Math.max(
+    0,
+    ...actions.flatMap((row) =>
+      isMenuGap(row)
+        ? []
+        : [
+            2 +
+              (showIcons ? 2 : 0) +
+              [...row.label].length +
+              (keyWidth > 0 ? 1 + keyWidth : 0),
+          ],
+    ),
+  )
+  const width = Math.min(
+    Math.max(contentWidth + 4, 40),
+    56,
+    Math.max(20, cols - 4),
+  )
+  const inner = Math.max(1, width - 4)
+  const confirming = isConfirmRows(actions)
+
+  // Close rows wear the error tone, and nothing else on the menu wears any
+  // tone at all: it is the only meaningful colour here. `Cancel` shares the
+  // confirm group (it must, or a gap would split the pair) but keeps the
+  // default colour — matched by label, the same way the builder writes it.
+  //
+  // Pure so it stays pinnable: the test frame carries no escape codes, so a
+  // frame cannot assert a colour — see `selectionBackground` for the same rule.
+  const isCloseRow = (row: Action): boolean => menuTone(row) === "error"
+
+  const number =
+    item.kind === "pr" || item.kind === "issue" ? item.number : null
+  // The number (or key) is fixed; the title gives up the tail. `truncate`
+  // elides the middle, which would eat the join between two halves that both
+  // matter — a title truncates at the end, with the … saying so.
+  const leadNum =
     item.kind === "task"
       ? item.key
-      : item.kind === "pr" || item.kind === "issue"
-        ? `#${item.number}`
+      : number !== null
+        ? `#${number}`
         : ""
+  const lead = leadNum ? `${leadNum} · ` : ""
+  const rest = confirming
+    ? `Close #${number}?`
+    : item.kind === "task"
+      ? item.summary
+      : item.kind === "pr" || item.kind === "issue"
+        ? item.title
+        : ""
+  const restText =
+    [...lead].length + [...rest].length <= inner
+      ? rest
+      : [...rest].slice(0, Math.max(0, inner - [...lead].length - 1)).join("") +
+        "…"
+
   // Never shrinks. Hosts draw the menu in flow under a board that already fills
   // a fixed-height Page, and Yoga took the missing rows out of the menu: on
   // 2026-10-02 its rows collapsed onto one line, an action vanished under
@@ -2832,25 +3089,68 @@ export const ActionMenu = ({
     <Box
       flexDirection="column"
       flexShrink={0}
+      width={width}
       borderStyle="round"
       borderColor={colors.info}
       backgroundColor={OVERLAY_BG}
       paddingX={1}
       marginTop={1}
     >
-      <Text color={colors.info} bold>
-        {title}
-      </Text>
-      <Text dimColor>{"─".repeat(32)}</Text>
-      {actions.map((a, i) => (
-        <Box key={a.label}>
-          <Text color={colors.info}>{i === cursor ? "❯ " : "  "}</Text>
-          <Text bold={i === cursor}>{a.label}</Text>
-          <Text dimColor>{"  " + a.hint}</Text>
-        </Box>
-      ))}
-      <Text dimColor>{"─".repeat(32)}</Text>
-      <Text dimColor>↑↓ navigate ↵ confirm esc cancel</Text>
+      {confirming ? (
+        <Text color={colors.error} bold>
+          {restText}
+        </Text>
+      ) : (
+        <Text>
+          <Text color={colors.info} bold>
+            {leadNum}
+          </Text>
+          {leadNum ? <Text dimColor>{" · "}</Text> : null}
+          <Text>{restText}</Text>
+        </Text>
+      )}
+      <Text dimColor>{"─".repeat(inner)}</Text>
+      {actions.map((row, i) =>
+        isMenuGap(row) ? (
+          <Text key={`gap-${i}`}> </Text>
+        ) : (
+          <Box key={`${i}:${row.label}`} width={inner}>
+            <Box width={2} flexShrink={0}>
+              <Text color={colors.info}>{i === cursor ? "❯ " : "  "}</Text>
+            </Box>
+            {showIcons ? (
+              <Box width={2} flexShrink={0}>
+                {row.icon ? (
+                  <Text dimColor>{row.icon}</Text>
+                ) : (
+                  <Text>{"  "}</Text>
+                )}
+              </Box>
+            ) : null}
+            <Box flexGrow={1}>
+              <Text
+                bold={i === cursor}
+                color={isCloseRow(row) ? colors.error : undefined}
+              >
+                {row.label}
+              </Text>
+            </Box>
+            {keyWidth > 0 ? (
+              <Box width={keyWidth} flexShrink={0} justifyContent="flex-end">
+                <Text color={colors.secondary}>{row.hint ?? ""}</Text>
+              </Box>
+            ) : null}
+          </Box>
+        ),
+      )}
+      <Text dimColor>{"─".repeat(inner)}</Text>
+      <FooterHints
+        hints={[
+          ["↑↓", "move"],
+          ["↵", "run"],
+          ["esc", "close"],
+        ]}
+      />
     </Box>
   )
 }
@@ -3335,6 +3635,7 @@ const BrowseScreen = ({
   fetchedAt,
   refreshError,
   hidden,
+  overlayBody,
   peelRef,
   onTyping,
   onOpenPr,
@@ -3435,7 +3736,20 @@ const BrowseScreen = ({
   // in a row are still two distinct values — a bare string would compare equal
   // and the flash would fire only once, reading as "it recovered".
   refreshError?: { message: string; at: number }
+  // Don't act on keys: an App-level overlay (a drill-in view or an extension
+  // body) is open above this screen and owns them. Rendering continues — the
+  // frame, the title row and the footer stay on screen with the overlay in the
+  // content area — so this gates only input, never output. The pulse re-arm
+  // above the gate stays outside it for the same reason it always has: a key
+  // pressed at a hidden screen is still evidence of a person at the keyboard.
   hidden?: boolean
+  /**
+   * The App-level overlay to show in the content area, if one is open: a
+   * drill-in view or an extension body. Present, the frame/header/footer below
+   * stay mounted and this takes the list's place between them; absent, the
+   * browse list renders exactly as it always has.
+   */
+  overlayBody?: ReactNode
   /**
    * Where this screen publishes its PEEL — close the topmost layer it owns and
    * report whether there was one. The app root binds `esc` / `backspace` once
@@ -4707,7 +5021,12 @@ const BrowseScreen = ({
     // so the memo already recomputes at least as often as they do.
   }, [palette, activeItem, extensions, jiraBase, jiraKeyRe, jiraSetupHint])
 
-  if (hidden) return null
+  // The App-level overlay (a drill-in view or an extension body) takes the
+  // list's place between the same header and footer: the frame never unmounts,
+  // so `hidden` above gates only the keys, never this render. The browse list
+  // underneath is simply not drawn while one is open.
+  const chrome = useContext(InboxChromeContext)
+  const overlayOpen = overlayBody != null
 
   // The four overlays are mutually exclusive and now FLOAT over the browse list
   // instead of replacing it, so pressing `?` no longer blanks the app to show its
@@ -4761,6 +5080,7 @@ const BrowseScreen = ({
         item={activeItem}
         actions={menu.actions}
         cursor={menu.cursor}
+        cols={listCols}
       />
     ) : null
 
@@ -4777,7 +5097,9 @@ const BrowseScreen = ({
         brand={brand}
         sections={localSections}
         login={login}
-        scopeLabel={origin?.label}
+        // Inside an overlay the breadcrumb names the open item; on browse, the
+        // host's scope. The counts, the login and the freshness never leave.
+        scopeLabel={overlayOpen ? (chrome?.scope ?? origin?.label) : origin?.label}
         budgetLabel={budgetNotice(budget)?.label}
         budgetCritical={budgetNotice(budget)?.critical}
         refreshing={refreshing}
@@ -4812,6 +5134,7 @@ const BrowseScreen = ({
         </Box>
       ) : null}
 
+      {overlayOpen ? null : (
       <Box marginBottom={1}>
         <Tabs
           active={section.id}
@@ -4844,8 +5167,9 @@ const BrowseScreen = ({
           }))}
         />
       </Box>
+      )}
 
-      {search != null ? (
+      {!overlayOpen && search != null ? (
         <Box marginBottom={1}>
           <Text color={colors.info}>{"  / "}</Text>
           <Text>{search}</Text>
@@ -4854,7 +5178,7 @@ const BrowseScreen = ({
             matchCount !== 1 ? "es" : ""
           }  ${filter.hints.map(([k, label]) => `${k} ${label}`).join(" · ")}`}</Text>
         </Box>
-      ) : repoFilter.size > 0 ? (
+      ) : !overlayOpen && repoFilter.size > 0 ? (
         <Box marginBottom={1}>
           <Text color={colors.accent}>{"  ◉ "}</Text>
           <Text>{`${repoFilter.size} repo${
@@ -4883,6 +5207,15 @@ const BrowseScreen = ({
           `alignItems="center"` centred the panel inside a box that WAS the panel,
           which is no centring at all. Both bugs, one missing number. */}
       <Box>
+        {overlayOpen ? (
+          // The overlay owns this band: the same frame, the same header above
+          // and footer below, the body where the list was. Fixed to the list's
+          // own height so the frame holds still between browse and drill, and
+          // clipped rather than spilling past the footer on a long body.
+          <Box flexDirection="column" height={listHeight} overflow="hidden">
+            {overlayBody}
+          </Box>
+        ) : (
         <Box
           flexDirection="column"
           minHeight={listHeight}
@@ -4983,7 +5316,8 @@ const BrowseScreen = ({
             </Box>
           ) : null}
         </Box>
-        {showRail ? (
+        )}
+        {showRail && !overlayOpen ? (
           <SidePanel
             sidebar={rails}
             liveLabel={liveLabel}
@@ -4998,6 +5332,16 @@ const BrowseScreen = ({
       <Box marginTop={1}>
         {flash ? (
           <Text color={colors.success}>{flash}</Text>
+        ) : overlayOpen ? (
+          // The overlay's own verbs, plus the way back. `page="nested"` is what
+          // appends `⌫ back` and `q quit`, so a body passes only its own keys
+          // through `useChrome` — the same contract ink-ui's `Page` offers its
+          // nested pages, without re-laying-out the browse frame as one.
+          <FooterHints
+            hints={chrome?.hints ?? []}
+            page="nested"
+            help={false}
+          />
         ) : (
           <FooterHints hints={hints} />
         )}
@@ -5273,6 +5617,22 @@ export const App = ({
   const browsePeel = useRef<(() => boolean) | null>(null)
   const drillPeel = useRef<(() => boolean) | null>(null)
   const [typing, setTyping] = useState(false)
+
+  // What the open overlay claims in the persistent chrome: the header
+  // breadcrumb and the footer's verbs, set through `useChrome` by whatever is
+  // mounted in the content area. Owned here rather than in BrowseScreen because
+  // the overlay is mounted by App and the chrome outlives any one screen —
+  // BrowseScreen only reads it. See `sameChrome` for why the setter compares.
+  const [chromeSpec, setChromeSpec] = useState<ChromeSpec>({})
+  const setChrome = useCallback(
+    (next: ChromeSpec) =>
+      setChromeSpec((prev) => (sameChrome(prev, next) ? prev : next)),
+    [],
+  )
+  const chromeValue = useMemo<ChromeState>(
+    () => ({ scope: chromeSpec.scope, hints: chromeSpec.hints, setChrome }),
+    [chromeSpec, setChrome],
+  )
 
   useAppKeys({
     isActive: !typing,
@@ -5930,8 +6290,13 @@ export const App = ({
               target: state.target,
             }
           : null
-  const toBrowse = () =>
+  const toBrowse = () => {
+    // The overlay's chrome goes with it. Every chrome-setting view sets on
+    // mount, so the only moments that need a clear are the shell's own
+    // transitions — closing here, opening below.
+    setChromeSpec({})
     setState({ phase: "browse", sections: state.sections, login: state.login })
+  }
 
   // Closing from a drill hands back to the inbox, so the row has to go from
   // App's own sections — returning to a list that still shows what you just
@@ -5984,8 +6349,32 @@ export const App = ({
       )
     }, MERGED_HOLD_MS)
   }
+  // The overlay renders in the content area of the same frame, header and
+  // footer — BrowseScreen stays mounted throughout, and `hidden` gates only
+  // its keys. What used to be a full-screen swap (frame, title row and footer
+  // all unmounting) is now a band between chrome that never leaves.
+  const overlayBody =
+    overlay?.kind === "pr" || overlay?.kind === "issue"
+      ? detailFor?.({
+          item: overlay.item,
+          kind: overlay.kind,
+          login: state.login,
+          registerPeel: (peel) => {
+            drillPeel.current = peel
+          },
+          onTyping: setTyping,
+          onBack: toBrowse,
+          onRefresh: applyOrRefresh,
+          onRemove: markLeaving,
+          onMerged: markMerged,
+        })
+      : overlay?.kind === "ext"
+        ? extensions
+            ?.find((e) => e.id === overlay.extId)
+            ?.body(toBrowse, overlay.target)
+        : null
   return (
-    <>
+    <InboxChromeContext.Provider value={chromeValue}>
       <BrowseScreen
         brand={brandOf(title)}
         sections={state.sections}
@@ -6006,13 +6395,15 @@ export const App = ({
         origin={origin}
         budget={budget}
         skippedForBudget={skippedForBudget}
-        // `hidden` keeps BOTH its jobs — don't render, and don't act on keys.
-        // It looks like one boolean doing two things, but the listen half is not
-        // simply `isActive`: four lines above that guard re-arm the idle pulse,
-        // deliberately, because a key pressed at a hidden tab is still evidence
-        // of a person at the keyboard. Gate the handler itself and an idle
-        // return to a hidden tab stops re-arming.
+        // `hidden` gates ONLY the keys now — the screen stays rendered with the
+        // overlay in its content area (see `overlayBody`). It looks like one
+        // boolean doing one thing, but the listen half is not simply `isActive`:
+        // four lines above that guard re-arm the idle pulse, deliberately,
+        // because a key pressed at a hidden tab is still evidence of a person
+        // at the keyboard. Gate the handler itself and an idle return to a
+        // hidden tab stops re-arming.
         hidden={overlay !== null}
+        overlayBody={overlayBody ?? undefined}
         peelRef={browsePeel}
         onTyping={setTyping}
         mergedUrls={mergedUrls}
@@ -6028,23 +6419,26 @@ export const App = ({
         stripState={hasStrip ? stripState : undefined}
         stripLabel={stripLabel}
         tabHelp={tabHelp}
-        onOpenPr={(item) =>
+        onOpenPr={(item) => {
+          setChromeSpec({})
           setState({
             phase: "pr",
             item,
             sections: state.sections,
             login: state.login,
           })
-        }
-        onOpenIssue={(item) =>
+        }}
+        onOpenIssue={(item) => {
+          setChromeSpec({})
           setState({
             phase: "issue",
             item,
             sections: state.sections,
             login: state.login,
           })
-        }
-        onOpenExt={(id, target) =>
+        }}
+        onOpenExt={(id, target) => {
+          setChromeSpec({})
           setState({
             phase: "ext",
             extId: id,
@@ -6052,27 +6446,9 @@ export const App = ({
             sections: state.sections,
             login: state.login,
           })
-        }
+        }}
         extensions={extensions}
       />
-      {(overlay?.kind === "pr" || overlay?.kind === "issue") &&
-        detailFor?.({
-          item: overlay.item,
-          kind: overlay.kind,
-          login: state.login,
-          registerPeel: (peel) => {
-            drillPeel.current = peel
-          },
-          onTyping: setTyping,
-          onBack: toBrowse,
-          onRefresh: applyOrRefresh,
-          onRemove: markLeaving,
-          onMerged: markMerged,
-        })}
-      {overlay?.kind === "ext" &&
-        extensions
-          ?.find((e) => e.id === overlay.extId)
-          ?.body(toBrowse, overlay.target)}
-    </>
+    </InboxChromeContext.Provider>
   )
 }

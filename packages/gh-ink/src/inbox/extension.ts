@@ -1,7 +1,65 @@
-import type { ReactNode } from "react"
+import { createContext, useContext, useEffect, type ReactNode } from "react"
 // Type-only, so the cycle with inbox.tsx (which imports InboxExtension from here)
 // is erased at compile time and never exists at runtime.
 import type { AnyItem } from "./inbox.js"
+
+// ─── Persistent chrome ──────────────────────────────────────────────────────
+//
+// The inbox frame, its title row and its footer stay on screen while an overlay
+// (an extension body or a drill-in view) is open, and the overlay renders in
+// the content area between them. An overlay that wants a word in either says
+// so through `useChrome`: the header breadcrumb (which item this is) and the
+// footer's hints. One that never calls it still renders inside the frame, with
+// the shell's own back/quit tail — `body(onExit, target)` keeps its signature,
+// so silence is never a blank screen.
+//
+// A setter, not a value: the overlay sets, the shell reads. Set on mount (and
+// whenever scope/hints change, so a tab switch can swap the footer's verbs) and
+// deliberately NOT cleared on unmount — every chrome-setting view sets on
+// mount, and the shell clears on its own transitions (open/close), so a swap
+// between two chrome-setting views (a drill and its own log) can never land on
+// a blank in between whatever order React runs the two effects in.
+export type ChromeHints = [string, string][]
+export type ChromeSpec = { scope?: string; hints?: ChromeHints }
+
+export type ChromeState = ChromeSpec & {
+  setChrome: (spec: ChromeSpec) => void
+}
+
+// Null outside the inbox shell — a view mounted standalone (a domain CLI, a
+// unit test) gets no provider, and `useChrome` below is a no-op there rather
+// than a crash. Not part of the public index: the shell reads it, views only
+// ever call `useChrome`.
+export const InboxChromeContext = createContext<ChromeState | null>(null)
+
+/**
+ * Claim a word in the inbox chrome while mounted: `scope` becomes the header
+ * breadcrumb (e.g. `Resubmit · acme/api-gateway#1234`), `hints` the footer's
+ * verbs. The shell appends its own back/quit tail, so a body passes only its
+ * own keys — never `esc`, `q` or `?`.
+ *
+ * Returns whether a shell claimed it: a view mounted outside the inbox (where
+ * the context is null) draws its own chrome instead, so the same component
+ * renders framed standalone and chromeless inside the shell.
+ */
+export const useChrome = (spec: ChromeSpec): boolean => {
+  const chrome = useContext(InboxChromeContext)
+  const setChrome = chrome?.setChrome
+  const scope = spec.scope
+  // The hints travel as their serialisation, not their identity: a body builds
+  // the array inline, so the reference is new on every render while the verbs
+  // are the same — and an effect keyed on the reference would set state on
+  // every render, which re-renders, which sets again.
+  const hintsKey = JSON.stringify(spec.hints ?? null)
+  useEffect(() => {
+    if (!setChrome) return
+    setChrome({ scope, hints: spec.hints })
+    // `spec.hints` read directly: `hintsKey` above is what dedupes renders,
+    // and what is set is the body's own array for the shell to read.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [setChrome, scope, hintsKey])
+  return chrome !== null
+}
 
 // The context the browse screen hands an extension body when its key is pressed.
 // Every field is optional because it describes what happened to be in view, not a
@@ -84,6 +142,19 @@ export interface InboxExtension {
   // would read as if it were. Both kinds appear in the footer and the legend,
   // because both are things you can press.
   scope?: "item" | "global"
+  // Which menu group an item extension's row belongs to: `"act"` for verbs that
+  // act on the row (Submit, Land, Delegate), `"open"` for verbs that open
+  // something (Open ticket). Absent or `"other"` lands with the quiet verbs at
+  // the menu's end (Mute). The menu capitalises `hint` for the row's label, so
+  // `hint` is the same lowercase verb phrase the footer shows.
+  menuGroup?: "act" | "open" | "other"
+  // The row's glyph in nerd-font terminals, as a `"\uF4FA"` escape — never a raw
+  // byte, which is invisible in review. Shown only when ink-ui's `getIconMode()`
+  // is `"nerd"`; in text mode the icon column is dropped entirely, so nothing
+  // here may carry meaning the label does not already say. A host picks its own
+  // value; the ones the built-ins use are listed in the README's icon table so
+  // sibling verbs can match them.
+  icon?: string
   // Row kinds this extension is THE in-tree view for. Declaring `["task"]` makes
   // ↵ (and `d`, and the menu's drill action) on a ticket row mount this body the
   // way ↵ on a PR mounts PrView — instead of opening the action menu or spawning

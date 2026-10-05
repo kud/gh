@@ -52,6 +52,10 @@ export const delegateExtension: InboxExtension = {
   // action menu under `m`. Without this it would still work as a keypress and stay
   // absent from the menu, which is exactly the gap that prompted 0.5.0.
   scope: "item",
+  // An act on the row, grouped with Submit and Land in the menu's Act band.
+  // No `icon`: none of the menu's nerd-font verbs names delegating, and a
+  // near-miss glyph is worse than the empty column text mode already draws.
+  menuGroup: "act",
   body: (onExit, target) => (
     <DelegateScreen
       item={target?.item}

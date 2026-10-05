@@ -106,19 +106,28 @@ describe("ActionMenu in flow under a full-height board", () => {
     const bottom = lines.findIndex((line, i) => i > top && line.includes("╰"))
     const menuLines = lines.slice(top, bottom + 1)
 
-    // Title row appears
+    // Title row carries the number and the row's title now, truncated to one
+    // line rather than the bare number it used to draw.
     expect(menuLines.some((line) => line.includes("#1201"))).toBe(true)
+    expect(menuLines.some((line) => line.includes("test PR"))).toBe(true)
 
     // Every action label appears on its own line
     for (const action of actions) {
       expect(menuLines.some((line) => line.includes(action.label))).toBe(true)
     }
 
-    // Both rules appear (top and bottom of the menu) - menu uses 32 dashes on inner lines
-    // Exclude border lines (first and last) which have long dash sequences
+    // Both rules span the menu's full inner width: a 40-column floor with
+    // 2-wide borders and paddingX 1 either side leaves 36 dashes. The old
+    // hard-coded 32 is gone. Exclude border lines (first and last) which have
+    // long dash sequences.
     const innerLines = menuLines.slice(1, -1)
-    const ruleLines = innerLines.filter((line) => line.includes("─".repeat(32)))
+    const ruleLines = innerLines.filter((line) => line.includes("─".repeat(36)))
     expect(ruleLines.length).toBe(2)
+
+    // The footer names the menu's own keys through the shared hints component.
+    expect(menuLines.some((line) => line.includes("↑↓"))).toBe(true)
+    expect(menuLines.some((line) => line.includes("↵"))).toBe(true)
+    expect(menuLines.some((line) => line.includes("esc"))).toBe(true)
 
     // No stale glyph fragments (e.g. "cew" from "Copy link" overwriting "Request review")
     for (const line of menuLines) {

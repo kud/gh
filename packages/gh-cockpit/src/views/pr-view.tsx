@@ -393,11 +393,15 @@ export const PrView = ({
           {
             label: "Delegate to an agent",
             hint: "a",
+            // An act on the row, grouped with the host's other acts — the menu
+            // sorts by group, so appended rows still land in display order.
+            group: "act",
             run: () => setAi(true),
           },
           {
             label: "Copy prompt to clipboard",
             hint: "y",
+            group: "copy",
             run: () => setCopy(true),
           },
         ])
