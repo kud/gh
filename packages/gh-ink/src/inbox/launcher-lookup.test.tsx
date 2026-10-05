@@ -232,7 +232,7 @@ describe("launcher lookup: the rows each phase draws", () => {
     expect(frame).toContain("› acme/api-gateway#2926")
   })
 
-  it("draws a failure as its own row, in its own words, and stays open", async () => {
+  it("puts a failure in the message slot, in its own words, and stays open", async () => {
     fetchNode.mockRejectedValue(
       Object.assign(
         new Error("Command failed with exit code 1: gh api graphql -f query=…"),
@@ -252,9 +252,14 @@ describe("launcher lookup: the rows each phase draws", () => {
     expect(frame).toContain(
       "✗ couldn't look up acme/api-gateway#2926 · HTTP 502:",
     )
-    expect(frame).toContain("Bad Gateway")
+    expect(frame).toContain("Gateway · ↵ retry")
     expect(frame).not.toContain("Command failed")
     expect(frame).not.toContain("DETAIL")
+    // The message slot, not a row: the palette's cursor has nothing to sit on
+    // (the `❯` behind it belongs to the list), and the input still holds the
+    // query as typed.
+    expect(frame).not.toContain("❯ ✗")
+    expect(frame).toContain("› acme/api-gateway#2926")
 
     // Enter on the failure asks again.
     fetchNode.mockResolvedValue(issueNode("acme/api-gateway", 2926))
