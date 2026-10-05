@@ -1,5 +1,11 @@
 # @kud/gh-workflow
 
+## 0.15.0
+
+### Minor Changes
+
+- 89c8768: Sections can declare an optional `group`; the inbox tab strip draws a divider where it changes. Requires @kud/ink-ui 0.35.0.
+
 ## 0.14.1
 
 ### Patch Changes

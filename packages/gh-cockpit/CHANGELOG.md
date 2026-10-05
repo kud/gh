@@ -1,5 +1,14 @@
 # @kud/gh-cockpit
 
+## 0.11.9
+
+### Patch Changes
+
+- 89c8768: Sections can declare an optional `group`; the inbox tab strip draws a divider where it changes. Requires @kud/ink-ui 0.35.0.
+- Updated dependencies [89c8768]
+  - @kud/gh-workflow@0.15.0
+  - @kud/gh-ink@0.71.0
+
 ## 0.11.8
 
 ### Patch Changes
