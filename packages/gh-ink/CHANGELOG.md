@@ -1,5 +1,12 @@
 # @kud/gh-ink
 
+## 0.68.1
+
+### Patch Changes
+
+- b297163: ←→ move the caret inside the inbox search while typing, and letters and backspace act where it sits. The bar draws the caret at its position rather than always at the end. Picks up `@kud/ink-ui` 0.33.1.
+- 4a3e58c: A task row's ticket key wears the accent on every row again, the same hue as the PR number beneath it, since both are the row's identifier. Bold still marks only the row under the cursor.
+
 ## 0.68.0
 
 ### Minor Changes
