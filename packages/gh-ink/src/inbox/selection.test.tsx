@@ -56,10 +56,10 @@ describe("selectionBackground", () => {
 
 describe("taskKeyStyle", () => {
   /*
-   * Exact equality on purpose: bold purple on every row, unlike the PR number,
+   * Exact equality on purpose: bold yellow on every row, unlike the PR number,
    * so a stray prop breaks the shape.
    */
-  it("wears bold November purple on every row", () => {
+  it("wears bold November yellow on every row", () => {
     expect(taskKeyStyle()).toEqual({ color: TICKET_KEY_COLOUR, bold: true })
   })
 })
