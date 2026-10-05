@@ -1376,22 +1376,22 @@ export const selectionBackground = (
   backdropped: boolean,
 ): string | undefined => (active && !backdropped ? SELECTION_BG : undefined)
 
-export const TICKET_KEY_BLUE = "#81B2FF"
+export const TICKET_KEY_COLOUR = "#FF0174"
 
 /**
- * What the task key wears, given whether its row is under the cursor. A
- * clear sky blue on every row, so a ticket key never reads as the PR number one
- * branch down, which keeps the accent. Both are identifiers, and sharing a hue
- * made them easy to confuse (Erwann, 2026-10-05, reversing the shared accent).
- * Not `colors.info`: that is ANSI cyan, which most themes paint a washed-out
- * lavender. Bold only when active, because weight is the selection signal and
+ * What the task key wears, given whether its row is under the cursor. The
+ * November pink, the shell prompt's path colour, on every row, so a ticket key
+ * never reads as the PR number one branch down, which keeps the accent. Both are
+ * identifiers, and sharing a hue made them easy to confuse (Erwann, 2026-10-05).
+ * Cyan read as a washed-out lavender and a sky blue sat outside the November
+ * palette; both were tried and dropped the same day. Bold only when active, because weight is the selection signal and
  * bold at rest would mute it. A function rather than bare props so the shape
  * stays pinnable — see `selectionBackground` for why a frame cannot assert it.
  */
 export const taskKeyStyle = (
   active: boolean,
 ): { color: string; bold: boolean } => ({
-  color: TICKET_KEY_BLUE,
+  color: TICKET_KEY_COLOUR,
   bold: active,
 })
 
