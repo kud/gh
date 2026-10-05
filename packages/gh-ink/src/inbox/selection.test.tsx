@@ -55,12 +55,12 @@ describe("selectionBackground", () => {
 
 describe("taskKeyStyle", () => {
   /*
-   * Exact equality on purpose: the whole point is that no hue rides along, so
-   * a re-added colour prop breaks the shape rather than hiding in it.
+   * Exact equality on purpose: the accent on every row, like the PR number, and
+   * bold only under the cursor, so a stray prop breaks the shape.
    */
-  it("keeps the cursor's bold and drops the hue, active or not", () => {
-    expect(taskKeyStyle(true)).toEqual({ bold: true })
-    expect(taskKeyStyle(false)).toEqual({ bold: false })
+  it("wears the accent on every row and bold only when active", () => {
+    expect(taskKeyStyle(true)).toEqual({ color: colors.accent, bold: true })
+    expect(taskKeyStyle(false)).toEqual({ color: colors.accent, bold: false })
   })
 })
 

@@ -1135,13 +1135,17 @@ export const selectionBackground = (
 ): string | undefined => (active && !backdropped ? SELECTION_BG : undefined)
 
 /**
- * What the task key wears, given whether its row is under the cursor. Bold when
- * active, and no hue either way: it wore the accent until 2026-10-05, which
- * read as selection turning the title orange, and the recessed band says where
- * the cursor is now. A function rather than a bare prop so the absence stays
- * pinnable — see `selectionBackground` for why a frame cannot assert it.
+ * What the task key wears, given whether its row is under the cursor. The
+ * accent on every row, like the PR number one branch down: both are the row's
+ * identifier, so they share a hue (Iris, 2026-10-05). Bold only when active,
+ * because weight is the selection signal and bold at rest would mute it. A
+ * function rather than bare props so the shape stays pinnable — see
+ * `selectionBackground` for why a frame cannot assert it.
  */
-export const taskKeyStyle = (active: boolean): { bold: boolean } => ({
+export const taskKeyStyle = (
+  active: boolean,
+): { color: string; bold: boolean } => ({
+  color: colors.accent,
   bold: active,
 })
 
@@ -2748,10 +2752,8 @@ const ItemRow = ({
             the ticket — and a dimmed key-only repeat was tried and dropped: it
             made the second band's heading harder to read for a duplication that
             was never actually confusing. */}
-        {/* The key keeps its weight and its gutter, not its hue — see
-            `taskKeyStyle`. The PR number one branch down keeps its accent: it
-            is a reference on every row, where this orange used to mark the one
-            row under the cursor. */}
+        {/* The key wears the PR number's accent on every row — see
+            `taskKeyStyle`. */}
         <Text {...taskKeyStyle(active)}>{item.key + "  "}</Text>
         <Text
           bold={active || (!!transient && isArrival(transient))}
