@@ -227,7 +227,13 @@ export type SettledResult = { ok: true } | { ok: false; reason: string }
 // row between bands and never a heading; `confirm` is the close-confirmation
 // sub-menu, whose rows the cursor deliberately lands on last.
 export type ActionGroup =
-  "act" | "open" | "switch" | "copy" | "quiet" | "close" | "confirm"
+  | "act"
+  | "open"
+  | "switch"
+  | "copy"
+  | "quiet"
+  | "close"
+  | "confirm"
 
 export type Action = {
   label: string
@@ -1070,16 +1076,16 @@ export const maxViewStart = (items: AnyItem[], budget: number): number => {
  */
 export const rowKey = (item: AnyItem): string =>
   item.kind === "task"
-    ? (item.instanceKey ?? item.key)
+    ? item.instanceKey ?? item.key
     : item.kind === "repo-header"
-      ? `header:${item.repo}`
-      : item.kind === "subgroup-header"
-        ? `subgroup:${item.label}`
-        : item.kind === "show-more"
-          ? `show-more:${item.hidden[0]?.repo ?? ""}`
-          : item.kind === "show-less"
-            ? `show-less:${item.toHide[0]?.repo ?? ""}`
-            : `${item.repo}/${item.number}`
+    ? `header:${item.repo}`
+    : item.kind === "subgroup-header"
+    ? `subgroup:${item.label}`
+    : item.kind === "show-more"
+    ? `show-more:${item.hidden[0]?.repo ?? ""}`
+    : item.kind === "show-less"
+    ? `show-less:${item.toHide[0]?.repo ?? ""}`
+    : `${item.repo}/${item.number}`
 
 const firstSelectable = (section: Section): number =>
   Math.max(
@@ -1370,19 +1376,22 @@ export const selectionBackground = (
   backdropped: boolean,
 ): string | undefined => (active && !backdropped ? SELECTION_BG : undefined)
 
+export const TICKET_KEY_BLUE = "#81B2FF"
+
 /**
- * What the task key wears, given whether its row is under the cursor. Info
- * blue on every row, so a ticket key never reads as the PR number one branch
- * down, which keeps the accent. Both are identifiers, and sharing a hue made
- * them easy to confuse (Erwann, 2026-10-05, reversing the shared accent). Bold only when active,
- * because weight is the selection signal and bold at rest would mute it. A
- * function rather than bare props so the shape stays pinnable — see
- * `selectionBackground` for why a frame cannot assert it.
+ * What the task key wears, given whether its row is under the cursor. A
+ * clear sky blue on every row, so a ticket key never reads as the PR number one
+ * branch down, which keeps the accent. Both are identifiers, and sharing a hue
+ * made them easy to confuse (Erwann, 2026-10-05, reversing the shared accent).
+ * Not `colors.info`: that is ANSI cyan, which most themes paint a washed-out
+ * lavender. Bold only when active, because weight is the selection signal and
+ * bold at rest would mute it. A function rather than bare props so the shape
+ * stays pinnable — see `selectionBackground` for why a frame cannot assert it.
  */
 export const taskKeyStyle = (
   active: boolean,
 ): { color: string; bold: boolean } => ({
-  color: colors.info,
+  color: TICKET_KEY_BLUE,
   bold: active,
 })
 
@@ -2162,8 +2171,8 @@ const InboxHeader = ({
   const countSeg = loading
     ? "      loading…  "
     : quiet
-      ? "  "
-      : `  ${String(total).padStart(3)} item${total !== 1 ? "s" : ""}  ·  `
+    ? "  "
+    : `  ${String(total).padStart(3)} item${total !== 1 ? "s" : ""}  ·  `
   const userSeg = loading || quiet ? "" : `@${login}  `
   // A LABEL, not a control, and the HOST'S WORD rather than one of ours. Which
   // side you are on is settled when the command starts, so a switch here would
@@ -2200,12 +2209,12 @@ const InboxHeader = ({
   const [statusText, statusColor] = hasPending
     ? [`● ${pendingSummary || "new"} · r apply`, colors.accent]
     : refreshing
-      ? ["↻ refreshing…", "cyan"]
-      : appliedSummary
-        ? [`◉ ${appliedSummary}`, colors.accent]
-        : fetchedAt
-          ? [`updated ${agoText(fetchedAt)}`, undefined]
-          : ["", undefined]
+    ? ["↻ refreshing…", "cyan"]
+    : appliedSummary
+    ? [`◉ ${appliedSummary}`, colors.accent]
+    : fetchedAt
+    ? [`updated ${agoText(fetchedAt)}`, undefined]
+    : ["", undefined]
   const statusSeg = statusText ? statusText + "  " : ""
 
   const fill = Math.max(
@@ -2250,14 +2259,17 @@ const InboxHeader = ({
 // A standing single-line row, always the same height (one line + marginBottom)
 // across loading/error/ready so the content below it never jumps.
 export type CiStatusState =
-  { kind: "loading" } | { kind: "error" } | { kind: "ready"; status: CiStatus }
+  | { kind: "loading" }
+  | { kind: "error" }
+  | { kind: "ready"; status: CiStatus }
 
 // The strip's poll state, the same three-way shape as the CI line's: out for
 // the first answer, or ready with what the host said — `null` being a real
 // answer ("nothing configured"), never a failed one, since a failed poll keeps
 // the last strip up rather than blanking the row.
 export type StripStatusState =
-  { kind: "loading" } | { kind: "ready"; strip: StatusStrip | null }
+  | { kind: "loading" }
+  | { kind: "ready"; strip: StatusStrip | null }
 
 /** What the strip SAYS, ignoring when it said it. */
 export const stripSignature = (strip: StatusStrip | null): string =>
@@ -2739,11 +2751,7 @@ export const TAB_MARK = "●"
  * level up. The trailing WORD on a row never got it, which is why a row gaining a
  * marker used to reflow — see the transit marks, which now live here instead.
  */
-export const tabMarker = (
-  marked: Set<string>,
-  id: string,
-  frame = 0,
-): string =>
+export const tabMarker = (marked: Set<string>, id: string, frame = 0): string =>
   marked.has(id) ? `${TAB_PULSE[frame % TAB_PULSE.length] as string} ` : "  "
 
 // The dot breathing rather than sitting still. A tab you are NOT looking at is
@@ -2950,10 +2958,10 @@ const ItemRow = ({
     const transitIcon = !transient
       ? " "
       : isDeparture(transient)
-        ? (TRANSIT_OUT_FRAMES[rampAt(TRANSIT_OUT_FRAMES.length)] as string)
-        : isArrival(transient)
-          ? (TRANSIT_IN_FRAMES[rampAt(TRANSIT_IN_FRAMES.length)] as string)
-          : "\u25C9"
+      ? (TRANSIT_OUT_FRAMES[rampAt(TRANSIT_OUT_FRAMES.length)] as string)
+      : isArrival(transient)
+      ? (TRANSIT_IN_FRAMES[rampAt(TRANSIT_IN_FRAMES.length)] as string)
+      : "\u25C9"
     // The prefix term is new here and easy to miss: a task row had no indent
     // to price until stories became tasks hanging under an epic, so this
     // budget never carried one and a depth-1 story overflowed by exactly its
@@ -3094,15 +3102,15 @@ const ItemRow = ({
         color: MERGED_COLOUR,
       }
     : transient
-      ? {
-          glyph: isDeparture(transient)
-            ? (TRANSIT_OUT_FRAMES[rampAt(TRANSIT_OUT_FRAMES.length)] as string)
-            : isArrival(transient)
-              ? (TRANSIT_IN_FRAMES[rampAt(TRANSIT_IN_FRAMES.length)] as string)
-              : displayFor(item.health).glyph,
-          color: TRANSIT_COLOUR[transient],
-        }
-      : undefined
+    ? {
+        glyph: isDeparture(transient)
+          ? (TRANSIT_OUT_FRAMES[rampAt(TRANSIT_OUT_FRAMES.length)] as string)
+          : isArrival(transient)
+          ? (TRANSIT_IN_FRAMES[rampAt(TRANSIT_IN_FRAMES.length)] as string)
+          : displayFor(item.health).glyph,
+        color: TRANSIT_COLOUR[transient],
+      }
+    : undefined
   // `changed` is deliberately absent: the row changed, it did not arrive and it
   // is not leaving, so its title reads exactly as it did before. The glyph above
   // is what says something happened.
@@ -3110,10 +3118,10 @@ const ItemRow = ({
     transient === "out"
       ? "withdrawn"
       : transient && isDeparture(transient)
-        ? "departing"
-        : transient && isArrival(transient)
-          ? "arriving"
-          : undefined
+      ? "departing"
+      : transient && isArrival(transient)
+      ? "arriving"
+      : undefined
   // Never both: a row merged from here is already being announced, and stacking
   // GONE onto MERGED would report one departure twice. Both are built anyway
   // rather than one being chosen, because the budget on the other side charges
@@ -3329,10 +3337,10 @@ export const ActionMenu = ({
   const rest = confirming
     ? `Close #${number}?`
     : item.kind === "task"
-      ? item.summary
-      : item.kind === "pr" || item.kind === "issue"
-        ? item.title
-        : ""
+    ? item.summary
+    : item.kind === "pr" || item.kind === "issue"
+    ? item.title
+    : ""
   const restText =
     [...lead].length + [...rest].length <= inner
       ? rest
@@ -3393,8 +3401,8 @@ export const ActionMenu = ({
                   row.tone === "error"
                     ? colors.error
                     : isCloseRow(row)
-                      ? colors.error
-                      : undefined
+                    ? colors.error
+                    : undefined
                 }
                 dimColor={row.tone === "dim" ? true : undefined}
               >
@@ -4377,17 +4385,17 @@ const BrowseScreen = ({
    * changes constantly, and a stale peel closes the wrong layer.
    */
   const peel = (): boolean => {
-    if (palette !== null) return (setPalette(null), true)
-    if (help) return (setHelp(false), true)
-    if (explain) return (setExplain(false), true)
-    if (repoPicker) return (setRepoPicker(false), true)
-    if (railActive) return (setRailFocus(false), true)
+    if (palette !== null) return setPalette(null), true
+    if (help) return setHelp(false), true
+    if (explain) return setExplain(false), true
+    if (repoPicker) return setRepoPicker(false), true
+    if (railActive) return setRailFocus(false), true
     // `menu.handleKey` keeps its own esc arm — it is exported and PrView mounts
     // it too, so this double-closes by one idempotent state update rather than
     // buying surgery on a two-caller hook.
-    if (menu.actions !== null) return (menu.close(), true)
-    if (search != null) return (filter.clear(), true)
-    if (repoFilter.size > 0) return (setRepoFilter(new Set()), true)
+    if (menu.actions !== null) return menu.close(), true
+    if (search != null) return filter.clear(), true
+    if (repoFilter.size > 0) return setRepoFilter(new Set()), true
     return false
   }
   useEffect(() => {
@@ -4802,8 +4810,8 @@ const BrowseScreen = ({
       key.leftArrow || (key.tab && key.shift)
         ? -1
         : key.rightArrow || key.tab
-          ? 1
-          : 0
+        ? 1
+        : 0
     if (step !== 0)
       setTabIdx((i) => (i + step + localSections.length) % localSections.length)
     // Ink's exit, not process.exit: it unmounts and hands the terminal back
@@ -5103,7 +5111,7 @@ const BrowseScreen = ({
         (activeItem.kind === "pr" || activeItem.kind === "issue")
       ) {
         const { repo } = activeItem
-        const branch = activeItem.kind === "pr" ? (activeItem.branch ?? "") : ""
+        const branch = activeItem.kind === "pr" ? activeItem.branch ?? "" : ""
         showFlash(`⋯ Opening ${repo}…`)
         void jumpToRepo(repo, branch, login)
           .then(() => showFlash(`↗ Opened ${repo} in new tab`))
@@ -5201,41 +5209,35 @@ const BrowseScreen = ({
         ["q", "quit"],
       ]
     : activeItem?.kind === "repo-header"
-      ? [
-          ["↑↓", "nav"],
-          ["←→", "tab"],
-          ["↵", "open repo"],
-          ["o", "browser"],
-          headerHint,
-          ["?", "help"],
-          ["q", "quit"],
-        ]
-      : activeItem?.kind === "subgroup-header"
-        ? [
-            ["↑↓", "nav"],
-            ["←→", "tab"],
-            headerHint,
-            ["?", "help"],
-            ["q", "quit"],
-          ]
-        : [
-            ["↑↓", "nav"],
-            ["←→", "tab"],
-            ["↵/d", "open"],
-            ["m", "actions"],
-            // Only where Jira is configured: without it the launcher can only say
-            // so, and a footer key that opens an apology is a broken feature.
-            ...(jiraBase ? ([["⌃K", "launch"]] as [string, string][]) : []),
-            // Advertised only where it does something, and named for what it
-            // shows rather than for the furniture: nobody wants "a sidebar".
-            ...(showRail
-              ? ([["⇥", railTitle]] as [string, string][])
-              : hasRail
-                ? ([["i", railTitle]] as [string, string][])
-                : []),
-            ["?", "help"],
-            ["q", "quit"],
-          ]
+    ? [
+        ["↑↓", "nav"],
+        ["←→", "tab"],
+        ["↵", "open repo"],
+        ["o", "browser"],
+        headerHint,
+        ["?", "help"],
+        ["q", "quit"],
+      ]
+    : activeItem?.kind === "subgroup-header"
+    ? [["↑↓", "nav"], ["←→", "tab"], headerHint, ["?", "help"], ["q", "quit"]]
+    : [
+        ["↑↓", "nav"],
+        ["←→", "tab"],
+        ["↵/d", "open"],
+        ["m", "actions"],
+        // Only where Jira is configured: without it the launcher can only say
+        // so, and a footer key that opens an apology is a broken feature.
+        ...(jiraBase ? ([["⌃K", "launch"]] as [string, string][]) : []),
+        // Advertised only where it does something, and named for what it
+        // shows rather than for the furniture: nobody wants "a sidebar".
+        ...(showRail
+          ? ([["⇥", railTitle]] as [string, string][])
+          : hasRail
+          ? ([["i", railTitle]] as [string, string][])
+          : []),
+        ["?", "help"],
+        ["q", "quit"],
+      ]
   const matchCount = section.items.filter(
     (i) => i.kind !== "repo-header" && i.kind !== "subgroup-header",
   ).length
@@ -5325,8 +5327,8 @@ const BrowseScreen = ({
     const message = !jiraBase
       ? `Jira not configured${jiraSetupHint ? ` · ${jiraSetupHint}` : ""}`
       : query && !ticketKey
-        ? `no ticket matches "${query}"`
-        : undefined
+      ? `no ticket matches "${query}"`
+      : undefined
     const items: PaletteItem[] = commands.map((command) => ({
       id: command.id,
       title: command.title,
@@ -5418,7 +5420,7 @@ const BrowseScreen = ({
         // Inside an overlay the breadcrumb names the open item; on browse, the
         // host's scope. The counts, the login and the freshness never leave.
         scopeLabel={
-          overlayOpen ? (chrome?.scope ?? origin?.label) : origin?.label
+          overlayOpen ? chrome?.scope ?? origin?.label : origin?.label
         }
         budgetLabel={budgetNotice(budget)?.label}
         budgetCritical={budgetNotice(budget)?.critical}
@@ -6187,13 +6189,10 @@ export const App = ({
     const running = [...heldSince].filter(([tab]) => held.has(tab))
     if (running.length === 0) return
     const remaining = (at: number) => at + TRANSIT_HOLD_MS - Date.now()
-    const timer = setTimeout(
-      () => {
-        for (const [tab, at] of running)
-          if (remaining(at) <= 0) settleTab(tab, transients)
-      },
-      Math.max(0, Math.min(...running.map(([, at]) => remaining(at)))),
-    )
+    const timer = setTimeout(() => {
+      for (const [tab, at] of running)
+        if (remaining(at) <= 0) settleTab(tab, transients)
+    }, Math.max(0, Math.min(...running.map(([, at]) => remaining(at)))))
     return () => clearTimeout(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [transients, heldSince, state.phase])
@@ -6482,7 +6481,7 @@ export const App = ({
   // the one moment it has no response to read it from, and the moment a third
   // cockpit opening on an exhausted account does the most damage.
   const [budget, setBudget] = useState<InboxBudget | null>(() =>
-    cacheKey ? (readCache(cacheKey)?.budget ?? null) : null,
+    cacheKey ? readCache(cacheKey)?.budget ?? null : null,
   )
   // Its own state rather than a field on the browse phase: the rail is not rows.
   // It never enters the diff, never joins the union, and never waits on a tab's
@@ -6619,14 +6618,14 @@ export const App = ({
     state.phase === "pr"
       ? { kind: "pr" as const, item: state.item }
       : state.phase === "issue"
-        ? { kind: "issue" as const, item: state.item }
-        : state.phase === "ext"
-          ? {
-              kind: "ext" as const,
-              extId: state.extId,
-              target: state.target,
-            }
-          : null
+      ? { kind: "issue" as const, item: state.item }
+      : state.phase === "ext"
+      ? {
+          kind: "ext" as const,
+          extId: state.extId,
+          target: state.target,
+        }
+      : null
   const toBrowse = () => {
     // The overlay's chrome goes with it. Every chrome-setting view sets on
     // mount, so the only moments that need a clear are the shell's own
@@ -6706,10 +6705,10 @@ export const App = ({
           onMerged: markMerged,
         })
       : overlay?.kind === "ext"
-        ? extensions
-            ?.find((e) => e.id === overlay.extId)
-            ?.body(toBrowse, overlay.target)
-        : null
+      ? extensions
+          ?.find((e) => e.id === overlay.extId)
+          ?.body(toBrowse, overlay.target)
+      : null
   return (
     <InboxChromeContext.Provider value={chromeValue}>
       <BrowseScreen

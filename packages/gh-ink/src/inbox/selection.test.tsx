@@ -8,6 +8,7 @@ import {
   SELECTION_BG,
   selectionBackground,
   taskKeyStyle,
+  TICKET_KEY_BLUE,
 } from "./inbox.js"
 import type { Section, TaskRow } from "./inbox.js"
 
@@ -55,21 +56,18 @@ describe("selectionBackground", () => {
 
 describe("taskKeyStyle", () => {
   /*
-   * Exact equality on purpose: info blue on every row, unlike the PR number, and
+   * Exact equality on purpose: sky blue on every row, unlike the PR number, and
    * bold only under the cursor, so a stray prop breaks the shape.
    */
-  it("wears info blue on every row and bold only when active", () => {
-    expect(taskKeyStyle(true)).toEqual({ color: colors.info, bold: true })
-    expect(taskKeyStyle(false)).toEqual({ color: colors.info, bold: false })
+  it("wears sky blue on every row and bold only when active", () => {
+    expect(taskKeyStyle(true)).toEqual({ color: TICKET_KEY_BLUE, bold: true })
+    expect(taskKeyStyle(false)).toEqual({ color: TICKET_KEY_BLUE, bold: false })
   })
 })
 
 class FakeStdout extends EventEmitter {
   frames: string[] = []
-  constructor(
-    public columns: number,
-    public rows: number,
-  ) {
+  constructor(public columns: number, public rows: number) {
     super()
   }
   write = (frame: string) => {
