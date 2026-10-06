@@ -177,7 +177,7 @@ describe("the focus slot", () => {
     // complete and the key follows it. Both halves asserted: the words still
     // point, and the key still advertises the jump.
     expect(out).toMatch(
-      /focus {2}▲ SHOP-1234 {2}Payout totals.* {3}in progress/,
+      /focus\uE0B4 {2}▲ SHOP-1234 {2}Payout totals.* {3}in progress/,
     )
     expect(out).toMatch(/ {3}g jump/)
     // Below the header, above the tab strip.
@@ -238,10 +238,12 @@ describe("the focus slot", () => {
     )
     const out = frame()
     done()
-    // The slot row carries the mark too — what is pinned here is that exactly
-    // one LIST row does, the one `g` would land on.
+    // The slot row carries the mark too, inside its pill — what is pinned here
+    // is that exactly one LIST row does, the one `g` would land on. The pill
+    // row is dropped by the label glued to the pill's right cap, where the
+    // old mark-and-label run was dropped by the label and two spaces.
     const marked = out.split("\n").filter((l) => l.includes(FOCUS_MARK))
-    const rows = marked.filter((l) => !l.includes("focus  "))
+    const rows = marked.filter((l) => !l.includes("focus\uE0B4"))
     expect(rows).toHaveLength(1)
     expect(rows[0]).toContain("SHOP-1234")
   })
@@ -262,7 +264,7 @@ describe("the focus slot", () => {
     const out = frame()
     done()
     const marked = out.split("\n").filter((l) => l.includes(FOCUS_MARK))
-    const rows = marked.filter((l) => !l.includes("focus  "))
+    const rows = marked.filter((l) => !l.includes("focus\uE0B4"))
     expect(rows).toHaveLength(1)
     expect(rows[0]).toContain("#2")
   })

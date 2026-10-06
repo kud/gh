@@ -83,14 +83,15 @@ describe("task row pill", () => {
   // through which caps it drew.
   it("draws the label as a soft pill", async () => {
     const frame = await mount(row({ pill: "epic" }))
-    expect(frame).toContain(
-      `${glyph("plCapLeft")}epic${glyph("plCapRight")}`,
-    )
+    expect(frame).toContain(`${glyph("plCapLeft")}epic${glyph("plCapRight")}`)
     expect(frame).not.toContain(glyph("plCapLeftThin"))
   })
 
   it("draws no caps on a row that has no pill", async () => {
-    expect(await mount(row())).not.toContain(glyph("plCapLeft"))
+    const frame = await mount(row())
+    const taskLine = frame.split("\n").find((l) => l.includes("PROJ-1")) ?? ""
+    expect(taskLine).toContain("PROJ-1")
+    expect(taskLine).not.toContain(glyph("plCapLeft"))
   })
 
   // Both, on one row: a story under someone else's epic carries that epic's key

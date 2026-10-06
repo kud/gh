@@ -1,6 +1,6 @@
 import React from "react"
 import { Box, Text } from "ink"
-import { colors } from "@kud/ink-ui"
+import { Pill, colors, pillWidth } from "@kud/ink-ui"
 import { truncate } from "../lib/truncate.js"
 
 /**
@@ -20,7 +20,11 @@ import { truncate } from "../lib/truncate.js"
 export type FocusSlot = {
   /** The mark in front of the row, accent by default. */
   mark?: string
-  /** The mark's colour. Defaults to the accent. */
+  /**
+   * The mark's colour in the list gutter (`focusCellFor`). Defaults to the
+   * accent. The ready row's pill takes its accent from its own
+   * `variant="accent"`, so this never reaches the pill.
+   */
   markColor?: string
   /** What the row is a slot OF, in the host's words: `focus`, say. */
   label: string
@@ -101,6 +105,12 @@ const cells = (s: string): number => [...s].length
 // the reason because it is the longer of the two by construction, and a reason
 // clipped to nothing would leave the row pointing without saying why.
 //
+// The mark and label ride one tonal pill now, so the head prices the pill via
+// `pillWidth`, which already counts its two cap columns. Pricing the label
+// alone instead undercounts by exactly those two columns, and a row budgeted
+// two wide overflows its container — where Ink folds the whole frame for a
+// row wider than it, rather than clipping the row.
+//
 // The jump hint is priced with the fixed cells, but it is spent last: when
 // space runs short the title truncates first, then the reason truncates
 // around a hint that stays, and only when the reason would fall below one
@@ -117,10 +127,8 @@ const titleBudgetOf = (
   const mark = focus.mark ?? FOCUS_MARK
   const head =
     2 /* gutter */ +
-    cells(mark) +
-    1 +
-    cells(label) +
-    2 +
+    pillWidth(`${mark} ${label}`) +
+    2 /* spaces after the pill */ +
     (focus.marker ? cells(focus.marker) + 1 : 0) +
     cells(focus.ref) +
     2
@@ -201,13 +209,16 @@ export const FocusSlotLine = ({
 
   const mark = focus.mark ?? FOCUS_MARK
   const { title, reason, hint } = titleBudgetOf(focus, label, width, jumpKey)
+  // The slot label is chrome, not row data, so it rides a tonal accent pill —
+  // the quietest filled form, per the design system. The pill takes its accent
+  // from its own variant, so `focus.markColor` never reaches it: the colour
+  // only affects the list gutter (`focusCellFor`). Never `color`: that prop
+  // is for states an external system invented, and this word is ours.
   return (
     <Box marginBottom={1}>
       <Text>{"  "}</Text>
-      <Text color={focus.markColor ?? colors.accent} bold>
-        {`${mark} `}
-      </Text>
-      <Text dimColor>{`${label}  `}</Text>
+      <Pill variant="accent" tone="tonal">{`${mark} ${label}`}</Pill>
+      <Text>{"  "}</Text>
       {/* The host's priority glyph in the default foreground, never a status
           hue: priority is lightness, not colour, and a red chevron here would
           claim a failure. */}

@@ -44,7 +44,7 @@
     "access": "public"
   },
   "peerDependencies": {
-    "@kud/ink-ui": ">=0.39.0 <1",
+    "@kud/ink-ui": ">=0.41.0 <1",
     "ink": ">=7",
     "react": ">=19"
   },
@@ -54,7 +54,7 @@
     "zx": "8.8.5"
   },
   "devDependencies": {
-    "@kud/ink-ui": "0.39.0",
+    "@kud/ink-ui": "0.41.0",
     "@types/node": "22.20.1",
     "@types/react": "19.2.17",
     "ink": "7.1.0",
