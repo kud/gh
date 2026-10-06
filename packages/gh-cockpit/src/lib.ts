@@ -52,6 +52,7 @@ export {
   filterBySearch,
   fitCount,
   FOCUS_MARK,
+  FOCUS_JUMP_KEY,
   FocusSlotLine,
   focusCellFor,
   focusRefColor,
