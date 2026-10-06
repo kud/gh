@@ -85,6 +85,7 @@ import {
 } from "../components/status-strip.js"
 import {
   FocusSlotLine,
+  FOCUS_JUMP_KEY,
   focusCellFor,
   type FocusSlot,
 } from "./focus-slot.js"
@@ -3880,7 +3881,7 @@ export const HelpModal = ({
     ["r", "refresh"],
     ["w", "restore a change that failed"],
     ...(hasFocus
-      ? ([["g", "jump to focus"]] as [string, string][])
+      ? ([[FOCUS_JUMP_KEY, "jump to focus"]] as [string, string][])
       : []),
     ...extensionLegend(extensions),
     ["?", "this help"],
@@ -5190,7 +5191,7 @@ const BrowseScreen = ({
     // to: this arm fires only with one on screen, and the extension arm below
     // still answers when it stands down. (No built-in key is shadowed — `g`
     // appears in neither the handler above nor the legend below.)
-    if (input === "g" && focus) {
+    if (input === FOCUS_JUMP_KEY && focus) {
       const tabId = focus.target.tab
       const at = localSections.findIndex((s) => s.id === tabId)
       if (at === -1) return
@@ -5943,6 +5944,7 @@ const BrowseScreen = ({
           label={focusLabel}
           empty={focusEmpty}
           width={COLS}
+          jumpKey={FOCUS_JUMP_KEY}
         />
       ) : null}
 

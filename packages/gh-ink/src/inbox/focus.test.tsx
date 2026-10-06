@@ -172,9 +172,14 @@ describe("the focus slot", () => {
     })
     const out = frame()
     done()
+    // The hint's nine cells come out of the title's budget at this width, so
+    // the title middle-elides where it once fit whole; the reason stays
+    // complete and the key follows it. Both halves asserted: the words still
+    // point, and the key still advertises the jump.
     expect(out).toMatch(
-      /focus {2}▲ SHOP-1234 {2}Payout totals double-count reversed adjustments {3}in progress/,
+      /focus {2}▲ SHOP-1234 {2}Payout totals.* {3}in progress/,
     )
+    expect(out).toMatch(/ {3}g jump/)
     // Below the header, above the tab strip.
     const lines = out.split("\n")
     const slot = lines.findIndex((l) => l.includes("SHOP-1234  Payout"))

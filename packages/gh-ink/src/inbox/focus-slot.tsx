@@ -46,6 +46,13 @@ export type FocusSlot = {
 // screen below.
 export const FOCUS_MARK = "\u{F04FE}"
 
+// The inbox key that jumps to the focus row, drawn as a quiet hint after the
+// reason on the ready row. One constant so the keymap legend, the input
+// handler and the hint cannot drift: a key renamed in one place and forgotten
+// in another would either advertise a jump that does nothing or hide one that
+// works, and all three read this.
+export const FOCUS_JUMP_KEY = "g"
+
 export const DEFAULT_FOCUS_LABEL = "focus"
 export const DEFAULT_FOCUS_EMPTY = "nothing to focus on"
 
@@ -93,11 +100,20 @@ const cells = (s: string): number => [...s].length
 // fixed cell first, whatever is left for the words. The title gives way before
 // the reason because it is the longer of the two by construction, and a reason
 // clipped to nothing would leave the row pointing without saying why.
+//
+// The jump hint is priced with the fixed cells, but it is spent last: when
+// space runs short the title truncates first, then the reason truncates
+// around a hint that stays, and only when the reason would fall below one
+// cell does the hint drop and hand its cells back to the reason. A hint beside
+// an empty reason would advertise a key on a row that says nothing, while a
+// reason clipped to nothing beside a hint would say nothing at all.
 const titleBudgetOf = (
   focus: FocusSlot,
   label: string,
   width: number,
-): { title: string; reason: string } => {
+  jumpKey?: string,
+): { title: string; reason: string; hint: string | undefined } => {
+  const hint = jumpKey ? jumpKey : undefined
   const mark = focus.mark ?? FOCUS_MARK
   const head =
     2 /* gutter */ +
@@ -108,17 +124,29 @@ const titleBudgetOf = (
     (focus.marker ? cells(focus.marker) + 1 : 0) +
     cells(focus.ref) +
     2
+  const hintCells = hint ? 3 + cells(hint) + 5 /* " jump" */ : 0
   const tail = 3 + cells(focus.reason)
-  const titleMax = width - head - tail
+  const titleMax = width - head - tail - hintCells
   if (titleMax >= 1)
-    return { title: truncate(focus.title, titleMax), reason: focus.reason }
+    return { title: truncate(focus.title, titleMax), reason: focus.reason, hint }
   // No room for even one title cell: drop the title and spend what is left on
   // the reason, so the row still says why in one line rather than overflowing
   // into the frame. Ink compresses rather than clips an overflowing row, and a
-  // row wider than its container folds the whole frame with it.
+  // row wider than its container folds the whole frame with it. The hint keeps
+  // its cells here; it drops only when the reason itself would not fit.
+  const reasonMax = width - head - 3 - 1 - hintCells
+  if (hint === undefined || reasonMax >= 1)
+    return {
+      title: "",
+      reason: truncate(focus.reason, Math.max(0, width - head - 3 - 1 - hintCells)),
+      hint,
+    }
+  // Even a one-cell reason cannot keep the hint: drop it and give its cells
+  // back, so the row still says why rather than saying nothing at all.
   return {
     title: "",
     reason: truncate(focus.reason, Math.max(0, width - head - 3 - 1)),
+    hint: undefined,
   }
 }
 
@@ -136,6 +164,7 @@ export const FocusSlotLine = ({
   label = DEFAULT_FOCUS_LABEL,
   empty = DEFAULT_FOCUS_EMPTY,
   width,
+  jumpKey,
 }: {
   /** `undefined` while the first answer is out; `null` when it came back empty. */
   focus: FocusSlot | null | undefined
@@ -145,6 +174,12 @@ export const FocusSlotLine = ({
   empty?: string
   /** Columns the row may use. */
   width: number
+  /**
+   * The key that jumps to the focus row, drawn as a quiet hint after the
+   * reason. Ready rows only: loading and empty have no row to jump to, so
+   * they never draw it even when it is set.
+   */
+  jumpKey?: string
 }) => {
   if (focus === undefined)
     return (
@@ -165,7 +200,7 @@ export const FocusSlotLine = ({
     )
 
   const mark = focus.mark ?? FOCUS_MARK
-  const { title, reason } = titleBudgetOf(focus, label, width)
+  const { title, reason, hint } = titleBudgetOf(focus, label, width, jumpKey)
   return (
     <Box marginBottom={1}>
       <Text>{"  "}</Text>
@@ -180,6 +215,19 @@ export const FocusSlotLine = ({
       <Text color={focusRefColor(focus)} bold>{`${focus.ref}  `}</Text>
       <Text bold>{title}</Text>
       <Text dimColor>{`   ${reason}`}</Text>
+      {/* The jump key in the accent, wearing the mark's colour so the hint
+          reads as pointing at the same row. Quiet by construction: three
+          spaces, one key, one dim word — and drawn only while the budget
+          holds it, never at the reason's expense. */}
+      {hint ? (
+        <>
+          <Text dimColor>{"   "}</Text>
+          <Text color={colors.accent} bold>
+            {hint}
+          </Text>
+          <Text dimColor>{" jump"}</Text>
+        </>
+      ) : null}
     </Box>
   )
 }

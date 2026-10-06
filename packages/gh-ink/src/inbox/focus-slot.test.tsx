@@ -6,6 +6,7 @@ import { colors } from "@kud/ink-ui"
 import {
   FocusSlotLine,
   FOCUS_MARK,
+  FOCUS_JUMP_KEY,
   focusCellFor,
   focusRefColor,
   type FocusSlot,
@@ -169,5 +170,109 @@ describe("FocusSlotLine", () => {
     const lines = out.split("\n").filter((l) => l.includes("SHOP-1234"))
     expect(lines).toHaveLength(1)
     expect(lines[0]).toContain("…")
+  })
+})
+
+/*
+ * The jump hint is the key advertised twice — once in the keymap legend, once
+ * after the reason — and both read the same constant, so the test pins the
+ * constant's value the way the legend does: rename the key and the hint moves
+ * with it. Budget order is title first, reason second, hint last: the hint
+ * stays while the words give way, and drops only when the reason itself would
+ * not fit, handing its cells back.
+ */
+describe("FocusSlotLine jump hint", () => {
+  it("pins the jump key the legend and handler share", () => {
+    expect(FOCUS_JUMP_KEY).toBe("g")
+  })
+
+  it("draws the key and the word after the reason on the ready row", () => {
+    const out = frameOf(
+      <FocusSlotLine focus={ticketFocus()} width={116} jumpKey={FOCUS_JUMP_KEY} />,
+    )
+    expect(out).toMatch(/in progress.* {3}g jump/)
+  })
+
+  it("draws nothing extra when jumpKey is unset", () => {
+    const out = frameOf(<FocusSlotLine focus={ticketFocus()} width={116} />)
+    expect(out).not.toContain("jump")
+  })
+
+  it("draws nothing extra for an empty key", () => {
+    const out = frameOf(
+      <FocusSlotLine focus={ticketFocus()} width={116} jumpKey="" />,
+    )
+    expect(out).not.toContain("jump")
+  })
+
+  it("stays off the loading row even when jumpKey is set", () => {
+    const out = frameOf(
+      <FocusSlotLine focus={undefined} width={116} jumpKey={FOCUS_JUMP_KEY} />,
+    )
+    expect(out).not.toContain("jump")
+  })
+
+  it("stays off the empty row even when jumpKey is set", () => {
+    const out = frameOf(
+      <FocusSlotLine focus={null} width={116} jumpKey={FOCUS_JUMP_KEY} />,
+    )
+    expect(out).not.toContain("jump")
+  })
+
+  // The frame is wider than the row budget here, so a row that honoured the
+  // budget is measurable directly: one physical line, no longer than width.
+  const rowOf = (out: string): string => {
+    const lines = out.split("\n").filter((l) => l.includes("SHOP-1234"))
+    expect(lines).toHaveLength(1)
+    return lines[0]
+  }
+
+  it("keeps the reason whole and the hint while the title gives way", () => {
+    const out = frameOf(
+      <FocusSlotLine
+        focus={{
+          ...ticketFocus(),
+          title: `a very long title ${"x".repeat(200)}`,
+        }}
+        width={100}
+        jumpKey={FOCUS_JUMP_KEY}
+      />,
+    )
+    const row = rowOf(out)
+    expect([...row].length).toBeLessThanOrEqual(100)
+    expect(row).toContain("…")
+    expect(row).toContain(ticketFocus().reason)
+    expect(row).toMatch(/ {3}g jump/)
+  })
+
+  it("truncates the reason around a hint that stays", () => {
+    const out = frameOf(
+      <FocusSlotLine
+        focus={ticketFocus()}
+        width={60}
+        jumpKey={FOCUS_JUMP_KEY}
+      />,
+    )
+    const row = rowOf(out)
+    expect([...row].length).toBeLessThanOrEqual(60)
+    expect(row).not.toContain(ticketFocus().reason)
+    expect(row).toMatch(/ {3}g jump/)
+  })
+
+  // No room for even a one-cell reason beside the hint: the hint drops and its
+  // cells go back to the reason, so the row still says why.
+  it("drops the hint last, giving the space back to the reason", () => {
+    const out = frameOf(
+      <FocusSlotLine
+        focus={ticketFocus()}
+        width={35}
+        jumpKey={FOCUS_JUMP_KEY}
+      />,
+    )
+    const row = rowOf(out)
+    expect([...row].length).toBeLessThanOrEqual(35)
+    expect(row).not.toContain("jump")
+    expect(row).toContain("…")
+    expect(row.endsWith("you")).toBe(true)
   })
 })

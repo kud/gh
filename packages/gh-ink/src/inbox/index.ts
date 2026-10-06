@@ -95,6 +95,7 @@ export { readCache, writeCache, type InboxBudget } from "./cache.js"
 export {
   FocusSlotLine,
   FOCUS_MARK,
+  FOCUS_JUMP_KEY,
   focusRefColor,
   focusCellFor,
   DEFAULT_FOCUS_LABEL,
