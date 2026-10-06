@@ -3,6 +3,7 @@ import { homedir } from "node:os"
 import { join } from "node:path"
 import { useState, useEffect } from "react"
 import type { Section } from "./inbox.js"
+import type { FocusSlot } from "./focus-slot.js"
 import { railsOf, type Rails } from "../components/side-panel.js"
 import { inboxConfig } from "./config.js"
 
@@ -66,8 +67,14 @@ export const cacheTtlMs = (): number => inboxConfig().cacheTtlMs
  * v4 entry's single object still reads as a one-section stack, so nothing
  * would break — but the reader below now checks the stack's shape, and a
  * bump is cheaper than a second code path kept alive for the old file.
+ *
+ * 6 — `focus` added. Optional, so a v5 entry deserialises harmlessly — but a
+ * launch painted from a cache that predates the slot must not invent an empty
+ * line either: `undefined` means the host has no focus feature and draws no
+ * row, and a missing field reads exactly as that. One cold fetch is still the
+ * cheaper trade where it matters, which is a null the old file cannot carry.
  */
-const CACHE_VERSION = 5
+const CACHE_VERSION = 6
 
 /**
  * What the last fetch cost and what was left afterwards, as reported INSIDE the
@@ -107,6 +114,16 @@ export type CachedCockpit = {
    * refresh — `i` did nothing and the footer did not even offer it.
    */
   sidebar?: Rails
+  /**
+   * The focus slot, when the host supplied one. Cached beside the rows because
+   * it is painted beside them: a launch that trusts the cache never refetches,
+   * so a focus left out of the file is a slot that stays on `loading…` until
+   * the next refresh — or never fills in at all.
+   *
+   * Absent reads as `undefined`: no focus feature, no row. `null` is a real
+   * answer ("nothing to focus on") and round-trips as one.
+   */
+  focus?: FocusSlot | null
 }
 
 const cacheDir = (): string =>
@@ -123,11 +140,22 @@ export const readCache = (key: string): CachedCockpit | null => {
     const raw = JSON.parse(readFileSync(cacheFile(key), "utf8"))
     if (raw?.version !== CACHE_VERSION) return null
     if (!Array.isArray(raw?.sections)) return null
+    // A well-formed file with a misshapen focus is still a miss: the slot
+    // reads `target.tab`/`target.url` to jump, and a garbage answer there is a
+    // crash on `g` rather than a degraded render. `null` passes — it is the
+    // host's real "nothing to focus on".
+    const focusOk =
+      raw.focus === undefined ||
+      raw.focus === null ||
+      (typeof raw.focus?.target?.tab === "string" &&
+        typeof raw.focus?.target?.url === "string")
+    if (!focusOk) return null
     return {
       sections: raw.sections,
       login: raw.login ?? "",
       at: raw.at ?? 0,
       budget: raw.budget,
+      ...(raw.focus !== undefined ? { focus: raw.focus as FocusSlot | null } : {}),
       ...(railsOf(raw.sidebar).every((s) => Array.isArray(s?.rows)) &&
       raw.sidebar !== undefined
         ? { sidebar: raw.sidebar }
@@ -151,6 +179,7 @@ export const writeCache = (
     login: string
     budget?: InboxBudget
     sidebar?: Rails
+    focus?: FocusSlot | null
   },
 ): void => {
   try {

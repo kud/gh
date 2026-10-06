@@ -93,6 +93,16 @@ export {
 } from "./extension.js"
 export { readCache, writeCache, type InboxBudget } from "./cache.js"
 export {
+  FocusSlotLine,
+  FOCUS_MARK,
+  focusRefColor,
+  focusCellFor,
+  DEFAULT_FOCUS_LABEL,
+  DEFAULT_FOCUS_EMPTY,
+  type FocusSlot,
+  type FocusGutter,
+} from "./focus-slot.js"
+export {
   configureInbox,
   inboxConfig,
   resetInboxConfig,

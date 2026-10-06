@@ -84,6 +84,11 @@ import {
   type StatusStrip,
 } from "../components/status-strip.js"
 import {
+  FocusSlotLine,
+  focusCellFor,
+  type FocusSlot,
+} from "./focus-slot.js"
+import {
   colors,
   CommandPalette,
   FooterHints,
@@ -2986,6 +2991,7 @@ const ItemRow = ({
   columns,
   shed,
   numberCols,
+  focus,
 }: {
   item: AnyItem
   active: boolean
@@ -3050,6 +3056,14 @@ const ItemRow = ({
    */
   transitAt?: number
   sparkFrame?: number
+  /**
+   * The focus slot's current answer, for the gutter mark. `undefined` draws no
+   * gutter at all — no focus feature, byte-identical rows. Anything else
+   * reserves the two columns on every url-bearing row: the mark on the row `g`
+   * would land on, blanks elsewhere. Headers and collapsed rows carry none —
+   * they name no url, so there is no row for the mark to point at.
+   */
+  focus?: FocusSlot | null
 }) => {
   // One vocabulary, because the row is saying the same thing either way: it is
   // leaving. Who caused it is the flash's business — the row's is that it will
@@ -3179,8 +3193,15 @@ const ItemRow = ({
         (farewellLabel ? pillWidth(farewellLabel) + 2 : 0) -
         prefix.length -
         (markerCols > 0 ? markerCols + 1 : 0) -
+        // The focus gutter, priced only when it is drawn: two columns on every
+        // url-bearing row while a focus is on screen, none at all without one.
+        (focus !== undefined ? 2 : 0) -
         12,
     )
+    // Resolved once for the row: the mark on the row `g` would land on, blanks
+    // on every other url-bearing row while a focus is on screen, nothing at
+    // all without one — see `focusCellFor`.
+    const focusCell = focusCellFor(focus, item.url)
     return (
       <Box marginTop={gap ? 1 : 0} width={cols} backgroundColor={selBg}>
         <Text color={colors.info}>{active ? "❯ " : "  "}</Text>
@@ -3199,6 +3220,16 @@ const ItemRow = ({
             fixed-width either way, so nothing shifts when a ticket gains or
             loses its last PR. */}
         <Text dimColor>{parent ? "┬ " : "  "}</Text>
+        {/* The focus gutter, between the tree run and the row's own cells: the
+            eye learns one place for it beside the marker cell, and a fixed cell
+            means the mark never moves the title it is pointing at. */}
+        {focusCell !== undefined ? (
+          focusCell ? (
+            <Text color={focusCell.color} bold>{`${focusCell.mark} `}</Text>
+          ) : (
+            <Text>{"  "}</Text>
+          )
+        ) : null}
         {pending ? (
           <Text dimColor>{transitIcon + " "}</Text>
         ) : (
@@ -3356,6 +3387,10 @@ const ItemRow = ({
       icon={icon}
       motion={motion}
       announcements={announcements}
+      focusCell={focusCellFor(
+        focus,
+        "url" in item ? item.url : undefined,
+      )}
     />
   )
 }
@@ -3787,6 +3822,7 @@ const LEGEND_FOOTNOTE =
 export const HelpModal = ({
   extensions,
   hasJira,
+  hasFocus,
   tabHelp,
   maxRows,
   scroll = 0,
@@ -3796,6 +3832,10 @@ export const HelpModal = ({
   // "Jenkins exists", which is why a second extension went unlisted here.
   extensions?: InboxExtension[]
   hasJira?: boolean
+  // A live focus target: without one `g` does nothing, and a legend is the one
+  // place a reader goes to find out what they can press — so the row is
+  // advertised only where it acts, the way `t` is Jira's.
+  hasFocus?: boolean
   tabHelp?: [string, string][]
   // Rows the panel may occupy — the caller's list budget, not the terminal's
   // height, since the modal sits inside the frame with the header and tabs above
@@ -3839,6 +3879,9 @@ export const HelpModal = ({
     ["f", "filter by repo"],
     ["r", "refresh"],
     ["w", "restore a change that failed"],
+    ...(hasFocus
+      ? ([["g", "jump to focus"]] as [string, string][])
+      : []),
     ...extensionLegend(extensions),
     ["?", "this help"],
     ["q", "quit"],
@@ -4131,6 +4174,9 @@ const BrowseScreen = ({
   ciJob,
   stripState,
   stripLabel,
+  focus,
+  focusLabel,
+  focusEmpty,
   tabHelp,
   origin,
   budget,
@@ -4278,6 +4324,22 @@ const BrowseScreen = ({
   stripState?: StripStatusState
   stripLabel?: string
   /**
+   * The focus slot's current answer: what the reader should look at next.
+   * `undefined` (no focus feature on this host) draws no row at all; `null`
+   * draws the dim empty line; a value draws the slot. Unlike the strip it
+   * arrives with the fetch rather than on its own poller, because it goes
+   * stale the same way the rows do.
+   */
+  focus?: FocusSlot | null
+  /**
+   * What to call the focus row. Passing this (or `focusEmpty`) reserves the
+   * row from the first paint, so it reads `loading…` until the fetch lands
+   * rather than appearing late and shoving the tabs down.
+   */
+  focusLabel?: string
+  /** The empty sentence, drawn dim after the label when focus is null. */
+  focusEmpty?: string
+  /**
    * Take a ticket move optimistically: the host patches its rows and hands back
    * where to report the answer, or undefined to leave the move pessimistic.
    * See `TabForStatus`.
@@ -4382,6 +4444,12 @@ const BrowseScreen = ({
   const reserveCiRow = ciStatusState != null
   // The strip costs the same two rows, for the same reason.
   const reserveStripRow = stripState != null
+  // The focus slot costs the same two rows once it is drawn — or reserved by
+  // either label prop, so the row reads `loading…` from the first paint rather
+  // than appearing late and shoving the tab strip down. One height across all
+  // three states, so the tabs never jump between them.
+  const reserveFocusRow =
+    focusLabel !== undefined || focusEmpty !== undefined || focus !== undefined
   const ciStatus = ciStatusState?.kind === "ready" ? ciStatusState.status : null
   const listHeight = Math.max(
     5,
@@ -4391,7 +4459,8 @@ const BrowseScreen = ({
       10 -
       (filterActive ? 2 : 0) -
       (reserveCiRow ? 2 : 0) -
-      (reserveStripRow ? 2 : 0),
+      (reserveStripRow ? 2 : 0) -
+      (reserveFocusRow ? 2 : 0),
   )
 
   // Pull in fresh data when App applies it (no longer via a loading remount).
@@ -4717,6 +4786,9 @@ const BrowseScreen = ({
       uniformLabels,
       columns: trailingColumns,
       numberCols,
+      // Presence only: every row holds the same two gutter columns while a
+      // focus is on screen, so the shed ladder prices the cost once for all.
+      focusGutter: focus !== undefined,
     },
   )
 
@@ -5107,6 +5179,84 @@ const BrowseScreen = ({
     // (alternate screen included) instead of leaving whatever was on it.
     if (input === "r") {
       onRefresh?.()
+      return
+    }
+    // `g`: jump to whatever the focus slot is pointing at — the tab it names,
+    // the row it carries the url of. Below the row bindings' guards but above
+    // any arm that reads the active row, because the jump switches tabs first
+    // and the row under the cursor is not the row it is for.
+    //
+    // A host extension on `g` keeps working where there is no focus to jump
+    // to: this arm fires only with one on screen, and the extension arm below
+    // still answers when it stands down. (No built-in key is shadowed — `g`
+    // appears in neither the handler above nor the legend below.)
+    if (input === "g" && focus) {
+      const tabId = focus.target.tab
+      const at = localSections.findIndex((s) => s.id === tabId)
+      if (at === -1) return
+      // The row as DRAWN, not as stored: a search or repo filter may be hiding
+      // it, and the cursor indexes the drawn list.
+      const drawn = (s: Section): AnyItem[] => {
+        const one = search != null ? filterBySearch([s], search, login) : [s]
+        const two =
+          repoFilter.size > 0 ? filterByRepos(one, repoFilter, login) : one
+        return filterActive ? (two[0]?.items ?? []) : s.items
+      }
+      const urlOf = (i: AnyItem): string | undefined =>
+        "url" in i ? i.url : undefined
+      let items = localSections[at]!.items
+      if (!items.some((i) => urlOf(i) === focus.target.url)) {
+        // A collapsed tail is not a gap in the tree, it IS the rest of it —
+        // the same reasoning `treeUrls` copies hidden rows by. So the jump
+        // opens the tail its row is folded into rather than reporting it
+        // missing, mirroring the ↵ expansion above row for row.
+        const tail = items.find(
+          (i): i is ShowMore =>
+            i.kind === "show-more" &&
+            i.hidden.some((h) => h.url === focus.target.url),
+        )
+        // Nowhere to land: the slot still named a real tab, so switch to it
+        // and leave the cursor where the restore logic left it rather than
+        // planting it on a row nobody can see.
+        if (!tail) {
+          setTabIdx(at)
+          return
+        }
+        items = [
+          ...items.slice(0, items.indexOf(tail)),
+          ...tail.hidden,
+          {
+            kind: "show-less" as const,
+            toHide: tail.hidden,
+            // The depth of the row it replaces, never a constant — a collapsed
+            // row under a story sits deeper than 1, and pinning it breaks the
+            // `treeUrls` walk exactly as the comment there warns.
+            depth: depthOf(tail),
+          },
+          ...items.slice(items.indexOf(tail) + 1),
+        ]
+        const expanded = items
+        setLocalSections((prev) =>
+          prev.map((s) => (s.id === tabId ? { ...s, items: expanded } : s)),
+        )
+        // The cursor resyncs by row identity off this ref on the next commit —
+        // hand it the expanded list now, so the row it resolves the new cursor
+        // against is the one the cursor was just placed in rather than the
+        // collapsed list it was standing in.
+        prevItems.current = { ...prevItems.current, [tabId]: expanded }
+      }
+      setTabIdx(at)
+      const shown = drawn({ ...localSections[at]!, items })
+      const dit = shown.findIndex((i) => urlOf(i) === focus.target.url)
+      if (dit === -1) return
+      setCursors((p) => ({ ...p, [tabId]: dit }))
+      setViewStarts((p) => {
+        // The down-arrow's own walk, so the landing row is on screen: up past
+        // any header standing above it, down while it sits below the window.
+        let vs = Math.min(p[tabId] ?? 0, withHeaders(shown, dit))
+        while (dit >= vs + windowCount(shown, vs, listHeight)) vs++
+        return { ...p, [tabId]: vs }
+      })
       return
     }
     // Any extension whose declared key is pressed opens it. This used to be a
@@ -5722,6 +5872,7 @@ const BrowseScreen = ({
       <HelpModal
         extensions={extensions}
         hasJira={!!jiraBase}
+        hasFocus={focus != null}
         tabHelp={tabHelp}
         maxRows={listHeight}
         scroll={helpScroll}
@@ -5783,6 +5934,17 @@ const BrowseScreen = ({
           width={COLS}
         />
       ) : null}
+      {/* The focus slot, directly above the tab strip with the strip's own
+          blank line above it (its marginBottom). Reserved — never conditional
+          on the answer — so loading, ready and empty all spend the same row. */}
+      {reserveFocusRow ? (
+        <FocusSlotLine
+          focus={focus}
+          label={focusLabel}
+          empty={focusEmpty}
+          width={COLS}
+        />
+      ) : null}
 
       {/* Said out loud, because silence here is indistinguishable from a cockpit
           that simply has nothing new — and the reader would go on waiting for
@@ -5802,9 +5964,14 @@ const BrowseScreen = ({
         <Box marginBottom={1}>
           <Tabs
             active={section.id}
+            // The frame's own width, not the terminal's: the fallback prices
+            // against the terminal and overshoots by the frame chrome, so the
+            // strip would fold late and spill past the border.
+            width={COLS}
             items={localSections.map((s) => ({
               value: s.id,
               label: s.label,
+              icon: s.icon,
               count: countOf(s.id),
               /*
                * The denominator, and only where it can still be true.
@@ -5974,6 +6141,7 @@ const BrowseScreen = ({
                     columns={trailingColumns}
                     shed={trailingShed}
                     numberCols={numberCols}
+                    focus={focus}
                     // `i > 0` is window-relative and stays that way: the window's
                     // first row never draws its gap, and fitCount does not charge
                     // for one. The rule itself is gapsAbove, shared with fitCount so
@@ -6142,6 +6310,8 @@ export const App = ({
   stripFetcher,
   stripLabel,
   stripPollMs = 300_000,
+  focusLabel,
+  focusEmpty,
   watchPath,
   watchDebounceMs = 400,
   // Zero by default, deliberately. A package that adds randomness to its own
@@ -6175,6 +6345,15 @@ export const App = ({
      * data that goes stale the same way the rows do.
      */
     sidebar?: Rails
+    /**
+     * What the reader should look at next, in the host's words — see
+     * `FocusSlot`. Part of the fetch result for the same reason the rail is:
+     * it goes stale with the rows, and the cache paints it beside them.
+     *
+     * Absent means the host has no focus feature and no row is drawn; `null`
+     * means nothing to point at and draws the dim empty line.
+     */
+    focus?: FocusSlot | null
   }>
   cacheKey?: string
   /**
@@ -6242,6 +6421,16 @@ export const App = ({
   /** What to call the row before its first answer arrives with a title. */
   stripLabel?: string
   stripPollMs?: number
+  /**
+   * What to call the focus row. Passing this (or `focusEmpty`) reserves the
+   * row from the first paint — `loading…` until the fetch lands — while a
+   * host that never wires the feature passes neither and draws nothing.
+   * Vocabulary, not data: it never goes stale, so it is a prop rather than
+   * part of the fetch result.
+   */
+  focusLabel?: string
+  /** The empty sentence, drawn dim after the label when focus comes back null. */
+  focusEmpty?: string
   /**
    * A file something else touches when it has changed GitHub on your behalf —
    * a Claude session closing an issue, a script merging a PR. Touching it makes
@@ -6611,6 +6800,11 @@ export const App = ({
           ),
         }
         if (fresh.budget) setBudget(fresh.budget)
+        // The focus arrives with the fetch and goes stale with it, so it is
+        // applied the moment a fresh one resolves — a glance, not something
+        // navigated, exactly like the rail one line below. An answer that omits
+        // it leaves the last one standing rather than blanking the row.
+        if (fresh.focus !== undefined) setFocus(fresh.focus)
         // Applied at once rather than through the manual-apply gate. That gate
         // exists so the LIST cannot reshuffle under you mid-read; the rail holds
         // no cursor and nothing is being read down it, so holding it back would
@@ -6864,6 +7058,11 @@ export const App = ({
       // cache — the case where nothing refetches — launched with no rail at
       // all: `i` was gated on a sidebar that had not arrived, and would not.
       if (cached.sidebar) setSidebar(cached.sidebar)
+      // The slot paints the same way: a launch that trusts the cache never
+      // refetches, so a focus left out of the paint is a slot stuck on
+      // `loading…`. `!== undefined` rather than truthy — `null` is the real
+      // "nothing to focus on" and must survive the paint as one.
+      if (cached.focus !== undefined) setFocus(cached.focus)
       setState({
         phase: "browse",
         sections: cached.sections,
@@ -6981,6 +7180,7 @@ export const App = ({
           if (shared && shared.at > firedAt) {
             receive({ sections: shared.sections, login: shared.login })
             if (shared.sidebar) setSidebar(shared.sidebar)
+            if (shared.focus !== undefined) setFocus(shared.focus)
             setFetchedAt(shared.at)
             return
           }
@@ -7017,6 +7217,10 @@ export const App = ({
   // has been folded into the marks and the counts are gone.
   const [appliedSummary, setAppliedSummary] = useState("")
   const [sidebar, setSidebar] = useState<Rails | undefined>(undefined)
+  // The focus slot's current answer. Its own state rather than a field on the
+  // browse phase, for the same reason the rail is: it is not rows, never
+  // enters the diff, and never waits on a tab's hold.
+  const [focus, setFocus] = useState<FocusSlot | null | undefined>(undefined)
   // An automatic refresh declined itself. Worth saying: silence here is
   // indistinguishable from a cockpit that simply has nothing new, and the reader
   // would keep waiting for rows that were never coming.
@@ -7103,6 +7307,16 @@ export const App = ({
           <StatusStripLine
             strip={stripState.kind === "ready" ? stripState.strip : undefined}
             label={stripLabel}
+            width={COLS}
+          />
+        ) : null}
+        {/* The reserved slot reads `loading…` here the way the strip does —
+            before any answer exists, the reservation is the whole state. */}
+        {focusLabel !== undefined || focusEmpty !== undefined ? (
+          <FocusSlotLine
+            focus={undefined}
+            label={focusLabel}
+            empty={focusEmpty}
             width={COLS}
           />
         ) : null}
@@ -7284,6 +7498,9 @@ export const App = ({
         ciJob={ciJob}
         stripState={hasStrip ? stripState : undefined}
         stripLabel={stripLabel}
+        focus={focus}
+        focusLabel={focusLabel}
+        focusEmpty={focusEmpty}
         tabHelp={tabHelp}
         onOpenPr={(item) => {
           setChromeSpec({})

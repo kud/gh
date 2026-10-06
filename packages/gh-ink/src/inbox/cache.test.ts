@@ -71,6 +71,44 @@ describe("glance cache", () => {
     expect(readCache(KEY)?.sidebar).toBeUndefined()
   })
 
+  // The slot paints from the cache on a launch that never refetches, so a
+  // focus left out of the file is a slot stuck on `loading…` — and a null left
+  // out is worse: `undefined` draws no row at all, which is a different answer
+  // from "nothing to focus on".
+  it("round-trips the focus slot beside the rows", async () => {
+    const focus = {
+      label: "focus",
+      ref: "SHOP-1234",
+      title: "Payout totals double-count reversed adjustments",
+      reason: "in progress",
+      target: { tab: "review", url: "https://example.com/SHOP-1234" },
+    }
+    writeCache(KEY, { sections, login: "kud", focus })
+    expect(readCache(KEY)?.focus).toEqual(focus)
+  })
+
+  it("round-trips an empty focus answer as empty, not absent", async () => {
+    writeCache(KEY, { sections, login: "kud", focus: null })
+    expect(readCache(KEY)?.focus).toBeNull()
+  })
+
+  it("reads an entry with no focus as one without a focus, not a broken one", async () => {
+    writeCache(KEY, { sections, login: "kud" })
+    expect(readCache(KEY)?.focus).toBeUndefined()
+  })
+
+  // `g` reads `target.tab`/`target.url` to jump, so a well-formed file with a
+  // misshapen focus is a crash on that key rather than a degraded render.
+  it("misses rather than trusts a file with a misshapen focus", async () => {
+    writeCache(KEY, { sections, login: "kud", focus: null })
+    const raw = JSON.parse(readFileSync(cacheFile(), "utf8"))
+    writeFileSync(
+      cacheFile(),
+      JSON.stringify({ ...raw, focus: { label: "focus" } }),
+    )
+    expect(readCache(KEY)).toBeNull()
+  })
+
   it("treats a just-written entry as fresh", async () => {
     writeCache(KEY, { sections, login: "kud" })
     expect(isFresh(readCache(KEY))).toBe(true)

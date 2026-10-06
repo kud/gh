@@ -389,6 +389,14 @@ export type Section = {
    */
   group?: string
   /**
+   * One glyph naming the tab at a glance, passed through to ink-ui's
+   * `TabItem.icon`. Part of the label rather than a second gutter: the strip
+   * styles it with the label (bold accent when active, dim when not) and folds
+   * an inactive tab down to `icon count` when the strip does not fit its width.
+   * Absent, the tab never folds — same contract as the strip's own field.
+   */
+  icon?: string
+  /**
    * Present when `items` is a SAMPLE of a larger set rather than the set —
    * because a source behind it matched more rows than its query was allowed to
    * return. `total` is how many there really are.

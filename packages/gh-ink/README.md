@@ -61,6 +61,31 @@ codepoints; sibling host verbs should match them rather than invent neighbours:
 | Unsubscribe / Mute / Remove reviewer | U+F478 / U+F466 / U+F468 |
 | Close PR / and delete / issue  | U+F4DC / U+F48E / U+F41D |
 
+## Inbox focus slot and tab icons
+
+`App` draws one standing row directly above the tab strip for whatever the
+reader should look at next. The fetch result carries it as
+`focus?: FocusSlot | null`: absent means the host has no focus feature and no
+row is drawn; `null` means nothing to point at and draws the dim empty line.
+It rides the fetch (and the cache beside the rows) because it goes stale the
+same way they do.
+
+| Prop / field       | What                                                                                                |
+| ------------------ | --------------------------------------------------------------------------------------------------- |
+| `focusLabel`       | What to call the row (default `focus`). Passing this or `focusEmpty` reserves the row from first paint. |
+| `focusEmpty`       | The empty sentence, drawn dim after the label when focus comes back `null`.                         |
+| `FocusSlot`        | `label`, `ref` (a ticket key, or a PR-style `#427`), `title`, `reason`, optional `marker` (the host's priority glyph), `mark`/`markColor`/`refColor` overrides, and `target: { tab, url }`. |
+| `g`                | Jumps to `focus.target`: switches to that tab and lands the cursor on that row, opening a collapsed tail it is folded into. Listed in the `?` legend only while a focus is on screen. |
+
+A row whose url matches the target draws the mark in a fixed gutter between
+the tree glyph and the marker cell; every other row holds two blanks there, so
+the mark moves nothing sideways. Without a focus the rows draw what they
+always drew.
+
+Tabs take an optional `Section.icon`, passed through to ink-ui's
+`TabItem.icon`: one glyph naming the tab beside its label, which is also what
+an inactive tab folds down to when the strip does not fit its width.
+
 ## Development
 
 ```sh

@@ -13,6 +13,7 @@ import {
 import { displayFor } from "../lib/health-display.js"
 import { truncate } from "../lib/truncate.js"
 import { Text, useBackdropped } from "../inbox/backdrop.js"
+import type { FocusGutter } from "../inbox/focus-slot.js"
 
 /**
  * How this row is moving through the list right now.
@@ -101,6 +102,15 @@ export type PrRowProps = {
    * to the title rather than standing empty.
    */
   gutter?: boolean
+  /**
+   * The focus gutter, resolved by the list — see `focusCellFor`. `undefined`
+   * draws nothing at all (no focus feature, byte-identical to before); `null`
+   * holds two blank columns so the marked row does not shift its neighbours;
+   * a mark draws the focus glyph there in its colour. A fixed cell either way,
+   * for the same reason the cursor gutter is one: a mark that moved the title
+   * of exactly the row being watched would defeat its own purpose.
+   */
+  focusCell?: FocusGutter
 }
 
 // Unresolved review threads — a comment glyph (nf-fa-comments) + count, keeping
@@ -229,7 +239,12 @@ type LayoutInput = Pick<
   | "shed"
   | "numberCols"
   | "gutter"
->
+> & {
+  // Presence only, not the mark: every row holds the same two columns when a
+  // focus is on screen, so the shed ladder — which drops trailing columns for
+  // the whole section at once — needs the cost but not the occupant.
+  focusGutter?: boolean
+}
 
 /**
  * Which trailing columns the section has to give up, so that every row gives up
@@ -276,6 +291,7 @@ export const layoutOf = ({
   shed = {},
   numberCols,
   gutter = true,
+  focusGutter = false,
 }: LayoutInput) => {
   const numCols = numberCols ?? numberColumnsOf([item])
   const numStr = `#${item.number}`.padEnd(numCols)
@@ -430,6 +446,7 @@ export const layoutOf = ({
     return (
       (gutter ? 2 : 0) +
       prefix.length +
+      (focusGutter ? 2 : 0) +
       2 /* health */ +
       2 /* turn */ +
       numCols +
@@ -514,6 +531,7 @@ export const PrRow = ({
   shed,
   numberCols,
   gutter = true,
+  focusCell,
 }: PrRowProps) => {
   // Read once for the row rather than at each of the pill sites — a hook, so it
   // cannot sit inside a branch.
@@ -609,6 +627,7 @@ export const PrRow = ({
     shed,
     numberCols,
     gutter,
+    focusGutter: focusCell !== undefined,
   })
 
   return (
@@ -617,6 +636,17 @@ export const PrRow = ({
     <Box width={cols} backgroundColor={selectionBg}>
       {gutter ? <Text color={colors.info}>{active ? "❯ " : "  "}</Text> : null}
       <Text dimColor>{prefix}</Text>
+      {/* The focus gutter, right after the tree run and before the row's own
+          cells: the eye learns one place for it, and a fixed cell means the
+          mark never moves the title it is pointing at. Absent entirely without
+          a focus, so a host that never wired one draws byte-identical rows. */}
+      {focusCell !== undefined ? (
+        focusCell ? (
+          <Text color={focusCell.color} bold>{`${focusCell.mark} `}</Text>
+        ) : (
+          <Text>{"  "}</Text>
+        )
+      ) : null}
       <Text color={color as any} bold>
         {icon + " "}
       </Text>
