@@ -1,5 +1,14 @@
 # @kud/gh-cockpit
 
+## 0.12.1
+
+### Patch Changes
+
+- f46aed3: gh-cockpit's public surface now re-exports FOCUS_JUMP_KEY from @kud/gh-ink, which its exports test requires, so hosts can reference the same key constant as the legend and hint.
+- Updated dependencies [9fce3c6]
+- Updated dependencies [6c9b18d]
+  - @kud/gh-ink@0.75.1
+
 ## 0.12.0
 
 ### Minor Changes

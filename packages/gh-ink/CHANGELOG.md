@@ -1,5 +1,12 @@
 # @kud/gh-ink
 
+## 0.75.1
+
+### Patch Changes
+
+- 9fce3c6: The focus row now says how to reach what it points at. Pressing `g` already jumped to the focus item, but nothing on screen mentioned it, so the key was discoverable only from the help modal. The ready row ends with a quiet `g jump` after the reason, the key in the accent beside the focus mark and the word dim. The hint is priced into the row's width budget and spent last: the title truncates first, then the reason, and the hint drops only when even that cannot fit, so the row stays one line. The key is a single exported constant shared by the legend, the input handler and the hint, so they cannot drift.
+- 6c9b18d: The loading frame no longer runs past the bottom of the terminal when the host draws a status strip and a focus slot. Its body took two rows off for the CI line but none for the strip or the slot, so a cold launch with both drew four rows more than it budgeted and three more than the screen: Ink cleared and repainted the whole terminal on every spinner tick with the header scrolled out of view, and the frame dropped back into place when the fetch landed. Both rows now come out of the body, the same reservations the browse list makes, so the loading frame is the height of the loaded one and nothing moves when the rows arrive.
+
 ## 0.75.0
 
 ### Minor Changes
