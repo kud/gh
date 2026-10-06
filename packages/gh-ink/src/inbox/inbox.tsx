@@ -6564,6 +6564,9 @@ export const App = ({
       return sameCiStatusState(prev, next) ? prev : next
     })
   const hasStrip = !!stripFetcher
+  // Either label prop reserves the focus row, drawn `loading…` until the fetch
+  // lands.
+  const hasFocusSlot = focusLabel !== undefined || focusEmpty !== undefined
   const [stripState, setStripState] = useState<StripStatusState>({
     kind: "loading",
   })
@@ -7312,7 +7315,7 @@ export const App = ({
         ) : null}
         {/* The reserved slot reads `loading…` here the way the strip does —
             before any answer exists, the reservation is the whole state. */}
-        {focusLabel !== undefined || focusEmpty !== undefined ? (
+        {hasFocusSlot ? (
           <FocusSlotLine
             focus={undefined}
             label={focusLabel}
@@ -7334,10 +7337,25 @@ export const App = ({
             its margin, and the one footer line NoRowsScreen draws. Loading has
             no footer and so runs a row short of the bottom, which is the right
             way round to be wrong — Ink clips overflow from the TOP, so guessing
-            high would eat the header. */}
+            high would eat the header.
+
+            Every row drawn above the body comes out of it: the CI line, the
+            strip and the focus slot, two rows each, the same reservations
+            BrowseScreen's listHeight makes. Only the CI line used to, so a
+            cold cockpit with a strip and a focus slot ran three rows past the
+            terminal: Ink cleared and repainted the whole screen on every
+            spinner tick with the header scrolled off, and the frame dropped
+            back into place when the fetch landed. */}
         <Box
           flexDirection="column"
-          minHeight={Math.max(5, rows - 6 - (hasCiStatus ? 2 : 0))}
+          minHeight={Math.max(
+            5,
+            rows -
+              6 -
+              (hasCiStatus ? 2 : 0) -
+              (hasStrip ? 2 : 0) -
+              (hasFocusSlot ? 2 : 0),
+          )}
         >
           {state.phase === "loading" ? (
             <LoadingScreen label={`Fetching ${title}…`} />

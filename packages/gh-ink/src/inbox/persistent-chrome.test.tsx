@@ -107,6 +107,8 @@ const mount = async (extra?: {
   extensions?: InboxExtension[]
   detailFor?: () => React.ReactNode
   fetcher?: () => Promise<{ sections: Section[]; login: string }>
+  stripFetcher?: () => Promise<null>
+  focusLabel?: string
 }) => {
   const stdout = new FakeStdout(120, 30)
   const stdin = new FakeStdin()
@@ -116,6 +118,8 @@ const mount = async (extra?: {
       fetcher={extra?.fetcher ?? (async () => ({ sections: SECTIONS, login: "kud" }))}
       extensions={extra?.extensions}
       detailFor={extra?.detailFor as never}
+      stripFetcher={extra?.stripFetcher}
+      focusLabel={extra?.focusLabel}
     />,
     {
       stdout: stdout as never,
@@ -258,6 +262,32 @@ describe("every other full-screen state", () => {
     expect(frame).toMatch(/╰/)
     expect(frame).toContain("🚀 Cockpit")
     expect(frame).toContain("Fetching cockpit")
+  })
+
+  it("reserves the strip and focus rows out of the loading body, not on top of it", async () => {
+    // The services strip and the focus slot each cost two rows above the body.
+    // The body used to subtract only the CI line, so with both drawn the cold
+    // frame ran four rows past its budget and three past the terminal: Ink
+    // cleared and repainted the whole screen on every spinner tick, the
+    // terminal scrolled the header off, and it dropped back when the fetch
+    // landed. The frame is the same height with or without them.
+    const never = () => new Promise(() => {}) as never
+    const height = (frame: string) => frame.replace(/\n$/, "").split("\n").length
+    const bare = await mount({ fetcher: never })
+    const bareFrame = bare.frame()
+    bare.done()
+    const chromed = await mount({
+      fetcher: never,
+      stripFetcher: never,
+      focusLabel: "focus",
+    })
+    const frame = chromed.frame()
+    chromed.done()
+
+    expect(frame).toContain("status  loading…")
+    expect(frame).toContain("focus  loading…")
+    expect(height(frame)).toBe(height(bareFrame))
+    expect(height(frame)).toBeLessThan(30)
   })
 
   it("frames the empty state with the same header", async () => {
