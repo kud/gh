@@ -390,6 +390,91 @@ describe("PrRow author column", () => {
     )
     expect(frame).not.toContain("@alice")
   })
+
+  /*
+   * An all-blank column is shed even without pressure. The widths are measured
+   * over every section at once, so a section of the viewer's own PRs would
+   * otherwise pay for a foreign login and a thread count found nowhere in it —
+   * blank cells on every row, straight out of the title budget.
+   */
+  it("sheds author and threads no row fills, handing the title their cells", () => {
+    const login = "octocat"
+    const sectionItems = [
+      pr({
+        number: 1,
+        repo: "acme/frontend-web",
+        title: "SHOP-1234 retry a declined card",
+        author: login,
+      }),
+      pr({
+        number: 2,
+        repo: "acme/frontend-web",
+        title: "SHOP-1234 report the network error",
+        author: login,
+      }),
+    ]
+    // The pool the list measures over: a foreign login and a thread count the
+    // section itself never draws.
+    const pool = [
+      ...sectionItems,
+      pr({
+        number: 3,
+        repo: "acme/api-gateway",
+        author: "some-long-login",
+        unresolved: 4,
+      }),
+    ]
+    const columns = trailingColumnsOf(pool)
+    expect(columns.author).toBeGreaterThan(0)
+    expect(columns.threads).toBeGreaterThan(0)
+    const numberCols = numberColumnsOf(pool)
+    const context = { login, cols: 200, columns, numberCols }
+    const shed = sectionShedOf(
+      sectionItems.map((item) => ({ item, prefix: "" })),
+      context,
+    )
+    expect(shed.author).toBe(true)
+    expect(shed.threads).toBe(true)
+    const without = layoutOf({ item: sectionItems[0], ...context })
+    const withShed = layoutOf({ item: sectionItems[0], ...context, shed })
+    expect(withShed.titleMax).toBe(
+      without.titleMax + (2 + columns.author) + (2 + columns.threads),
+    )
+  })
+
+  it("keeps the author column when one row shows someone else", () => {
+    const login = "octocat"
+    const rows = [
+      pr({ repo: "acme/frontend-web", author: login }),
+      pr({
+        number: 88,
+        repo: "acme/api-gateway",
+        author: "some-long-login",
+      }),
+    ]
+    const columns = trailingColumnsOf(rows)
+    const numberCols = numberColumnsOf(rows)
+    const shed = sectionShedOf(
+      rows.map((item) => ({ item, prefix: "" })),
+      { login, cols: 200, columns, numberCols },
+    )
+    expect(shed.author).not.toBe(true)
+  })
+
+  it("keeps the threads column when one row carries threads", () => {
+    const login = "octocat"
+    const rows = [
+      pr({ repo: "acme/frontend-web", author: login }),
+      pr({ number: 88, repo: "acme/api-gateway", author: login, unresolved: 2 }),
+    ]
+    const columns = trailingColumnsOf(rows)
+    const numberCols = numberColumnsOf(rows)
+    const shed = sectionShedOf(
+      rows.map((item) => ({ item, prefix: "" })),
+      { login, cols: 200, columns, numberCols },
+    )
+    expect(shed.threads).not.toBe(true)
+  })
 })
 
 describe("PrRow gutter", () => {

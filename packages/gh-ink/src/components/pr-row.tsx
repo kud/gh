@@ -248,9 +248,10 @@ type LayoutInput = Pick<
 
 /**
  * Which trailing columns the section has to give up, so that every row gives up
- * the same ones. Each row is laid out alone and the drops are unioned: if any
- * row needs its size cell gone to keep a readable title, the size column goes
- * for all of them.
+ * the same ones. Drops come from two places: width pressure — each row is laid
+ * out alone and the drops are unioned, so if any row needs its size cell gone
+ * to keep a readable title, the size column goes for all of them — and
+ * emptiness, where no row in the section fills the column at all.
  *
  * Forcing a drop on a row that did not need it only ever hands that row more
  * room, so it can never push the row further down the ladder than it went on
@@ -263,16 +264,35 @@ type LayoutInput = Pick<
 export const sectionShedOf = (
   rows: readonly Pick<LayoutInput, "item" | "prefix">[],
   context: Omit<LayoutInput, "item" | "prefix" | "announcements" | "shed">,
-): TrailingShed =>
-  rows.reduce<TrailingShed>((shed, row) => {
-    const { givingUp } = layoutOf({ ...context, ...row })
-    return {
-      author: shed.author || givingUp.author,
-      threads: shed.threads || givingUp.threads,
-      size: shed.size || givingUp.size,
-      age: shed.age || givingUp.age,
-    }
-  }, {})
+): TrailingShed => {
+  // An all-blank column is shed even without pressure. The widths above are
+  // measured over EVERY section at once (`listColumnsOf`), so a section of the
+  // viewer's own PRs still pays for the longest foreign `@login` and the
+  // widest thread count anywhere — blank cells on every row, charged at 2 +
+  // width each against the title. Dropping them moves neither size nor age:
+  // the trailing block is pinned right behind a flexGrow Box and author/threads
+  // are its two leftmost columns, so only the title budget grows.
+  const noAuthor = rows.every(
+    ({ item }) => !item.author || item.author === context.login,
+  )
+  const noThreads = rows.every(({ item }) => !threadsLabelOf(item))
+  const empty: TrailingShed = {
+    ...(noAuthor ? { author: true as const } : {}),
+    ...(noThreads ? { threads: true as const } : {}),
+  }
+  return rows.reduce<TrailingShed>(
+    (shed, row) => {
+      const { givingUp } = layoutOf({ ...context, ...row })
+      return {
+        author: shed.author || givingUp.author,
+        threads: shed.threads || givingUp.threads,
+        size: shed.size || givingUp.size,
+        age: shed.age || givingUp.age,
+      }
+    },
+    { ...empty },
+  )
+}
 
 /**
  * How one row spends its columns: which cells it draws, which it gives up, and
