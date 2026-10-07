@@ -1,5 +1,12 @@
 # @kud/gh-ink
 
+## 0.75.2
+
+### Patch Changes
+
+- 4c65682: A cockpit launch no longer jumps. The inbox read its cache in an effect after the first render, so every launch, warm cache included, drew one frame of the loading screen and then snapped to the board about 80ms later; the cache is now read during the first render, and a trusted cache's first frame is the board. The loading, empty and failed frames also ran one row short of the board, because their body budgeted a footer line that already sits inside it, so the bottom border dropped a row when the fetch landed. They are now exactly the terminal height, the same as the board.
+- 7341b31: The focus row's slot label now rides a tonal accent pill. The mark and the word `focus` used to sit as a bold glyph beside dim text, which read as one more run of prose; they are now one `Pill tone="tonal"`, the design system's quietest filled form, for what the frame says about itself rather than row data. The row's width budget prices the pill with `pillWidth`, so its two cap columns are counted and the title still truncates to exactly the room left instead of overflowing and folding the frame. A host's `markColor` still tints the list gutter but no longer reaches the pill, which takes its accent from its variant. Every package that bundles `@kud/ink-ui` moves from 0.39.0 to 0.41.0 together, which also draws the tab counts as tonal pills.
+
 ## 0.75.1
 
 ### Patch Changes
