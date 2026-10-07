@@ -6472,7 +6472,26 @@ export const App = ({
   // hugs one line until the fetch lands and then snaps open.
   const { rows } = useWindowSize()
 
-  const [state, setState] = useState<AppState>({ phase: "loading" })
+  /* The cache is read DURING the first render, not in an effect after it.
+     Read in the mount effect, it cost every launch one frame of the loading
+     screen — warm cache included — before the board replaced it some 80ms
+     later: the header's counts, the tab strip and every row arrived at once
+     under a spinner that had just been drawn, which reads as the whole frame
+     jumping. Read here, a trusted cache's first frame IS the board. Every
+     piece of state the paint seeds (phase, freshness, rail, slot, the
+     displayed refs) initialises from this one read. */
+  const [launchCache] = useState(() => (cacheKey ? readCache(cacheKey) : null))
+  const launchPainted = !!launchCache && launchCache.sections.length > 0
+
+  const [state, setState] = useState<AppState>(() =>
+    launchPainted && launchCache
+      ? {
+          phase: "browse",
+          sections: launchCache.sections,
+          login: launchCache.login,
+        }
+      : { phase: "loading" },
+  )
 
   /*
    * `q`, `esc` and `backspace` belong to the APP, not to a screen — mounted
@@ -6544,7 +6563,9 @@ export const App = ({
     login: string
   } | null>(null)
   const [refreshing, setRefreshing] = useState(false)
-  const [fetchedAt, setFetchedAt] = useState<number | null>(null)
+  const [fetchedAt, setFetchedAt] = useState<number | null>(
+    launchPainted && launchCache ? launchCache.at : null,
+  )
   const [refreshError, setRefreshError] = useState<{
     message: string
     at: number
@@ -6583,12 +6604,16 @@ export const App = ({
     })
   // Serialised sections currently on screen — so "is fresh different?" compares
   // against what the user is looking at, not against the (already-stale) cache.
-  const displayedKey = useRef<string>("")
+  const displayedKey = useRef<string>(
+    launchPainted && launchCache ? signatureOf(launchCache.sections) : "",
+  )
   // The sections themselves, for the same reason one level finer: the key says
   // THAT the list moved, these say which rows did. A ref rather than reading
   // `state`, because showData is called from callbacks that closed over an
   // older render and would diff against a list nobody is looking at.
-  const displayedSections = useRef<Section[]>([])
+  const displayedSections = useRef<Section[]>(
+    launchPainted && launchCache ? launchCache.sections : [],
+  )
   const [transients, setTransients] =
     useState<Map<string, Transient>>(NO_TRANSIENTS)
   // Which tab each marked row sits in. A ref, not state: it is read inside the
@@ -7053,33 +7078,12 @@ export const App = ({
   }
 
   useEffect(() => {
-    const cached = cacheKey ? readCache(cacheKey) : null
-    const painted = !!cached && cached.sections.length > 0
-    if (painted && cached) {
-      displayedKey.current = signatureOf(cached.sections)
-      displayedSections.current = cached.sections
-      setFetchedAt(cached.at)
-      // The rail paints with the rows it was cached beside. Left out, a fresh
-      // cache — the case where nothing refetches — launched with no rail at
-      // all: `i` was gated on a sidebar that had not arrived, and would not.
-      if (cached.sidebar) setSidebar(cached.sidebar)
-      // The slot paints the same way: a launch that trusts the cache never
-      // refetches, so a focus left out of the paint is a slot stuck on
-      // `loading…`. `!== undefined` rather than truthy — `null` is the real
-      // "nothing to focus on" and must survive the paint as one.
-      if (cached.focus !== undefined) setFocus(cached.focus)
-      setState({
-        phase: "browse",
-        sections: cached.sections,
-        login: cached.login,
-      })
-    }
     /* The whole point of the cache, and it was missing. This used to revalidate
        unconditionally, so the cached paint bought a fast first frame and saved
        nothing — 73 GraphQL points on every launch, however recently the last
        one ran. `r` still refetches on demand (`revalidate(true)`), and an action
        drops the entry outright, so nothing here can strand you on stale rows. */
-    if (!painted || !isFresh(cached)) revalidate()
+    if (!launchPainted || !isFresh(launchCache)) revalidate()
   }, [])
 
   // Poll the CI status on its own timer (independent of the gated inbox
@@ -7221,11 +7225,22 @@ export const App = ({
   // the apply knows it: by the time the header renders, the diff that produced it
   // has been folded into the marks and the counts are gone.
   const [appliedSummary, setAppliedSummary] = useState("")
-  const [sidebar, setSidebar] = useState<Rails | undefined>(undefined)
+  // The rail paints with the rows it was cached beside. Left out, a fresh
+  // cache — the case where nothing refetches — launched with no rail at
+  // all: `i` was gated on a sidebar that had not arrived, and would not.
+  const [sidebar, setSidebar] = useState<Rails | undefined>(
+    launchPainted ? launchCache?.sidebar : undefined,
+  )
   // The focus slot's current answer. Its own state rather than a field on the
   // browse phase, for the same reason the rail is: it is not rows, never
   // enters the diff, and never waits on a tab's hold.
-  const [focus, setFocus] = useState<FocusSlot | null | undefined>(undefined)
+  // The slot seeds the same way: a launch that trusts the cache never
+  // refetches, so a focus left out of the paint is a slot stuck on
+  // `loading…`. Carried as read — `null` is the real "nothing to focus on"
+  // and must survive the paint as one.
+  const [focus, setFocus] = useState<FocusSlot | null | undefined>(
+    launchPainted ? launchCache?.focus : undefined,
+  )
   // An automatic refresh declined itself. Worth saying: silence here is
   // indistinguishable from a cockpit that simply has nothing new, and the reader
   // would keep waiting for rows that were never coming.
@@ -7335,11 +7350,14 @@ export const App = ({
             unfilled underneath — which reads as "not fullscreen" even though the
             host is running us with alternateScreen: true.
 
-            Six: one margin above the frame, its two border rows, the header and
-            its margin, and the one footer line NoRowsScreen draws. Loading has
-            no footer and so runs a row short of the bottom, which is the right
-            way round to be wrong — Ink clips overflow from the TOP, so guessing
-            high would eat the header.
+            Five: one margin above the frame, its two border rows, and the
+            header and its margin. It used to be six, counting a footer line
+            NoRowsScreen draws — but that footer sits INSIDE this box, so the
+            box already pays for it. Every list-less frame ran one row short of
+            the board, and the bottom border dropped a row when the fetch
+            landed. Exactly the terminal height, the same total BrowseScreen
+            draws, is the only height that does not move. Not a row more:
+            Ink clips overflow from the TOP, so guessing high eats the header.
 
             Every row drawn above the body comes out of it: the CI line, the
             strip and the focus slot, two rows each, the same reservations
@@ -7353,7 +7371,7 @@ export const App = ({
           minHeight={Math.max(
             5,
             rows -
-              6 -
+              5 -
               (hasCiStatus ? 2 : 0) -
               (hasStrip ? 2 : 0) -
               (hasFocusSlot ? 2 : 0),

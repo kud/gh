@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest"
 import { EventEmitter } from "node:events"
+import { mkdtempSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import React from "react"
 import { render, Text } from "ink"
 import { App } from "./inbox.js"
 import { useChrome } from "./extension.js"
+import { writeCache } from "./cache.js"
 import type { GHItem, Section } from "./inbox.js"
 import type { InboxExtension } from "./extension.js"
 
@@ -109,6 +113,7 @@ const mount = async (extra?: {
   fetcher?: () => Promise<{ sections: Section[]; login: string }>
   stripFetcher?: () => Promise<null>
   focusLabel?: string
+  cacheKey?: string
 }) => {
   const stdout = new FakeStdout(120, 30)
   const stdin = new FakeStdin()
@@ -120,6 +125,7 @@ const mount = async (extra?: {
       detailFor={extra?.detailFor as never}
       stripFetcher={extra?.stripFetcher}
       focusLabel={extra?.focusLabel}
+      cacheKey={extra?.cacheKey}
     />,
     {
       stdout: stdout as never,
@@ -148,6 +154,7 @@ const mount = async (extra?: {
     press,
     pressEsc,
     frame: () => stripAnsi(stdout.lastFrame()),
+    firstFrame: () => stripAnsi(stdout.frames[0] ?? ""),
     done: () => {
       instance.unmount()
       instance.cleanup()
@@ -287,7 +294,44 @@ describe("every other full-screen state", () => {
     expect(frame).toContain("status  loading…")
     expect(frame).toContain("focus  loading…")
     expect(height(frame)).toBe(height(bareFrame))
-    expect(height(frame)).toBeLessThan(30)
+    expect(height(frame)).toBeLessThanOrEqual(30)
+  })
+
+  it("draws the loading frame exactly as tall as the board it gives way to", async () => {
+    // The body budgeted six rows of chrome, one of them a footer that sits
+    // INSIDE the body box. Every list-less frame ran a row short of the board,
+    // and the bottom border dropped a row the moment the fetch landed.
+    const height = (frame: string) => frame.replace(/\n$/, "").split("\n").length
+    const loading = await mount({ fetcher: () => new Promise(() => {}) as never })
+    const loadingFrame = loading.frame()
+    loading.done()
+    const board = await mount()
+    const boardFrame = board.frame()
+    board.done()
+
+    expect(loadingFrame).toContain("Fetching cockpit")
+    expect(boardFrame).toContain("pull request number 1")
+    expect(height(loadingFrame)).toBe(height(boardFrame))
+  })
+
+  it("paints a cached board on the very first frame, with no loading frame before it", async () => {
+    // The cache was read in the mount effect, AFTER the first render, so even
+    // a warm launch drew one loading frame and then snapped to the board.
+    process.env.XDG_CACHE_HOME = mkdtempSync(join(tmpdir(), "gh-ink-first-paint-"))
+    try {
+      writeCache("first-paint", { sections: SECTIONS, login: "kud" })
+      const t = await mount({
+        cacheKey: "first-paint",
+        fetcher: () => new Promise(() => {}) as never,
+      })
+      const first = t.firstFrame()
+      t.done()
+
+      expect(first).not.toContain("Fetching cockpit")
+      expect(first).toContain("pull request number 1")
+    } finally {
+      delete process.env.XDG_CACHE_HOME
+    }
   })
 
   it("frames the empty state with the same header", async () => {
