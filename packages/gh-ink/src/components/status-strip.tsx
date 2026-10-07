@@ -1,6 +1,6 @@
 import React from "react"
 import { Box, Text } from "ink"
-import { colors } from "@kud/ink-ui"
+import { colors, Pill, pillWidth } from "@kud/ink-ui"
 
 /**
  * One state per thing, from a closed set the strip knows how to draw. The host
@@ -102,8 +102,36 @@ export const ageLabel = (at: number | undefined, now = Date.now()): string => {
 // cluster beside the state rather than glued to the name's tail, where
 // `royalties▲` read as a stray superscript and put the two facts about one
 // service a word apart.
+//
+// A failure names itself WITHOUT the alarm mark beside it. It draws as a
+// solid error Pill with the cross inside it — `✕ billing` as one object —
+// and the pill already says "failure" as loudly as the row gets, so a fire
+// glyph beside it would repeat the same news in a second shape. A failing
+// item's text is therefore just its mark and its name whatever flags it
+// carries, and the wide renderer below skips the alarm cell for one
+// entirely: the pill is the fire.
 const itemText = (item: StripItem): string =>
-  `${stripGlyph(item.state)[0]}${item.alarm ? ` ${ALARM}` : ""} ${item.key}`
+  item.state === "fail"
+    ? `${stripGlyph("fail")[0]} ${item.key}`
+    : `${stripGlyph(item.state)[0]}${item.alarm ? ` ${ALARM}` : ""} ${item.key}`
+
+// A failing item is priced at what its Pill OCCUPIES — the label plus its two
+// caps — and not at the label's own length. Pricing the label alone
+// under-budgets every failure by exactly two columns, and at a width the
+// budget calls fitting the row overflows: Ink answers a row wider than its
+// frame by compressing every flexible child in it rather than clipping, so
+// the whole strip concertinas instead of one item being shed. The narrow pass
+// prices the same two columns even though it draws its named failures as
+// plain text, keeping the "mark then name" grammar — the budget is
+// conservative there by two columns per named failure, and a row that budgets
+// short is a row that never overflows.
+//
+// `pillWidth` is the same function `Pill` measures itself with, and it holds
+// under `NO_COLOR` too: the pill degrades to `[✕ billing]` in brackets, which
+// is the label plus two caps by another shape, so one budget covers both and
+// the words stay legible with the fill stripped.
+const itemWidth = (item: StripItem): number =>
+  item.state === "fail" ? pillWidth(itemText(item)) : itemText(item).length
 
 /**
  * The strip as plain text, at the width it has to fit. Exported so a test — or a
@@ -123,7 +151,13 @@ export const stripLayout = (
   const age = ageLabel(strip.at, now)
   const fixed = 2 + strip.title.length + 2 + (age ? age.length + 3 : 0)
   const full = strip.items.map(itemText).join("  ")
-  if (fixed + full.length <= width)
+  // Priced at rendered widths, not string lengths: a failing item draws as a
+  // Pill two columns wider than its label — see `itemWidth` — so the string
+  // above under-counts the row by two per failure.
+  const fullWidth =
+    strip.items.reduce((n, item) => n + itemWidth(item), 0) +
+    Math.max(0, strip.items.length - 1) * 2
+  if (fixed + fullWidth <= width)
     return { parts: strip.items, summary: full, age }
 
   const sorted = [...strip.items].sort(
@@ -146,25 +180,35 @@ export const stripLayout = (
     text = [tally(ok, "ok"), ...counts, ...named.map(itemText)]
       .filter(Boolean)
       .join(" · ")
-    if (fixed + text.length <= width) break
+    // Each named failure budgets its pill's two caps on top of the string —
+    // see `itemWidth` — or the narrow row overflows by exactly the caps the
+    // wide row was priced for.
+    const textWidth =
+      text.length + 2 * named.filter((i) => i.state === "fail").length
+    if (fixed + textWidth <= width) break
   }
   return { parts: null, summary: text, age }
 }
 
 // Brightness follows importance, and the name carries it as well as the mark:
-// a fire or a failure lights its name in the error colour and bold, an
-// unmeasured thing dims to the same weight as its `?`, and everything fine
-// stays at the row's resting weight. On a row of thirteen this is what makes
-// the two that matter the first thing seen — and when most of the row is
-// unknown, what makes it read as a quiet grey line with the fires standing out
-// of it, rather than thirteen names at full brightness competing with two
-// crosses. Only the marks that ask for something are bold; a bold tick twelve
-// times over was the loudest thing on the row for the least reason.
+// a fire lights its name in the error colour and bold, an unmeasured thing
+// dims to the same weight as its `?`, and everything fine stays at the row's
+// resting weight. On a row of thirteen this is what makes the two that matter
+// the first thing seen — and when most of the row is unknown, what makes it
+// read as a quiet grey line with the fires standing out of it, rather than
+// thirteen names at full brightness competing with two crosses. Only the marks
+// that ask for something are bold; a bold tick twelve times over was the
+// loudest thing on the row for the least reason.
+//
+// A failure used to light its name here alongside the alarm. It draws as a
+// solid error Pill now, which inks itself against its own fill, so this keeps
+// only the alarm's share of that contract — a caller never picks a foreground
+// for a fill it does not own, and the renderer below never calls this for a
+// failing item at all.
 const nameStyle = (
   item: StripItem,
 ): { color?: string; bold?: boolean; dimColor?: boolean } => {
-  if (item.state === "fail" || item.alarm)
-    return { color: colors.error, bold: true }
+  if (item.alarm) return { color: colors.error, bold: true }
   if (item.state === "unknown") return { dimColor: true }
   return {}
 }
@@ -211,8 +255,26 @@ export const StatusStripLine = ({
       <Text dimColor>{`  ${strip.title}  `}</Text>
       {parts ? (
         parts.map((item, i) => {
+          // A failure is the one item that draws as a Pill — solid error,
+          // mark inside — rather than as a mark beside a name. Solid is the
+          // event tone and a failure is the event this row exists to announce;
+          // every other state keeps the mark-and-name drawing it always had,
+          // because a row where everything is a pill has no way to say which
+          // pill is the news. The alarm cell is skipped for a failing item for
+          // the reason `itemText` gives: the pill already is the fire.
+          if (item.state === "fail")
+            return (
+              <React.Fragment key={item.key}>
+                {i > 0 ? <Text>{"  "}</Text> : null}
+                <Pill variant="error" tone="solid">
+                  {itemText(item)}
+                </Pill>
+              </React.Fragment>
+            )
           const [glyph, color] = stripGlyph(item.state)
-          const asking = item.state === "fail" || item.state === "warn"
+          // Failures never reach this branch — they returned as a Pill above —
+          // so only the warning still asks in bold here.
+          const asking = item.state === "warn"
           return (
             <React.Fragment key={item.key}>
               {i > 0 ? <Text>{"  "}</Text> : null}

@@ -1,6 +1,7 @@
 import React from "react"
 import { render } from "ink-testing-library"
 import { describe, it, expect } from "vitest"
+import { pillWidth } from "@kud/ink-ui"
 import {
   StatusStripLine,
   ageLabel,
@@ -10,6 +11,19 @@ import {
 } from "./status-strip.js"
 
 const frameOf = (node: React.ReactElement) => render(node).lastFrame() ?? ""
+
+// `Pill` reads this at render time, so a test can ask for the monochrome
+// fallback and put it back without touching anything else.
+const withNoColor = (fn: () => void) => {
+  const previous = process.env["NO_COLOR"]
+  process.env["NO_COLOR"] = "1"
+  try {
+    fn()
+  } finally {
+    if (previous === undefined) delete process.env["NO_COLOR"]
+    else process.env["NO_COLOR"] = previous
+  }
+}
 
 describe("stripGlyph", () => {
   // Nerd Font check / warning / times, one UTF-16 unit each so the width
@@ -66,10 +80,12 @@ describe("stripLayout", () => {
     ],
   }
 
-  // "<ok> api  <fail> db  <warn> queue" is 20 chars; fixed is 12 ("  services  "). The
-  // switch happens exactly at 32 — pin both sides of it.
+  // "<ok> api  <fail> db  <warn> queue" is 20 chars, but the failing item
+  // draws as a Pill two caps wider than its label, so the row is priced at 22
+  // against a fixed 12 ("  services  "). The switch happens exactly at 34 —
+  // pin both sides of it.
   it("names every item, with its own glyph, once the row has room", () => {
-    const { parts, summary } = stripLayout(wideEnough, 32)
+    const { parts, summary } = stripLayout(wideEnough, 34)
     expect(parts).toEqual(wideEnough.items)
     expect(summary).toContain("\u{f00c} api")
     expect(summary).toContain("\u{f00d} db")
@@ -77,12 +93,12 @@ describe("stripLayout", () => {
   })
 
   it("drops to counts one column short of the same row", () => {
-    const { parts } = stripLayout(wideEnough, 31)
+    const { parts } = stripLayout(wideEnough, 33)
     expect(parts).toBeNull()
   })
 
   it("names the failure before folding the oks into a count", () => {
-    const { parts, summary } = stripLayout(wideEnough, 31)
+    const { parts, summary } = stripLayout(wideEnough, 33)
     expect(parts).toBeNull()
     // The one fail is still named; the ok and the warn are only counted.
     expect(summary).toContain("\u{f00d} db")
@@ -92,9 +108,10 @@ describe("stripLayout", () => {
     expect(summary).not.toContain("\u{f071} queue")
   })
 
-  // Four bad items and a row too narrow even for the worst one alone: only
-  // the single worst is named, the rest of the fails and the warns are
-  // counted rather than silently dropped.
+  // Four bad items and a row too narrow even for the failures to all be named:
+  // only the single worst is named, the rest of the fails and the warns are
+  // counted rather than silently dropped. At 26 the two named failures of the
+  // wider attempts still price their pill caps out of the budget.
   it("names worst-first and counts the rest when even the failures don't fit", () => {
     const crowded: StatusStrip = {
       title: "svc",
@@ -105,7 +122,7 @@ describe("stripLayout", () => {
         { key: "ddd", state: "warn" },
       ],
     }
-    const { parts, summary } = stripLayout(crowded, 24)
+    const { parts, summary } = stripLayout(crowded, 26)
     expect(parts).toBeNull()
     expect(summary).toBe("1 \u{f00d} · 2 \u{f071} · \u{f00d} aaa")
   })
@@ -179,5 +196,120 @@ describe("StatusStripLine", () => {
       <StatusStripLine strip={strip} width={80} now={now} />,
     )
     expect(frame).toContain("2m")
+  })
+})
+
+describe("failing items draw as a solid error pill", () => {
+  const FAIL = "\u{f00d}"
+  const WARN = "\u{f071}"
+  const FIRE = "\u{f06d}"
+
+  it("renders one failing item with the glyph inside the pill", () => {
+    const strip: StatusStrip = {
+      title: "services",
+      items: [
+        { key: "api", state: "ok" },
+        { key: "workflows", state: "fail" },
+      ],
+    }
+    const frame = frameOf(<StatusStripLine strip={strip} width={80} />)
+    expect(frame).toContain(`${FAIL} workflows`)
+    expect(frame).toContain("api")
+  })
+
+  it("renders two failing items, each with the glyph inside its own pill", () => {
+    const strip: StatusStrip = {
+      title: "services",
+      items: [
+        { key: "api", state: "ok" },
+        { key: "billing", state: "fail" },
+        { key: "workflows", state: "fail" },
+      ],
+    }
+    const frame = frameOf(<StatusStripLine strip={strip} width={80} />)
+    expect(frame).toContain(`${FAIL} billing`)
+    expect(frame).toContain(`${FAIL} workflows`)
+  })
+
+  it("leaves warn as a mark beside a name, never a pill", () => {
+    // Under NO_COLOR every Pill degrades to brackets, so a warn drawn as
+    // plain text is a frame with no brackets in it at all.
+    withNoColor(() => {
+      const frame = frameOf(
+        <StatusStripLine
+          strip={{
+            title: "services",
+            items: [{ key: "web", state: "warn" }],
+          }}
+          width={80}
+        />,
+      )
+      expect(frame).toContain(`${WARN} web`)
+      expect(frame).not.toContain("[")
+    })
+  })
+
+  it("folds a failing item's alarm into the pill instead of drawing the fire", () => {
+    const strip: StatusStrip = {
+      title: "services",
+      items: [{ key: "billing", state: "fail", alarm: true }],
+    }
+    const frame = frameOf(<StatusStripLine strip={strip} width={80} />)
+    expect(frame).toContain(`${FAIL} billing`)
+    expect(frame).not.toContain(FIRE)
+    expect(stripLayout(strip, 200).summary).not.toContain(FIRE)
+  })
+
+  it("stays legible under NO_COLOR and prices exactly what the brackets occupy", () => {
+    const label = `${FAIL} workflows`
+    withNoColor(() => {
+      const frame = frameOf(
+        <StatusStripLine
+          strip={{
+            title: "services",
+            items: [{ key: "workflows", state: "fail" }],
+          }}
+          width={80}
+        />,
+      )
+      expect(frame).toContain(`[${label}]`)
+    })
+    // The bracket form is the label plus two caps, exactly what pillWidth
+    // budgets — one accounting covers the coloured pill and the fallback.
+    expect(`[${label}]`.length).toBe(pillWidth(label))
+  })
+
+  it("prices the pill's caps in the wide pass, not the label alone", () => {
+    const strip: StatusStrip = {
+      title: "services",
+      items: [
+        { key: "api", state: "ok" },
+        { key: "workflows", state: "fail" },
+      ],
+    }
+    // Label lengths alone price this row at 30 and call 31 roomy; the pill's
+    // two caps price it at 32, so 31 already folds.
+    expect(stripLayout(strip, 31).parts).toBeNull()
+    expect(stripLayout(strip, 32).parts).toEqual(strip.items)
+  })
+
+  it("prices the pill's caps in the narrow pass so a named failure never overflows", () => {
+    const strip: StatusStrip = {
+      title: "svc",
+      items: [
+        { key: "aaa", state: "fail" },
+        { key: "bbb", state: "warn" },
+      ],
+    }
+    // Naming both as text costs 13 over a fixed 7 and fits in 20; the named
+    // failure budgets two caps more, so the row counts the warn instead —
+    // still naming the failure, in mark-then-name grammar, on a line drawn
+    // at 18 columns that cannot overflow its 20.
+    const { parts, summary } = stripLayout(strip, 20)
+    expect(parts).toBeNull()
+    expect(summary).toBe(`1 ${WARN} · ${FAIL} aaa`)
+    const frame = frameOf(<StatusStripLine strip={strip} width={20} />)
+    for (const line of frame.split("\n"))
+      expect([...line].length).toBeLessThanOrEqual(20)
   })
 })
