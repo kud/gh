@@ -1,5 +1,15 @@
 # @kud/gh-ink
 
+## 0.76.0
+
+### Minor Changes
+
+- fa85b1e: A failing service used to sit on the status strip as a red cross beside its name, the same shape as every other state with only the hue doing the work. On a row of thirteen names that left the one fire to find by colour, which is exactly the channel a colourblind reader and a piped terminal do not have. A failing service now draws as a solid error pill with its cross inside it, so the failure reads as one object whatever the terminal takes away; every other state draws exactly as before, and under NO_COLOR the pill degrades to brackets around the same words.
+
+### Patch Changes
+
+- 4367349: A section of only your own PRs with no unresolved threads drew its titles short. The trailing widths are measured over every section at once so columns never move, which meant the section still paid for the longest foreign login and the widest thread count anywhere — blank cells on every row, each charging its width against the title. A section where no row fills the author or threads column now sheds that column outright, so the title takes back the cells; size and age are untouched, and the pinned-right trailing block keeps every column that draws.
+
 ## 0.75.2
 
 ### Patch Changes
