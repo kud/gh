@@ -370,6 +370,32 @@ describe("StatusStripLine", () => {
     expect(heightOf({ title: "services", items: [] })).toBe(3)
   })
 
+  // The spinner owns its interval and clears it on unmount, so the frame that
+  // carries data must no longer contain it — a spinner that outlived its row
+  // would keep repainting the cockpit and hold timer-driven tests open. Read
+  // from the first frame only, never after a tick, so the test does not wait
+  // on the spinner's clock.
+  it("drops the spinner the moment data arrives, at the same height", () => {
+    const BRAILLE = /[⠀-⣿]/
+    const instance = render(
+      <StatusStripLine
+        strip={undefined}
+        label="services"
+        width={100}
+        now={NOW}
+      />,
+    )
+    const loading = instance.lastFrame() ?? ""
+    instance.rerender(
+      <StatusStripLine strip={badDay} label="services" width={100} now={NOW} />,
+    )
+    const ready = instance.lastFrame() ?? ""
+    instance.unmount()
+    expect(loading).toMatch(BRAILLE)
+    expect(ready).not.toMatch(BRAILLE)
+    expect(heightOf(undefined)).toBe(heightOf(badDay))
+  })
+
   it("shows a loading state on both rows while the strip is undefined", () => {
     const frame = frameOf(
       <StatusStripLine strip={undefined} label="services" width={80} />,
