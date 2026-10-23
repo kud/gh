@@ -3511,6 +3511,26 @@ export const useActionMenu = () => {
   return { actions, cursor, open, close: () => setActions(null), handleKey }
 }
 
+const TITLE_SLACK = 1
+
+/**
+ * The menu grows to fit the row's title on one line, then stops at
+ * MENU_MAX_WIDTH; it never goes below 40 nor past `cols - 4`. It used to size
+ * from the action rows alone, so a typical menu sat at the 40-column floor
+ * and a ticket-prefixed PR title kept a dozen characters of itself.
+ */
+const MENU_MAX_WIDTH = 88
+export const menuWidthFor = (
+  cols: number,
+  contentWidth: number,
+  titleWidth: number,
+): number =>
+  Math.min(
+    Math.max(contentWidth + 4, titleWidth + 4, 40),
+    MENU_MAX_WIDTH,
+    Math.max(20, cols - 4),
+  )
+
 export const ActionMenu = ({
   item,
   actions,
@@ -3522,7 +3542,7 @@ export const ActionMenu = ({
   cursor: number
   /**
    * Content columns the menu may take. The width is fixed from the longest
-   * row — clamp(longest + 4, 40, 56), capped at `cols - 4` — so it never
+   * row and the title — see `menuWidthFor` — so it never
    * resizes as the cursor moves. A host beside a rail passes what the list
    * has; everywhere else the frame's own width is the right answer.
    */
@@ -3554,22 +3574,7 @@ export const ActionMenu = ({
           ],
     ),
   )
-  const width = Math.min(
-    Math.max(contentWidth + 4, 40),
-    56,
-    Math.max(20, cols - 4),
-  )
-  const inner = Math.max(1, width - 4)
   const confirming = isConfirmRows(actions)
-
-  // Close rows wear the error tone, and nothing else on the menu wears any
-  // tone at all: it is the only meaningful colour here. `Cancel` shares the
-  // confirm group (it must, or a gap would split the pair) but keeps the
-  // default colour — matched by label, the same way the builder writes it.
-  //
-  // Pure so it stays pinnable: the test frame carries no escape codes, so a
-  // frame cannot assert a colour — see `selectionBackground` for the same rule.
-  const isCloseRow = (row: Action): boolean => menuTone(row) === "error"
 
   const number =
     item.kind === "pr" || item.kind === "issue" ? item.number : null
@@ -3586,11 +3591,30 @@ export const ActionMenu = ({
     : item.kind === "pr" || item.kind === "issue"
     ? item.title
     : ""
+  // Code points, not cells: a commit-type emoji ("🐛") draws two cells but
+  // counts one. TITLE_SLACK keeps that one cell spare so the title line never
+  // wraps — on 2026-10-23 "#2995 · ACC-11511: 🐛 fix(command-la…" broke onto a
+  // second line in a 40-column menu.
+  const titleWidth = [...lead].length + [...rest].length + TITLE_SLACK
+
+  const width = menuWidthFor(cols, contentWidth, titleWidth)
+  const inner = Math.max(1, width - 4)
   const restText =
-    [...lead].length + [...rest].length <= inner
+    [...lead].length + [...rest].length + TITLE_SLACK <= inner
       ? rest
-      : [...rest].slice(0, Math.max(0, inner - [...lead].length - 1)).join("") +
-        "…"
+      : [...rest]
+          .slice(0, Math.max(0, inner - [...lead].length - 1 - TITLE_SLACK))
+          .join("") + "…"
+
+  // Close rows wear the error tone, and nothing else on the menu wears any
+  // tone at all: it is the only meaningful colour here. `Cancel` shares the
+  // confirm group (it must, or a gap would split the pair) but keeps the
+  // default colour — matched by label, the same way the builder writes it.
+  //
+  // Pure so it stays pinnable: the test frame carries no escape codes, so a
+  // frame cannot assert a colour — see `selectionBackground` for the same rule.
+  const isCloseRow = (row: Action): boolean => menuTone(row) === "error"
+
 
   // Never shrinks. Hosts draw the menu in flow under a board that already fills
   // a fixed-height Page, and Yoga took the missing rows out of the menu: on

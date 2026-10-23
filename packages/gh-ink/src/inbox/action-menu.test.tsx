@@ -3,7 +3,7 @@ import { EventEmitter } from "node:events"
 import React from "react"
 import { render, Box, Text } from "ink"
 import { Page } from "@kud/ink-ui"
-import { ActionMenu } from "./inbox.js"
+import { ActionMenu, menuWidthFor } from "./inbox.js"
 import type { GHItem } from "./inbox.js"
 
 class FakeStdout extends EventEmitter {
@@ -133,5 +133,23 @@ describe("ActionMenu in flow under a full-height board", () => {
     for (const line of menuLines) {
       expect(line).not.toMatch(/cew/)
     }
+  })
+})
+
+describe("menuWidthFor", () => {
+  it("grows to fit a long title instead of sitting on the 40-column floor", () => {
+    expect(menuWidthFor(200, 32, 59)).toBe(63)
+  })
+
+  it("keeps the floor when both rows and title are short", () => {
+    expect(menuWidthFor(200, 20, 12)).toBe(40)
+  })
+
+  it("stops at the cap, leaving longer titles to truncate", () => {
+    expect(menuWidthFor(300, 32, 140)).toBe(88)
+  })
+
+  it("never goes past the terminal minus margins", () => {
+    expect(menuWidthFor(50, 32, 59)).toBe(46)
   })
 })

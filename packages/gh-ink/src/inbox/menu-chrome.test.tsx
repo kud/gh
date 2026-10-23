@@ -298,13 +298,18 @@ describe("menu cursor and width", () => {
     t.done()
   })
 
-  it("clamps a short menu to the 40-column floor", async () => {
+  it("widens past the 40-column floor to keep the title whole", async () => {
     const t = await mountMenu(prActions())
-    const top = t.lines()[menuTop(t.lines())]!
+    const lines = t.lines()
+    const top = lines[menuTop(lines)]!
+    const title = lines[menuTop(lines) + 1]!
     t.done()
 
-    // Longest content row is far shorter than 40; the floor holds the frame.
-    expect(top.length).toBe(40)
+    // The rows alone would sit on the floor; the 40-character title pulls the
+    // frame wider, and it reads in full rather than ending in an ellipsis.
+    expect(top.length).toBeGreaterThan(40)
+    expect(title).toContain("a row with a title long enough to matter")
+    expect(title).not.toContain("…")
   })
 })
 
