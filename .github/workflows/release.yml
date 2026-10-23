@@ -43,8 +43,16 @@ jobs:
       - run: npm run test
       # Changesets publishes each changed workspace over OIDC. No NPM_TOKEN, no
       # --provenance — the id-token permission above is what npm trusts.
-      - uses: changesets/action@v1
+      #
+      # v2 of the action, not v1, because the CLI is on Changesets 3. v1 learns
+      # what was published by scraping `New tag:` lines from `changeset publish`,
+      # and Changesets 3 no longer prints them: the 2026-10-23 release published
+      # all seven packages to npm in a green run, and v1 then pushed no git tag
+      # and opened no GitHub release, silently. v2 reads the structured events
+      # Changesets 3 writes to the file named by CHANGESETS_OUTPUT, which it
+      # sets for the publish script, so `npm run release` still qualifies. It
+      # also takes its token through `github-token`, which defaults to the run's
+      # own, and ignores the GITHUB_TOKEN env the v1 step used to pass.
+      - uses: changesets/action@v2
         with:
-          publish: npm run release
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          publish-script: npm run release
