@@ -44,6 +44,28 @@ describe("stripSignature", () => {
     expect(stripSignature(plain)).not.toBe(stripSignature(alarmed))
   })
 
+  // The strip draws the cause word, so a cause moving under an unchanged
+  // state is a different strip — bailing out here would leave `slow` on
+  // screen after the host started saying `errors`.
+  it("changes when an item's cause changes, even with the same state", () => {
+    const slow = {
+      title: "services",
+      items: [{ key: "api", state: "warn" as const, cause: "slow" }],
+    }
+    const errors = {
+      title: "services",
+      items: [{ key: "api", state: "warn" as const, cause: "errors" }],
+    }
+    expect(stripSignature(slow)).not.toBe(stripSignature(errors))
+  })
+
+  it("changes when the shared note appears", () => {
+    const items = [{ key: "api", state: "unknown" as const }]
+    const plain = { title: "services", items }
+    const noted = { title: "services", items, note: "monitoring unreachable" }
+    expect(stripSignature(plain)).not.toBe(stripSignature(noted))
+  })
+
   // `null` — "nothing configured" — is a real answer and must never collapse
   // onto an empty strip's signature; the two are different claims about the
   // world and the poller must be able to tell them apart.

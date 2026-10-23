@@ -111,7 +111,7 @@ export {
   railRowsOf,
   StatusStripLine,
   stripGlyph,
-  stripLayout,
+  stripRows,
   stripSignature,
   ageLabel,
   toCiStatusState,

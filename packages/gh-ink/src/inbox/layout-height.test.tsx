@@ -189,6 +189,7 @@ const cases: Case[] = [
   { name: "board, two rows" },
   { name: "board, many rows", opts: { fetcher: async () => ({ sections: MANY, login: "kud" }) } },
   { name: "board, strip and focus", opts: { fetcher: async () => ({ sections: MANY, login: "kud" }), stripFetcher: STRIP as never, focusLabel: "focus" } },
+  { name: "board, unconfigured strip", opts: { fetcher: async () => ({ sections: MANY, login: "kud" }), stripFetcher: async () => null } },
   { name: "empty tab", opts: { fetcher: async () => ({ sections: MANY, login: "kud" }) }, keys: ["\t", "\t"] },
   { name: "filter typing", opts: { fetcher: async () => ({ sections: MANY, login: "kud" }) }, keys: ["/", "x"] },
   { name: "filter kept, no match", opts: { fetcher: async () => ({ sections: MANY, login: "kud" }) }, keys: ["/", "z", "z", "\r"] },

@@ -40,7 +40,9 @@ export {
 export {
   StatusStripLine,
   stripGlyph,
-  stripLayout,
+  stripRows,
+  type StripRows,
+  type StripSpan,
   ageLabel,
   type StatusStrip,
   type StripItem,

@@ -246,13 +246,7 @@ export type SettledResult = { ok: true } | { ok: false; reason: string }
 // row between bands and never a heading; `confirm` is the close-confirmation
 // sub-menu, whose rows the cursor deliberately lands on last.
 export type ActionGroup =
-  | "act"
-  | "open"
-  | "switch"
-  | "copy"
-  | "quiet"
-  | "close"
-  | "confirm"
+  "act" | "open" | "switch" | "copy" | "quiet" | "close" | "confirm"
 
 export type Action = {
   label: string
@@ -349,10 +343,10 @@ export type OptimisticChange = { patch: Patch; action: string }
 /** How a row is named in the failure line: a ticket key, or `#412`. */
 export const rowLabelOf = (item: AnyItem): string =>
   item.kind === "task"
-    ? item.ticket ?? item.key
+    ? (item.ticket ?? item.key)
     : item.kind === "pr" || item.kind === "issue"
-    ? `#${item.number}`
-    : ""
+      ? `#${item.number}`
+      : ""
 
 /**
  * Resolve the live transitions for a ticket, called lazily when its move
@@ -1175,16 +1169,16 @@ export const maxViewStart = (items: AnyItem[], budget: number): number => {
  */
 export const rowKey = (item: AnyItem): string =>
   item.kind === "task"
-    ? item.instanceKey ?? item.key
+    ? (item.instanceKey ?? item.key)
     : item.kind === "repo-header"
-    ? `header:${item.repo}`
-    : item.kind === "subgroup-header"
-    ? `subgroup:${item.label}`
-    : item.kind === "show-more"
-    ? `show-more:${item.hidden[0]?.repo ?? ""}`
-    : item.kind === "show-less"
-    ? `show-less:${item.toHide[0]?.repo ?? ""}`
-    : `${item.repo}/${item.number}`
+      ? `header:${item.repo}`
+      : item.kind === "subgroup-header"
+        ? `subgroup:${item.label}`
+        : item.kind === "show-more"
+          ? `show-more:${item.hidden[0]?.repo ?? ""}`
+          : item.kind === "show-less"
+            ? `show-less:${item.toHide[0]?.repo ?? ""}`
+            : `${item.repo}/${item.number}`
 
 const firstSelectable = (section: Section): number =>
   Math.max(
@@ -2373,8 +2367,8 @@ const InboxHeader = ({
   const countSeg = loading
     ? "      loading…  "
     : quiet
-    ? "  "
-    : `  ${String(total).padStart(3)} item${total !== 1 ? "s" : ""}  ·  `
+      ? "  "
+      : `  ${String(total).padStart(3)} item${total !== 1 ? "s" : ""}  ·  `
   const userSeg = loading || quiet ? "" : `@${login}  `
   // A LABEL, not a control, and the HOST'S WORD rather than one of ours. Which
   // side you are on is settled when the command starts, so a switch here would
@@ -2411,12 +2405,12 @@ const InboxHeader = ({
   const [statusText, statusColor] = hasPending
     ? [`● ${pendingSummary || "new"} · r apply`, colors.accent]
     : refreshing
-    ? ["↻ refreshing…", "cyan"]
-    : appliedSummary
-    ? [`◉ ${appliedSummary}`, colors.accent]
-    : fetchedAt
-    ? [`updated ${agoText(fetchedAt)}`, undefined]
-    : ["", undefined]
+      ? ["↻ refreshing…", "cyan"]
+      : appliedSummary
+        ? [`◉ ${appliedSummary}`, colors.accent]
+        : fetchedAt
+          ? [`updated ${agoText(fetchedAt)}`, undefined]
+          : ["", undefined]
   const statusSeg = statusText ? statusText + "  " : ""
 
   const fill = Math.max(
@@ -2461,25 +2455,31 @@ const InboxHeader = ({
 // A standing single-line row, always the same height (one line + marginBottom)
 // across loading/error/ready so the content below it never jumps.
 export type CiStatusState =
-  | { kind: "loading" }
-  | { kind: "error" }
-  | { kind: "ready"; status: CiStatus }
+  { kind: "loading" } | { kind: "error" } | { kind: "ready"; status: CiStatus }
 
 // The strip's poll state, the same three-way shape as the CI line's: out for
 // the first answer, or ready with what the host said — `null` being a real
 // answer ("nothing configured"), never a failed one, since a failed poll keeps
 // the last strip up rather than blanking the row.
 export type StripStatusState =
-  | { kind: "loading" }
-  | { kind: "ready"; strip: StatusStrip | null }
+  { kind: "loading" } | { kind: "ready"; strip: StatusStrip | null }
 
-/** What the strip SAYS, ignoring when it said it. */
+/**
+ * What the strip SAYS, ignoring when it said it. Every field the strip draws
+ * is in it — the cause word and the shared note included — or a cause moving
+ * from `slow` to `errors` would bail out of the repaint and leave the old
+ * word on screen.
+ */
 export const stripSignature = (strip: StatusStrip | null): string =>
   strip === null
     ? "∅"
-    : strip.items
-        .map((i) => `${i.key}=${i.state}${i.alarm ? "▲" : ""}`)
-        .join(",")
+    : [
+        strip.note ?? "",
+        ...strip.items.map(
+          (i) =>
+            `${i.key}=${i.state}:${i.cause ?? ""}${i.alarm ? ":build" : ""}`,
+        ),
+      ].join(",")
 
 export const toCiStatusState = (status: CiStatus | null): CiStatusState =>
   status ? { kind: "ready", status } : { kind: "error" }
@@ -2965,7 +2965,11 @@ export const TAB_MARK = "●"
  * level up. The trailing WORD on a row never got it, which is why a row gaining a
  * marker used to reflow — see the transit marks, which now live here instead.
  */
-export const tabMarker = (marked: Set<string>, id: string, frame = 0): string =>
+export const tabMarker = (
+  marked: Set<string>,
+  id: string,
+  frame = 0,
+): string =>
   marked.has(id) ? `${TAB_PULSE[frame % TAB_PULSE.length] as string} ` : "  "
 
 // The dot breathing rather than sitting still. A tab you are NOT looking at is
@@ -3188,12 +3192,12 @@ const ItemRow = ({
     const transitIcon = pending
       ? PENDING_GLYPH
       : !transient
-      ? " "
-      : isDeparture(transient)
-      ? (TRANSIT_OUT_FRAMES[rampAt(TRANSIT_OUT_FRAMES.length)] as string)
-      : isArrival(transient)
-      ? (TRANSIT_IN_FRAMES[rampAt(TRANSIT_IN_FRAMES.length)] as string)
-      : "\u25C9"
+        ? " "
+        : isDeparture(transient)
+          ? (TRANSIT_OUT_FRAMES[rampAt(TRANSIT_OUT_FRAMES.length)] as string)
+          : isArrival(transient)
+            ? (TRANSIT_IN_FRAMES[rampAt(TRANSIT_IN_FRAMES.length)] as string)
+            : "\u25C9"
     // The prefix term is new here and easy to miss: a task row had no indent
     // to price until stories became tasks hanging under an epic, so this
     // budget never carried one and a depth-1 story overflowed by exactly its
@@ -3361,17 +3365,21 @@ const ItemRow = ({
         color: MERGED_COLOUR,
       }
     : pending
-    ? { glyph: PENDING_GLYPH, color: colors.muted }
-    : transient
-    ? {
-        glyph: isDeparture(transient)
-          ? (TRANSIT_OUT_FRAMES[rampAt(TRANSIT_OUT_FRAMES.length)] as string)
-          : isArrival(transient)
-          ? (TRANSIT_IN_FRAMES[rampAt(TRANSIT_IN_FRAMES.length)] as string)
-          : displayFor(item.health).glyph,
-        color: TRANSIT_COLOUR[transient],
-      }
-    : undefined
+      ? { glyph: PENDING_GLYPH, color: colors.muted }
+      : transient
+        ? {
+            glyph: isDeparture(transient)
+              ? (TRANSIT_OUT_FRAMES[
+                  rampAt(TRANSIT_OUT_FRAMES.length)
+                ] as string)
+              : isArrival(transient)
+                ? (TRANSIT_IN_FRAMES[
+                    rampAt(TRANSIT_IN_FRAMES.length)
+                  ] as string)
+                : displayFor(item.health).glyph,
+            color: TRANSIT_COLOUR[transient],
+          }
+        : undefined
   // `changed` is deliberately absent: the row changed, it did not arrive and it
   // is not leaving, so its title reads exactly as it did before. The glyph above
   // is what says something happened.
@@ -3379,10 +3387,10 @@ const ItemRow = ({
     transient === "out"
       ? "withdrawn"
       : transient && isDeparture(transient)
-      ? "departing"
-      : transient && isArrival(transient)
-      ? "arriving"
-      : undefined
+        ? "departing"
+        : transient && isArrival(transient)
+          ? "arriving"
+          : undefined
   // Never both: a row merged from here is already being announced, and stacking
   // GONE onto MERGED would report one departure twice. Both are built anyway
   // rather than one being chosen, because the budget on the other side charges
@@ -3414,10 +3422,7 @@ const ItemRow = ({
       icon={icon}
       motion={motion}
       announcements={announcements}
-      focusCell={focusCellFor(
-        focus,
-        "url" in item ? item.url : undefined,
-      )}
+      focusCell={focusCellFor(focus, "url" in item ? item.url : undefined)}
     />
   )
 }
@@ -3615,10 +3620,10 @@ export const ActionMenu = ({
   const rest = confirming
     ? `Close #${number}?`
     : item.kind === "task"
-    ? item.summary
-    : item.kind === "pr" || item.kind === "issue"
-    ? item.title
-    : ""
+      ? item.summary
+      : item.kind === "pr" || item.kind === "issue"
+        ? item.title
+        : ""
   // Code points, not cells: a commit-type emoji ("🐛") draws two cells but
   // counts one. TITLE_SLACK keeps that one cell spare so the title line never
   // wraps — on 2026-10-23 "#2995 · ACC-11511: 🐛 fix(command-la…" broke onto a
@@ -3642,7 +3647,6 @@ export const ActionMenu = ({
   // Pure so it stays pinnable: the test frame carries no escape codes, so a
   // frame cannot assert a colour — see `selectionBackground` for the same rule.
   const isCloseRow = (row: Action): boolean => menuTone(row) === "error"
-
 
   // Never shrinks. Hosts draw the menu in flow under a board that already fills
   // a fixed-height Page, and Yoga took the missing rows out of the menu: on
@@ -3698,8 +3702,8 @@ export const ActionMenu = ({
                   row.tone === "error"
                     ? colors.error
                     : isCloseRow(row)
-                    ? colors.error
-                    : undefined
+                      ? colors.error
+                      : undefined
                 }
                 dimColor={row.tone === "dim" ? true : undefined}
               >
@@ -3923,9 +3927,7 @@ export const HelpModal = ({
     ["u", "unsubscribe from this item"],
     ["x", "remove yourself as reviewer"],
     ...(hasJira
-      ? ([
-          ["t", "Jira: move / open ticket"],
-        ] as [string, string][])
+      ? ([["t", "Jira: move / open ticket"]] as [string, string][])
       : []),
     ["⌃K", "launch · open a ticket or PR by name"],
     ["/", "search"],
@@ -4499,7 +4501,8 @@ const BrowseScreen = ({
   // list's height budget so the tree never grows taller than the terminal
   // (Ink clips overflow from the top, which would eat the CI line).
   const reserveCiRow = ciStatusState != null
-  // The strip costs the same two rows, for the same reason.
+  // The strip costs three: its issues row, its success row and the margin.
+  // Both rows are drawn in every state, so the reservation never moves.
   const reserveStripRow = stripState != null
   // The focus slot costs the same two rows once it is drawn — or reserved by
   // either label prop, so the row reads `loading…` from the first paint rather
@@ -4516,7 +4519,7 @@ const BrowseScreen = ({
       10 -
       (filterActive ? 2 : 0) -
       (reserveCiRow ? 2 : 0) -
-      (reserveStripRow ? 2 : 0) -
+      (reserveStripRow ? 3 : 0) -
       (reserveFocusRow ? 2 : 0),
   )
 
@@ -4783,20 +4786,20 @@ const BrowseScreen = ({
    * changes constantly, and a stale peel closes the wrong layer.
    */
   const peel = (): boolean => {
-    if (palette !== null) return setPalette(null), true
-    if (help) return setHelp(false), true
-    if (explain) return setExplain(false), true
-    if (repoPicker) return setRepoPicker(false), true
-    if (railActive) return setRailFocus(false), true
+    if (palette !== null) return (setPalette(null), true)
+    if (help) return (setHelp(false), true)
+    if (explain) return (setExplain(false), true)
+    if (repoPicker) return (setRepoPicker(false), true)
+    if (railActive) return (setRailFocus(false), true)
     // `menu.handleKey` keeps its own esc arm — it is exported and PrView mounts
     // it too, so this double-closes by one idempotent state update rather than
     // buying surgery on a two-caller hook.
-    if (menu.actions !== null) return menu.close(), true
+    if (menu.actions !== null) return (menu.close(), true)
     // Dismissing, not restoring: the row stays where the failed patch put it,
     // and `w` still restores it with the line gone.
-    if (noticeUp && failure) return setDismissedSeq(failure.seq), true
-    if (search != null) return filter.clear(), true
-    if (repoFilter.size > 0) return setRepoFilter(new Set()), true
+    if (noticeUp && failure) return (setDismissedSeq(failure.seq), true)
+    if (search != null) return (filter.clear(), true)
+    if (repoFilter.size > 0) return (setRepoFilter(new Set()), true)
     return false
   }
   useEffect(() => {
@@ -5228,8 +5231,8 @@ const BrowseScreen = ({
       key.leftArrow || (key.tab && key.shift)
         ? -1
         : key.rightArrow || key.tab
-        ? 1
-        : 0
+          ? 1
+          : 0
     if (step !== 0)
       setTabIdx((i) => (i + step + localSections.length) % localSections.length)
     // Ink's exit, not process.exit: it unmounts and hands the terminal back
@@ -5598,7 +5601,7 @@ const BrowseScreen = ({
         (activeItem.kind === "pr" || activeItem.kind === "issue")
       ) {
         const { repo } = activeItem
-        const branch = activeItem.kind === "pr" ? activeItem.branch ?? "" : ""
+        const branch = activeItem.kind === "pr" ? (activeItem.branch ?? "") : ""
         showFlash(`⋯ Opening ${repo}…`)
         void jumpToRepo(repo, branch, login)
           .then(() => showFlash(`↗ Opened ${repo} in new tab`))
@@ -5696,36 +5699,42 @@ const BrowseScreen = ({
         ["q", "quit"],
       ]
     : activeItem?.kind === "repo-header"
-    ? [
-        ["↑↓", "nav"],
-        ["←→", "tab"],
-        ["↵", "open repo"],
-        ["o", "browser"],
-        headerHint,
-        ["?", "help"],
-        ["q", "quit"],
-      ]
-    : activeItem?.kind === "subgroup-header"
-    ? [["↑↓", "nav"], ["←→", "tab"], headerHint, ["?", "help"], ["q", "quit"]]
-    : [
-        ["↑↓", "nav"],
-        ["←→", "tab"],
-        ["↵/d", "open"],
-        ["m", "actions"],
-        // Always, now that the launcher opens a pasted PR or issue too. It was
-        // shown only where Jira was configured, when a ticket key was all it
-        // could take and without one it could only apologise.
-        ["⌃K", "launch"],
-        // Advertised only where it does something, and named for what it
-        // shows rather than for the furniture: nobody wants "a sidebar".
-        ...(showRail
-          ? ([["⇥", railTitle]] as [string, string][])
-          : hasRail
-          ? ([["i", railTitle]] as [string, string][])
-          : []),
-        ["?", "help"],
-        ["q", "quit"],
-      ]
+      ? [
+          ["↑↓", "nav"],
+          ["←→", "tab"],
+          ["↵", "open repo"],
+          ["o", "browser"],
+          headerHint,
+          ["?", "help"],
+          ["q", "quit"],
+        ]
+      : activeItem?.kind === "subgroup-header"
+        ? [
+            ["↑↓", "nav"],
+            ["←→", "tab"],
+            headerHint,
+            ["?", "help"],
+            ["q", "quit"],
+          ]
+        : [
+            ["↑↓", "nav"],
+            ["←→", "tab"],
+            ["↵/d", "open"],
+            ["m", "actions"],
+            // Always, now that the launcher opens a pasted PR or issue too. It was
+            // shown only where Jira was configured, when a ticket key was all it
+            // could take and without one it could only apologise.
+            ["⌃K", "launch"],
+            // Advertised only where it does something, and named for what it
+            // shows rather than for the furniture: nobody wants "a sidebar".
+            ...(showRail
+              ? ([["⇥", railTitle]] as [string, string][])
+              : hasRail
+                ? ([["i", railTitle]] as [string, string][])
+                : []),
+            ["?", "help"],
+            ["q", "quit"],
+          ]
   const matchCount = section.items.filter(
     (i) => i.kind !== "repo-header" && i.kind !== "subgroup-header",
   ).length
@@ -5859,10 +5868,10 @@ const BrowseScreen = ({
     const message = claimed
       ? claimed.message
       : !jiraBase
-      ? `Jira not configured${jiraSetupHint ? ` · ${jiraSetupHint}` : ""}`
-      : query && !ticketKey
-      ? `nothing matches "${query}"`
-      : undefined
+        ? `Jira not configured${jiraSetupHint ? ` · ${jiraSetupHint}` : ""}`
+        : query && !ticketKey
+          ? `nothing matches "${query}"`
+          : undefined
     const items: PaletteItem[] = commands.map((command) => ({
       id: command.id,
       title: command.title,
@@ -5970,7 +5979,7 @@ const BrowseScreen = ({
         // Inside an overlay the breadcrumb names the open item; on browse, the
         // host's scope. The counts, the login and the freshness never leave.
         scopeLabel={
-          overlayOpen ? chrome?.scope ?? origin?.label : origin?.label
+          overlayOpen ? (chrome?.scope ?? origin?.label) : origin?.label
         }
         budgetLabel={budgetNotice(budget)?.label}
         budgetCritical={budgetNotice(budget)?.critical}
@@ -6835,10 +6844,13 @@ export const App = ({
     const running = [...heldSince].filter(([tab]) => held.has(tab))
     if (running.length === 0) return
     const remaining = (at: number) => at + TRANSIT_HOLD_MS - Date.now()
-    const timer = setTimeout(() => {
-      for (const [tab, at] of running)
-        if (remaining(at) <= 0) settleTab(tab, transients)
-    }, Math.max(0, Math.min(...running.map(([, at]) => remaining(at)))))
+    const timer = setTimeout(
+      () => {
+        for (const [tab, at] of running)
+          if (remaining(at) <= 0) settleTab(tab, transients)
+      },
+      Math.max(0, Math.min(...running.map(([, at]) => remaining(at)))),
+    )
     return () => clearTimeout(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [transients, heldSince, state.phase])
@@ -7110,8 +7122,8 @@ export const App = ({
             patch.kind === "remove"
               ? [[key, null]]
               : patch.kind === "move"
-              ? [[key, patch.toSection]]
-              : [],
+                ? [[key, patch.toSection]]
+                : [],
         ),
       ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -7283,7 +7295,7 @@ export const App = ({
   // the one moment it has no response to read it from, and the moment a third
   // cockpit opening on an exhausted account does the most damage.
   const [budget, setBudget] = useState<InboxBudget | null>(() =>
-    cacheKey ? readCache(cacheKey)?.budget ?? null : null,
+    cacheKey ? (readCache(cacheKey)?.budget ?? null) : null,
   )
   // Its own state rather than a field on the browse phase: the rail is not rows.
   // It never enters the diff, never joins the union, and never waits on a tab's
@@ -7428,9 +7440,10 @@ export const App = ({
             draws, is the only height that does not move. Not a row more:
             Ink clips overflow from the TOP, so guessing high eats the header.
 
-            Every row drawn above the body comes out of it: the CI line, the
-            strip and the focus slot, two rows each, the same reservations
-            BrowseScreen's listHeight makes. Only the CI line used to, so a
+            Every row drawn above the body comes out of it: the CI line and
+            the focus slot two rows each, the strip three (two lines since
+            2026-10-23), the same reservations BrowseScreen's listHeight
+            makes. Only the CI line used to, so a
             cold cockpit with a strip and a focus slot ran three rows past the
             terminal: Ink cleared and repainted the whole screen on every
             spinner tick with the header scrolled off, and the frame dropped
@@ -7442,7 +7455,7 @@ export const App = ({
             rows -
               5 -
               (hasCiStatus ? 2 : 0) -
-              (hasStrip ? 2 : 0) -
+              (hasStrip ? 3 : 0) -
               (hasFocusSlot ? 2 : 0),
           )}
         >
@@ -7463,14 +7476,14 @@ export const App = ({
     state.phase === "pr"
       ? { kind: "pr" as const, item: state.item }
       : state.phase === "issue"
-      ? { kind: "issue" as const, item: state.item }
-      : state.phase === "ext"
-      ? {
-          kind: "ext" as const,
-          extId: state.extId,
-          target: state.target,
-        }
-      : null
+        ? { kind: "issue" as const, item: state.item }
+        : state.phase === "ext"
+          ? {
+              kind: "ext" as const,
+              extId: state.extId,
+              target: state.target,
+            }
+          : null
   const toBrowse = () => {
     // The overlay's chrome goes with it. Every chrome-setting view sets on
     // mount, so the only moments that need a clear are the shell's own
@@ -7549,10 +7562,10 @@ export const App = ({
           onMerged: markMerged,
         })
       : overlay?.kind === "ext"
-      ? extensions
-          ?.find((e) => e.id === overlay.extId)
-          ?.body(toBrowse, overlay.target)
-      : null
+        ? extensions
+            ?.find((e) => e.id === overlay.extId)
+            ?.body(toBrowse, overlay.target)
+        : null
   return (
     <InboxChromeContext.Provider value={chromeValue}>
       <BrowseScreen
