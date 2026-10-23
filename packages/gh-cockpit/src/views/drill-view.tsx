@@ -63,8 +63,13 @@ export const DrillView = ({
     hints: hints.filter(([key]) => !SHELL_KEYS.has(key)),
   })
   if (inShell) {
+    // Grows to the shell's fixed-height overlay band. Without it the box hugs
+    // its content, and a ScrollView body — which starts one row tall and grows
+    // only into room its parent gives it — measured one row and stayed there:
+    // on 2026-10-23 a PR's Conversation tab drew one author rule over an
+    // empty pane, its indicator reading `1–1 / 53`.
     return (
-      <Box flexDirection="column">
+      <Box flexDirection="column" flexGrow={1}>
         {subtitle || tag ? (
           <Box marginBottom={1}>
             <TitleLine subtitle={subtitle} tag={tag} />
