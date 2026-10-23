@@ -1,5 +1,16 @@
 # @kud/gh-cockpit
 
+## 0.13.0
+
+### Minor Changes
+
+- 4f7e894: The services strip was one roll call of every service, each behind its own coloured mark, with a fire beside a tick for a red build and a solid pill for a failure. Thirteen of those in a line could not be read: the reader had to decode every mark to find the two that mattered. It is two rows now, both always drawn. The first names only what needs a look, worst first, as `name: mark cause · build ✕` (`billing: ✕ alerting   search: ⚠ slow · build ✕   web: ? no data`), and says `✓ all N fine` on a calm day. The second, `success`, is one shared tick followed by every service that is fine. Items take an optional `cause` word drawn after the mark, and a strip takes an optional `note`: when every item is unknown for one shared reason, the first row becomes a single sentence (`? no data for all 13 · monitoring unreachable`) and still names any red builds. Every name is bold in the default foreground whatever its state; the pill and the fire are gone. On a narrow terminal the first row folds no-data items into a count first, then the healthy services with red builds, then the warnings, and drops the age before it stops naming any failure; the second row is the whole list or the count, never a partial list. The strip reserves three rows instead of two, in every state, and its loading row shows a live spinner. `stripLayout` is replaced by `stripRows`, which returns both rows as text and as styled runs.
+
+### Patch Changes
+
+- Updated dependencies [4f7e894]
+  - @kud/gh-ink@0.77.0
+
 ## 0.12.6
 
 ### Patch Changes
