@@ -2289,6 +2289,11 @@ export const buildActions = (
   return byGroup(actions)
 }
 
+// The browse rows an overlay hides, each with its blank line under it: the tab
+// strip draws a label row and its active rule, the filter bar one row.
+const TAB_STRIP_ROWS = 3
+const FILTER_BAR_ROWS = 2
+
 const agoText = (ms: number): string => {
   const d = (Date.now() - ms) / 1000
   if (d < 60) return "just now"
@@ -6087,7 +6092,19 @@ const BrowseScreen = ({
           // and footer below, the body where the list was. Fixed to the list's
           // own height so the frame holds still between browse and drill, and
           // clipped rather than spilling past the footer on a long body.
-          <Box flexDirection="column" height={listHeight} overflow="hidden">
+          //
+          // Plus the rows the overlay hides: the tab strip and, when a filter
+          // is on, its bar. `listHeight` already paid for both, so a band of
+          // exactly `listHeight` left the frame three rows short of the
+          // terminal under every drill and extension body, five with a filter
+          // kept — the bottom border floating above the screen's edge.
+          <Box
+            flexDirection="column"
+            height={
+              listHeight + TAB_STRIP_ROWS + (filterActive ? FILTER_BAR_ROWS : 0)
+            }
+            overflow="hidden"
+          >
             {overlayBody}
           </Box>
         ) : (
