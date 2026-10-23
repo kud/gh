@@ -81,6 +81,7 @@ import {
 } from "../components/side-panel.js"
 import {
   StatusStripLine,
+  stripGlyph,
   type StatusStrip,
 } from "../components/status-strip.js"
 import {
@@ -1579,6 +1580,29 @@ export const workCount = (s: Section): number => {
     n += 1
   }
   return n
+}
+
+// The mark and hue a task row's `warning` wears: the status strip's own warn,
+// read from it rather than copied, so the cockpit has one warning mark.
+const [WARNING_MARK, WARNING_INK] = stripGlyph("warn")
+
+/**
+ * How many rows in a tab carry a `warning`: what the tab draws as `⚠ N` after
+ * its count.
+ *
+ * Counted off the rows rather than handed in by the host, so the tab can only
+ * ever count what a row in it actually says. A separate host figure is a second
+ * implementation of the same rule, free to warn on a tab whose rows are silent.
+ *
+ * Distinct keys, because a ticket can head more than one block in the same tab,
+ * and one wrong ticket drawn twice is still one thing to fix. Read off the
+ * same sections the badge reads, so a search narrows both together.
+ */
+export const warningCount = (s: Section): number => {
+  const keys = new Set<string>()
+  for (const item of s.items)
+    if (item.kind === "task" && item.warning) keys.add(item.key)
+  return keys.size
 }
 
 /**
@@ -3176,6 +3200,7 @@ const ItemRow = ({
 
   if (item.kind === "task") {
     const note = item.note ?? ""
+    const warning = item.warning ?? ""
     // Same refresh vocabulary the GitHub row has always had, which this branch
     // returned before ever reaching: a row arriving coalesces, a row leaving
     // dissolves, and either way it says which in words. Without it a refresh on
@@ -3221,6 +3246,7 @@ const ItemRow = ({
         item.key.length -
         note.length -
         (item.pill ? pillWidth(item.pill) + 1 : 0) -
+        (warning ? warning.length + 3 : 0) -
         (farewellLabel ? pillWidth(farewellLabel) + 2 : 0) -
         prefix.length -
         (markerCols > 0 ? markerCols + 1 : 0) -
@@ -3316,6 +3342,19 @@ const ItemRow = ({
               {item.pill}
             </Pill>
           </>
+        ) : null}
+        {/* Right after the pill: the pill says what the row is, the warning
+            says what is wrong with it, and the note is only where it hangs.
+            The strip's own warn mark and colour, so one mark means one thing
+            across the cockpit; the mark bold, the words not. Plain `Text`
+            rather than a `Pill`, so it is not suppressed behind an overlay —
+            and a warning is not a classification, so it takes no fill. */}
+        {warning ? (
+          <Text color={WARNING_INK}>
+            {" "}
+            <Text bold>{WARNING_MARK}</Text>
+            {` ${warning}`}
+          </Text>
         ) : null}
         {note ? <Text dimColor>{` ${note}`}</Text> : null}
         {farewellLabel && !backdropped ? (
@@ -4724,6 +4763,10 @@ const BrowseScreen = ({
     const s = counted.find((c) => c.id === id)
     return s ? workCount(s) : 0
   }
+  const warningOf = (id: string): number => {
+    const s = counted.find((c) => c.id === id)
+    return s ? warningCount(s) : 0
+  }
 
   // Which tabs are still holding news nobody has read. The marker itself lives
   // on the row, in a tab that may not be open — so without this the hold keeps
@@ -6040,6 +6083,7 @@ const BrowseScreen = ({
               label: s.label,
               icon: s.icon,
               count: countOf(s.id),
+              warning: warningOf(s.id),
               /*
                * The denominator, and only where it can still be true.
                *

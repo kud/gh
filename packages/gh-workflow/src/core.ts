@@ -295,6 +295,19 @@ export type TaskRow = {
    */
   pillColor?: string
   /**
+   * A sentence saying something about this row is wrong, drawn right after the
+   * pill in the warning colour and led by the warning mark: `⚠ PR merged ·
+   * move to QA?`. The host decides what counts as wrong; this package draws it
+   * and counts it.
+   *
+   * Its own field rather than a `note`, because a note is dim by contract — a
+   * breadcrumb you follow — and a warning dimmed is a warning missed. The words
+   * are required, never the mark alone: the mark says "risk", only the words
+   * say which. The tab holding the row counts the distinct keys that carry
+   * one (`warningCount`), so the tab can never warn about a row that does not.
+   */
+  warning?: string
+  /**
    * The Jira issue key behind this row, when one exists. Its PRESENCE is what
    * turns on the ticket affordances — ↵ opens a menu led by `jira issue view`,
    * and `t` transitions the issue. A row without it is just a task: ↵ opens its

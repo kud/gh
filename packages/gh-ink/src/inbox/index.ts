@@ -26,6 +26,7 @@ export {
   withoutItem,
   reposInSections,
   workCount,
+  warningCount,
   truncate,
   buildActions,
   buildCheckoutCmd,
