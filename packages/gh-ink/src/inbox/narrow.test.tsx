@@ -174,15 +174,15 @@ describe("a row given less width than it wants", () => {
 
   /*
    * Every case here narrows the row by OPENING THE RAIL, never by mounting a
-   * smaller terminal, and that is not a stylistic choice.
+   * smaller terminal.
    *
-   * `COLS` is sampled from the real terminal when the module loads, so a row's
-   * budget does not know what width the FakeStdout was given: mount at 48 columns
-   * and the rows still measure themselves against whatever window is running the
-   * suite. A spec written that way passes wherever it is run and proves nothing —
-   * a check that cannot fail, which is worse than no check because it is counted.
-   *
-   * The rail is the one lever that moves the number the rows actually read.
+   * That was forced while `COLS` was sampled at import: a row's budget could not
+   * see what width the FakeStdout was given, so a spec mounting at 48 columns
+   * still measured itself against whatever window was running the suite — a
+   * check that cannot fail, which is worse than no check because it is counted.
+   * The width is live now, and the lever is kept because the rail IS the case
+   * these specs are about: a row that gives up its trailing context when a
+   * sibling column takes the space.
    */
   it("gives up its trailing context rather than its subject", async () => {
     const roomy = await frameAt(COLS + 4, false)

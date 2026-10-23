@@ -1430,8 +1430,27 @@ end tell`,
 const FRAME_COLOR = "gray"
 const FRAME_PAD_X = 1
 const FRAME_CHROME_COLS = 2 /* border */ + FRAME_PAD_X * 2 /* padding */
+/*
+ * The frame's content width, sampled once when this module loads. Every render
+ * path used to price itself off this, and that was the bug: a window narrowed
+ * after launch left the header segments and the tab strip measured for the
+ * wider window, so they wrapped onto a second line and the frame ran a row past
+ * its terminal again — and Ink clips overflow from the TOP, which eats the
+ * header. Render paths read `useFrameCols` now. What keeps the sample alive is
+ * the export: cockpit re-exports `COLS` as part of the public surface, and the
+ * specs that pin `process.stdout.columns` before importing (row-cap.test.tsx)
+ * would go dark without it.
+ */
 export const COLS = (process.stdout.columns ?? 120) - FRAME_CHROME_COLS
 const MODAL_CHROME_COLS = 2 /* border */ + 1 * 2 /* paddingX */
+
+/*
+ * The same width, read at render. `useWindowSize` measures the stdout Ink is
+ * mounted on — including the resize event a module-load sample never sees — so
+ * it follows the `HelpModal` precedent there: a frame width is a property of
+ * the terminal as it is, not as it was when the process started.
+ */
+const useFrameCols = (): number => useWindowSize().columns - FRAME_CHROME_COLS
 /*
  * The widest a PR row is ever drawn. Until 2026-10-02 the row took the whole
  * list width, and its trailing block (threads, size, age) is pinned right — so
@@ -2342,6 +2361,7 @@ const InboxHeader = ({
   appliedSummary?: string
   fetchedAt?: number | null
 }) => {
+  const frameCols = useFrameCols()
   const total = sections.reduce((n, s) => n + workCount(s), 0)
   // padStart, not padEnd: the count needs a stable width so the header doesn't
   // shuffle as it changes, but padding after the digits splits "47" from
@@ -2401,7 +2421,7 @@ const InboxHeader = ({
 
   const fill = Math.max(
     4,
-    COLS -
+    frameCols -
       brand.length -
       countSeg.length -
       userSeg.length -
@@ -2991,7 +3011,7 @@ const ItemRow = ({
   prefix = "",
   parent,
   sparkFrame = 0,
-  cols = COLS,
+  cols,
   markerCols = 0,
   uniformLabels = [],
   columns,
@@ -3027,10 +3047,11 @@ const ItemRow = ({
   /**
    * Columns available to this row, which is NOT always the frame width: a rail
    * beside the list takes its share, and a budget that does not know the rail is
-   * there overflows by exactly the rail. Defaulted so a host that draws no rail
-   * writes nothing.
+   * there overflows by exactly the rail. Required rather than defaulted — the
+   * only number this row may not guess is the width it is drawn on, and every
+   * caller (the list, which knows both the frame and the rail) states it.
    */
-  cols?: number
+  cols: number
   /**
    * This row's tree glyphs, already assembled — see `treePrefix`. Empty for a
    * top-level row.
@@ -3540,7 +3561,7 @@ export const ActionMenu = ({
   item,
   actions,
   cursor,
-  cols = COLS,
+  cols,
 }: {
   item: AnyItem
   actions: MenuRow[]
@@ -3549,10 +3570,12 @@ export const ActionMenu = ({
    * Content columns the menu may take. The width is fixed from the longest
    * row and the title — see `menuWidthFor` — so it never
    * resizes as the cursor moves. A host beside a rail passes what the list
-   * has; everywhere else the frame's own width is the right answer.
+   * has; everywhere else the frame's own width is the right answer, read live
+   * rather than from the load-time sample — see `useFrameCols`.
    */
   cols?: number
 }) => {
+  const frameCols = useFrameCols()
   // Nerd glyphs are PUA codepoints: two cells wide in the terminal, invisible
   // anywhere else. The column exists only when some row brings an icon AND the
   // host opted into nerd mode — otherwise it is dropped completely, no
@@ -3602,7 +3625,7 @@ export const ActionMenu = ({
   // second line in a 40-column menu.
   const titleWidth = [...lead].length + [...rest].length + TITLE_SLACK
 
-  const width = menuWidthFor(cols, contentWidth, titleWidth)
+  const width = menuWidthFor(cols ?? frameCols, contentWidth, titleWidth)
   const inner = Math.max(1, width - 4)
   const restText =
     [...lead].length + [...rest].length + TITLE_SLACK <= inner
@@ -4052,34 +4075,37 @@ export const HelpModal = ({
   )
 }
 
-const ExplainModal = ({ item, login }: { item: GHItem; login: string }) => (
-  <Box
-    flexDirection="column"
-    borderStyle="round"
-    borderColor={colors.info}
-    backgroundColor={OVERLAY_BG}
-    paddingX={1}
-    width={Math.min(COLS, 78)}
-  >
-    <Text color={colors.accent} bold>
-      {`#${item.number} · ${item.repo}`}
-    </Text>
-    <Text>{item.title}</Text>
-    {explainItem(item, login).map((section) => (
-      <Box key={section.heading} flexDirection="column" marginTop={1}>
-        <Text bold dimColor>
-          {section.heading}
-        </Text>
-        {section.lines.map((line, i) => (
-          <Text key={i}>{"  " + line}</Text>
-        ))}
+const ExplainModal = ({ item, login }: { item: GHItem; login: string }) => {
+  const frameCols = useFrameCols()
+  return (
+    <Box
+      flexDirection="column"
+      borderStyle="round"
+      borderColor={colors.info}
+      backgroundColor={OVERLAY_BG}
+      paddingX={1}
+      width={Math.min(frameCols, 78)}
+    >
+      <Text color={colors.accent} bold>
+        {`#${item.number} · ${item.repo}`}
+      </Text>
+      <Text>{item.title}</Text>
+      {explainItem(item, login).map((section) => (
+        <Box key={section.heading} flexDirection="column" marginTop={1}>
+          <Text bold dimColor>
+            {section.heading}
+          </Text>
+          {section.lines.map((line, i) => (
+            <Text key={i}>{"  " + line}</Text>
+          ))}
+        </Box>
+      ))}
+      <Box marginTop={1}>
+        <Text dimColor>esc · e close</Text>
       </Box>
-    ))}
-    <Box marginTop={1}>
-      <Text dimColor>esc · e close</Text>
     </Box>
-  </Box>
-)
+  )
+}
 
 const RepoPicker = ({
   repos,
@@ -4402,6 +4428,7 @@ const BrowseScreen = ({
   onRestore?: () => void
 }) => {
   const { rows } = useWindowSize()
+  const frameCols = useFrameCols()
   // Both directions are the same filter with `keep` flipped, so the host supplies
   // one predicate rather than two filters. No predicate — or no side asked for —
   // and there is no split: every section stands.
@@ -4717,7 +4744,7 @@ const BrowseScreen = ({
   // unbounded pulse survived review. The ticker is gated on the marks as a whole
   // and bounded by PULSE_SETTLE_MS instead; see it for what that cost.
   // Closed by default, even where a host supplies one. The rail costs
-  // railWidth(COLS) out of the list, and the list is what the cockpit is opened for —
+  // railWidth(frameCols) out of the list, and the list is what the cockpit is opened for —
   // a roadmap consulted now and then does not get to narrow every row all day.
   // `i` brings it in, and the footer advertises that key while it is away.
   const [railOpen, setRailOpen] = useState(false)
@@ -4788,8 +4815,8 @@ const BrowseScreen = ({
   // What the LIST has, which is the frame minus whatever the rail took. Computed
   // once here and handed down: a row cannot see the rail, and a budget that does
   // not know about it overflows by exactly the rail's width.
-  const railCols = railWidth(COLS)
-  const listCols = showRail ? COLS - railCols : COLS
+  const railCols = railWidth(frameCols)
+  const listCols = showRail ? frameCols - railCols : frameCols
   /*
    * The trailing block's column widths, over EVERY section the inbox holds
    * rather than the one on screen: a column that widens as you scroll moves
@@ -5961,7 +5988,7 @@ const BrowseScreen = ({
         <StatusStripLine
           strip={stripState.kind === "ready" ? stripState.strip : undefined}
           label={stripLabel}
-          width={COLS}
+          width={frameCols}
         />
       ) : null}
       {/* The focus slot, directly above the tab strip with the strip's own
@@ -5972,7 +5999,7 @@ const BrowseScreen = ({
           focus={focus}
           label={focusLabel}
           empty={focusEmpty}
-          width={COLS}
+          width={frameCols}
           jumpKey={FOCUS_JUMP_KEY}
         />
       ) : null}
@@ -5998,7 +6025,7 @@ const BrowseScreen = ({
             // The frame's own width, not the terminal's: the fallback prices
             // against the terminal and overshoots by the frame chrome, so the
             // strip would fold late and spill past the border.
-            width={COLS}
+            width={frameCols}
             items={localSections.map((s) => ({
               value: s.id,
               label: s.label,
@@ -6512,6 +6539,7 @@ export const App = ({
   // BrowseScreen and need the same height budget it uses — otherwise the frame
   // hugs one line until the fetch lands and then snaps open.
   const { rows } = useWindowSize()
+  const frameCols = useFrameCols()
 
   /* The cache is read DURING the first render, not in an effect after it.
      Read in the mount effect, it cost every launch one frame of the loading
@@ -7368,7 +7396,7 @@ export const App = ({
           <StatusStripLine
             strip={stripState.kind === "ready" ? stripState.strip : undefined}
             label={stripLabel}
-            width={COLS}
+            width={frameCols}
           />
         ) : null}
         {/* The reserved slot reads `loading…` here the way the strip does —
@@ -7378,7 +7406,7 @@ export const App = ({
             focus={undefined}
             label={focusLabel}
             empty={focusEmpty}
-            width={COLS}
+            width={frameCols}
           />
         ) : null}
         {/* Sized so the frame fills the alternate screen from the first paint,

@@ -9,11 +9,12 @@ import type { GHItem, Section } from "./inbox.js"
  * (threads, size, age) right-aligns to that line rather than to the window
  * edge. The tab strip and the header rule still span the frame.
  *
- * `COLS` is sampled from `process.stdout` when the module loads — see the long
- * note in narrow.test.tsx — so a FakeStdout alone cannot widen the rows. This
- * file pins the real stream's width BEFORE importing the inbox, which is the
- * only way to make the row budget read a wide window. Vitest isolates modules
- * per file, so the pinned width does not leak into any other suite.
+ * `COLS` is the width sampled from `process.stdout` when the module loads. The
+ * frame reads its width from the render's own stdout now, but this file still
+ * pins the real stream's width BEFORE importing the inbox, so the `COLS` guard
+ * below describes the same wide window the FakeStdout draws into. Vitest
+ * isolates modules per file, so the pinned width does not leak into any other
+ * suite.
  */
 const WIDE = 220
 

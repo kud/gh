@@ -107,11 +107,13 @@ describe("task row pill", () => {
   // sized to fill the terminal — so one column too many scrolls the whole panel
   // instead of clipping the row.
   //
-  // Asserted against COLS, never against the mount width. COLS is sampled from
-  // the REAL terminal when the module loads, so a budget checked against the
-  // FakeStdout passes or fails on how wide the window running the suite happens
-  // to be — which this spec did, green at one width and red at another an hour
-  // later, saying nothing about the code either time.
+  // Asserted against COLS + 4, which is also the width this spec mounts, rather
+  // than against a literal: the number that matters is the frame's own budget,
+  // and reading it from the module keeps the assertion honest if the default
+  // terminal width ever moves. This used to be COLS against a budget that read
+  // the real terminal rather than the FakeStdout, so it went green at one width
+  // and red at another an hour later, saying nothing about the code either time.
+  // The frame width is live now; the assertion stays as it was.
   it("keeps the row inside the frame when the summary is far too long", async () => {
     const frame = await mount(row({ summary: "x".repeat(400), pill: "epic" }))
     expect(frame).toContain("epic")

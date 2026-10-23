@@ -205,10 +205,11 @@ const cases: Case[] = [
 
 // Every state draws a frame exactly the terminal's height: the bottom border on
 // the last row, never above it (a band that forgot rows the overlay hides) and
-// never past it (Ink clips overflow from the top, eating the header). Not yet
-// covered: a terminal resized narrower after launch, since COLS is read once at
-// import; and the action menu on a terminal under ~30 rows, which outgrows the
-// band it opens in.
+// never past it (Ink clips overflow from the top, eating the header). Covered
+// elsewhere: a terminal narrowed after launch — resize-width.test.tsx, which is
+// the regression behind the frame width reading `useWindowSize` live instead of
+// the module-load `COLS`. Not yet covered: the action menu on a terminal under
+// ~30 rows, which outgrows the band it opens in.
 describe("frame height across states", () => {
   for (const rows of [24, 30, 50])
     for (const c of cases)

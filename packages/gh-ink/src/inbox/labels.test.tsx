@@ -15,9 +15,9 @@ import type { Sidebar } from "../components/side-panel.js"
  * Two properties are worth pinning and they pull opposite ways. The row must
  * SHOW the label, and the row must still FIT: `narrow.test.tsx` is the account
  * of what a row one column too wide does to the frame. So the ranking is
- * asserted as a function, and the fitting through the rail, which is the only
- * lever that moves the width a row actually reads (see that file for why a
- * smaller FakeStdout does not).
+ * asserted as a function, and the fitting through the rail, the narrowing that
+ * is the list's own doing (see that file for why the rail rather than a
+ * smaller FakeStdout).
  */
 
 const TAG = "\u{f02b}"
