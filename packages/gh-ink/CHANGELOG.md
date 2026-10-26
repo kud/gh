@@ -1,5 +1,11 @@
 # @kud/gh-ink
 
+## 0.80.3
+
+### Patch Changes
+
+- 5a020ae: A top-level task row with rows hanging under it now carries a `⊙` in the cell its children's stems drop from, so each block reads as a root with its branches.
+
 ## 0.80.2
 
 ### Patch Changes
