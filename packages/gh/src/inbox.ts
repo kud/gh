@@ -613,10 +613,17 @@ const SOURCES: Record<
     }}
   }`,
 
+  // Sorted by update because search's default order is by CREATION, and the
+  // window is a sample: 248 PRs closed in 90 days against a cap of 30 kept
+  // only the ~2 weeks most recently OPENED. A PR opened earlier and merged
+  // today was never returned, so the cockpit could not file it under its
+  // ticket, and `reconcile` held it as a ticketless row in the tab it had
+  // left (found 2026-10-26 on a PR opened three weeks before it merged).
+  // Closing a PR updates it, so this puts the freshest departures first.
   recentlyDone: (
     { scope, doneSince },
     first,
-  ) => `  recentlyDone: search(query: "${scope}is:pr author:@me -is:open closed:>=${doneSince}", type: ISSUE, first: ${first}) {
+  ) => `  recentlyDone: search(query: "${scope}is:pr author:@me -is:open closed:>=${doneSince} sort:updated-desc", type: ISSUE, first: ${first}) {
     issueCount
     nodes { __typename ... on PullRequest {
       id number title state isDraft createdAt mergedAt closedAt url
@@ -896,7 +903,9 @@ export const fetchInbox = async (
     cursor?.hasNextPage === true &&
     typeof cursor?.endCursor === "string"
   ) {
-    const page = await run(buildMyPRsPageQuery(options, pageSize, cursor.endCursor))
+    const page = await run(
+      buildMyPRsPageQuery(options, pageSize, cursor.endCursor),
+    )
     if (!page?.myPRs) break
     const envelope = mergeInboxData([data, page])
     data = {

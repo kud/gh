@@ -290,6 +290,14 @@ describe("buildInboxQuery", () => {
       searchFor(buildInboxQuery({ doneWithinDays: 1 }), "recentlyDone"),
     ).toContain(`closed:>=${yesterday}`)
   })
+
+  // The default order is by creation, which drops a long-lived PR merged
+  // today out of a capped window. See the comment on the query.
+  it("orders recentlyDone by update so a fresh merge is in the window", () => {
+    expect(searchFor(buildInboxQuery(), "recentlyDone")).toContain(
+      "sort:updated-desc",
+    )
+  })
 })
 
 /*
@@ -605,7 +613,8 @@ describe("source coverage", () => {
         expect(blockFor(query, source)).not.toContain("pageInfo")
   })
 
-  it("every source asks for issueCount", () => {    // The guard this pins used to exist only in a comment. `issueCount` was
+  it("every source asks for issueCount", () => {
+    // The guard this pins used to exist only in a comment. `issueCount` was
     // fetched for `myPRs` and nothing else, so seven of eight sources could
     // truncate with nothing anywhere able to notice — which is what turned a
     // 30-row window over 95 issues into a stream of invented arrivals and
