@@ -153,7 +153,7 @@ describe("orderJiraMoves", () => {
     ])
   })
 
-  it("appends unknown transitions alphabetically, labelled by name", () => {
+  it("appends unknown transitions in Jira's order, labelled by name", () => {
     const ordered = orderJiraMoves(
       [live("On Hold", "31"), live("Done", "21"), live("Blocked", "41")],
       configured,
@@ -165,15 +165,42 @@ describe("orderJiraMoves", () => {
         resolutions: ["Done"],
         to: { name: "Done" },
       },
-      { label: "Blocked", transition: "Blocked", to: { name: "Blocked" } },
       { label: "On Hold", transition: "On Hold", to: { name: "On Hold" } },
+      { label: "Blocked", transition: "Blocked", to: { name: "Blocked" } },
     ])
   })
 
-  it("orders everything alphabetically without a static list", () => {
+  it("keeps Jira's order without a static list", () => {
     expect(orderJiraMoves([live("Done"), live("Blocked")])).toEqual([
-      { label: "Blocked", transition: "Blocked", to: { name: "Blocked" } },
       { label: "Done", transition: "Done", to: { name: "Done" } },
+      { label: "Blocked", transition: "Blocked", to: { name: "Blocked" } },
+    ])
+  })
+
+  it("runs to do, in progress, done by the category each move lands in", () => {
+    const at = (name: string, category?: string): JiraAvailableTransition => ({
+      id: name,
+      name,
+      to: category ? { name, category } : { name },
+    })
+    const ordered = orderJiraMoves(
+      [
+        at("Launched", "done"),
+        at("Planned", "indeterminate"),
+        at("Ideas", "new"),
+        at("Mystery"),
+        at("Shippable", "done"),
+        at("Research", "indeterminate"),
+      ],
+      [{ label: "Ship it", transition: "Shippable" }],
+    )
+    expect(ordered.map((m) => m.label)).toEqual([
+      "Ideas",
+      "Planned",
+      "Mystery",
+      "Research",
+      "Ship it",
+      "Launched",
     ])
   })
 })

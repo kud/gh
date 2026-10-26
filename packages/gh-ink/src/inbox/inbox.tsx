@@ -398,6 +398,13 @@ export const storeJiraMoves = (
 export const invalidateJiraMoves = (ticket: string): boolean =>
   jiraMovesCache.delete(ticket)
 
+// Jira's status categories in the order work moves through them.
+const CATEGORY_RANK: Readonly<Record<string, number>> = {
+  new: 0,
+  indeterminate: 1,
+  done: 2,
+}
+
 // One ordered move row's worth: the workflow's own name to execute, wearing
 // the host's label and resolution step where the host knows this transition.
 export type OrderedJiraMove = {
@@ -414,7 +421,13 @@ export type OrderedJiraMove = {
  * place in line, its label and its resolution step (the Done-resolution dance
  * included); anything the static list does not know is still offered — hiding
  * it would reintroduce the forbidden-move problem one step sideways — after
- * the known ones, alphabetically, labelled by its own name.
+ * the known ones, labelled by its own name.
+ *
+ * The whole list then runs in workflow time: to do, in progress, done, by the
+ * status category each move lands in, so the menu reads in the order work
+ * moves. Within a category the known moves keep their place and the rest keep
+ * Jira's own order, never the alphabet, which put "Launched" before "Planned".
+ * A move with no category sits with in progress, where most statuses are.
  */
 export const orderJiraMoves = (
   available: JiraAvailableTransition[],
@@ -434,9 +447,13 @@ export const orderJiraMoves = (
   }
   const rest = available
     .filter((t) => !known.has(t.name))
-    .sort((a, b) => a.name.localeCompare(b.name))
     .map((t) => ({ label: t.name, transition: t.name, to: t.to }))
+  const rank = (move: OrderedJiraMove): number =>
+    CATEGORY_RANK[move.to?.category ?? ""] ?? 1
   return [...ordered, ...rest]
+    .map((move, i) => ({ move, i }))
+    .sort((a, b) => rank(a.move) - rank(b.move) || a.i - b.i)
+    .map(({ move }) => move)
 }
 
 /**
