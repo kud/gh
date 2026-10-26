@@ -1,5 +1,11 @@
 # @kud/gh-ink
 
+## 0.80.2
+
+### Patch Changes
+
+- e0625d7: A child task row with rows of its own now marks the joint on its stem with `┬` (`└──┬ ▲`), directly above the stem its first child hangs from.
+
 ## 0.80.1
 
 ### Patch Changes
