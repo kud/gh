@@ -293,7 +293,7 @@ describe("every other full-screen state", () => {
     chromed.done()
 
     expect(frame).toMatch(/ status  [⠀-⣿]/)
-    expect(frame).toContain("focus  loading…")
+    expect(frame).toMatch(/ focus  [⠀-⣿]/)
     expect(height(frame)).toBe(height(bareFrame))
     expect(height(frame)).toBeLessThanOrEqual(30)
   })

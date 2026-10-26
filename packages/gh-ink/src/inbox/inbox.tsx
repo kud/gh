@@ -98,6 +98,7 @@ import {
   LoadingScreen,
   Pill,
   pillWidth,
+  Spinner,
   StatusMessage,
   Tabs,
   Switch,
@@ -2388,8 +2389,9 @@ const InboxHeader = ({
   // `quiet` is not `loading`: a fetch that came back empty or failed has nothing
   // to count and nobody to attribute it to, but it is emphatically no longer
   // loading — and "0 items · @" reads as data that half-arrived.
+  // Loading draws a spinner in the middle of these five columns, never words.
   const countSeg = loading
-    ? "      loading…  "
+    ? "     "
     : quiet
       ? "  "
       : `  ${String(total).padStart(3)} item${total !== 1 ? "s" : ""}  ·  `
@@ -2452,7 +2454,15 @@ const InboxHeader = ({
       <Text color={colors.accent} bold>
         {brand}
       </Text>
-      <Text dimColor>{countSeg}</Text>
+      {loading ? (
+        <>
+          <Text>{"  "}</Text>
+          <Spinner />
+          <Text>{"  "}</Text>
+        </>
+      ) : (
+        <Text dimColor>{countSeg}</Text>
+      )}
       {userSeg ? <Text>{userSeg}</Text> : null}
       {scopeLabel ? <Text dimColor>{workLabel}</Text> : null}
       {budgetLabel ? (
@@ -2554,8 +2564,8 @@ export const CiStatusLine = ({
   if (state.kind === "loading")
     return (
       <Box marginBottom={1}>
-        <Text dimColor>{"  · "}</Text>
-        <Text dimColor>{`${name}  loading…`}</Text>
+        <Text dimColor>{`  ${name}  `}</Text>
+        <Spinner />
       </Box>
     )
 
@@ -4428,7 +4438,7 @@ const BrowseScreen = ({
   focus?: FocusSlot | null
   /**
    * What to call the focus row. Passing this (or `focusEmpty`) reserves the
-   * row from the first paint, so it reads `loading…` until the fetch lands
+   * row from the first paint, so it shows a spinner until the fetch lands
    * rather than appearing late and shoving the tabs down.
    */
   focusLabel?: string
@@ -4543,7 +4553,7 @@ const BrowseScreen = ({
   // the fine services had a second row to themselves under a `success` title.
   const reserveStripRow = stripState != null
   // The focus slot costs the same two rows once it is drawn — or reserved by
-  // either label prop, so the row reads `loading…` from the first paint rather
+  // either label prop, so the row shows a spinner from the first paint rather
   // than appearing late and shoving the tab strip down. One height across all
   // three states, so the tabs never jump between them.
   const reserveFocusRow =
@@ -6541,7 +6551,7 @@ export const App = ({
   stripPollMs?: number
   /**
    * What to call the focus row. Passing this (or `focusEmpty`) reserves the
-   * row from the first paint — `loading…` until the fetch lands — while a
+   * row from the first paint — a spinner until the fetch lands — while a
    * host that never wires the feature passes neither and draws nothing.
    * Vocabulary, not data: it never goes stale, so it is a prop rather than
    * part of the fetch result.
@@ -6704,7 +6714,7 @@ export const App = ({
       return sameCiStatusState(prev, next) ? prev : next
     })
   const hasStrip = !!stripFetcher
-  // Either label prop reserves the focus row, drawn `loading…` until the fetch
+  // Either label prop reserves the focus row, drawn as a spinner until the fetch
   // lands.
   const hasFocusSlot = focusLabel !== undefined || focusEmpty !== undefined
   const [stripState, setStripState] = useState<StripStatusState>({
@@ -7356,7 +7366,7 @@ export const App = ({
   // enters the diff, and never waits on a tab's hold.
   // The slot seeds the same way: a launch that trusts the cache never
   // refetches, so a focus left out of the paint is a slot stuck on
-  // `loading…`. Carried as read — `null` is the real "nothing to focus on"
+  // a spinner. Carried as read — `null` is the real "nothing to focus on"
   // and must survive the paint as one.
   const [focus, setFocus] = useState<FocusSlot | null | undefined>(
     launchPainted ? launchCache?.focus : undefined,
@@ -7450,7 +7460,7 @@ export const App = ({
             width={frameCols}
           />
         ) : null}
-        {/* The reserved slot reads `loading…` here the way the strip does —
+        {/* The reserved slot shows a spinner here the way the strip does —
             before any answer exists, the reservation is the whole state. */}
         {hasFocusSlot ? (
           <FocusSlotLine

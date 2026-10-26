@@ -356,7 +356,7 @@ export const stripRows = (
     fineCount > 0
       ? [
           { text: OK, color: colors.success },
-          { text: ` ${fineCount} fine`, color: colors.muted },
+          { text: ` ${fineCount} fine` },
         ]
       : []
   const fineWidth = fineSpans.length ? ITEM_GAP.length + widthOf(fineSpans) : 0

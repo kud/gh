@@ -1,6 +1,6 @@
 import React from "react"
 import { Box, Text } from "ink"
-import { Pill, colors, pillWidth } from "@kud/ink-ui"
+import { Pill, Spinner, colors, pillWidth } from "@kud/ink-ui"
 import { truncate } from "../lib/truncate.js"
 
 /**
@@ -192,8 +192,8 @@ export const FocusSlotLine = ({
   if (focus === undefined)
     return (
       <Box marginBottom={1}>
-        <Text dimColor>{"  · "}</Text>
-        <Text dimColor>{`${label}  loading…`}</Text>
+        <Text dimColor>{`  ${label}  `}</Text>
+        <Spinner />
       </Box>
     )
   // The "nothing to point at" mark, wearing the same target glyph as the ready

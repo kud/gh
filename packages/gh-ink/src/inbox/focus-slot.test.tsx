@@ -109,9 +109,9 @@ describe("focusCellFor", () => {
 })
 
 describe("FocusSlotLine", () => {
-  it("reads loading while the first answer is out", () => {
+  it("spins while the first answer is out", () => {
     const out = frameOf(<FocusSlotLine focus={undefined} width={116} />)
-    expect(out).toContain("· focus  loading…")
+    expect(out).toMatch(/ focus  [⠀-⣿]/)
   })
 
   it("reads the ticket slot in order: pill, marker, ref, title, reason", () => {

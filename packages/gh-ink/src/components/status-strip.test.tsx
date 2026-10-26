@@ -243,11 +243,11 @@ describe("stripRows: what row 1 names", () => {
     expect(noData).toMatchObject({ dim: true })
   })
 
-  it("wears the fine count muted behind a green tick", () => {
+  it("draws the fine count in the names' colour behind a green tick", () => {
     const spans = stripRows(badDay, 200, NOW).spans
     const fine = spans.find((s) => s.text === " 3 fine")
     expect(fine).toBeDefined()
-    expect(fine).toMatchObject({ color: colors.muted })
+    expect(fine?.color).toBeUndefined()
     expect(spans[spans.indexOf(fine!) - 1]).toMatchObject({
       text: OK,
       color: colors.success,

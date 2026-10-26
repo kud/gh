@@ -145,11 +145,11 @@ describe("the focus slot", () => {
     const out = frame()
     done()
     expect(out).not.toContain(FOCUS_MARK)
-    expect(out).not.toContain("loading…")
+    expect(out).not.toMatch(/ focus  [⠀-⣿]/)
     expect(out).toContain("pull request number 1")
   })
 
-  it("reads loading while the fetch carries no focus", async () => {
+  it("spins while the fetch carries no focus", async () => {
     const sections: Section[] = [
       { id: "open", label: "Open", items: [pr(1)] },
     ]
@@ -159,7 +159,7 @@ describe("the focus slot", () => {
     })
     const out = frame()
     done()
-    expect(out).toContain("· focus  loading…")
+    expect(out).toMatch(/ focus  [⠀-⣿]/)
   })
 
   it("reads the ready slot after the strip and above the tabs", async () => {
