@@ -40,6 +40,30 @@ export type RowMotion = "arriving" | "departing" | "withdrawn"
  */
 export type RowAnnouncement = { label: string; color: string }
 
+/**
+ * Width of the fixed type gutter, the cell a task row's `pill` sits in ahead
+ * of the tree: `subtask` plus its two caps and a one-column gap. Fixed rather
+ * than measured, because a cell sized per label would put the tree on a
+ * different column on every row, which is the shift the gutter exists to stop.
+ */
+export const TYPE_GUTTER_COLS = 10
+
+/** The gutter drawn blank: on PR rows, pill-less rows, and behind an overlay. */
+export const typeGutterBlank = " ".repeat(TYPE_GUTTER_COLS)
+
+/**
+ * The label as the gutter can hold it. Clipped at the tail rather than allowed
+ * to widen the cell: one long label would push only its own row's tree right.
+ */
+export const typeGutterLabel = (label: string): string => {
+  const max = TYPE_GUTTER_COLS - pillWidth("") - 1
+  return label.length <= max ? label : `${label.slice(0, max - 1)}…`
+}
+
+/** What the pill leaves free in the gutter, so the tree starts on one column. */
+export const typeGutterPad = (label: string): string =>
+  " ".repeat(Math.max(0, TYPE_GUTTER_COLS - pillWidth(typeGutterLabel(label))))
+
 export type PrRowProps = {
   item: GHItem
   active: boolean
@@ -111,6 +135,12 @@ export type PrRowProps = {
    * of exactly the row being watched would defeat its own purpose.
    */
   focusCell?: FocusGutter
+  /**
+   * Whether this list reserves the type gutter — see `TYPE_GUTTER_COLS`. A PR
+   * row has no type of its own and draws the cell blank, so its tree and `#n`
+   * stay on the columns its task-row siblings use. Absent draws nothing.
+   */
+  typeGutter?: boolean
 }
 
 // Unresolved review threads — a comment glyph (nf-fa-comments) + count, keeping
@@ -239,6 +269,7 @@ type LayoutInput = Pick<
   | "shed"
   | "numberCols"
   | "gutter"
+  | "typeGutter"
 > & {
   // Presence only, not the mark: every row holds the same two columns when a
   // focus is on screen, so the shed ladder — which drops trailing columns for
@@ -312,6 +343,7 @@ export const layoutOf = ({
   numberCols,
   gutter = true,
   focusGutter = false,
+  typeGutter = false,
 }: LayoutInput) => {
   const numCols = numberCols ?? numberColumnsOf([item])
   const numStr = `#${item.number}`.padEnd(numCols)
@@ -467,6 +499,7 @@ export const layoutOf = ({
       (gutter ? 2 : 0) +
       prefix.length +
       (focusGutter ? 2 : 0) +
+      (typeGutter ? TYPE_GUTTER_COLS : 0) +
       2 /* health */ +
       2 /* turn */ +
       numCols +
@@ -552,6 +585,7 @@ export const PrRow = ({
   numberCols,
   gutter = true,
   focusCell,
+  typeGutter = false,
 }: PrRowProps) => {
   // Read once for the row rather than at each of the pill sites — a hook, so it
   // cannot sit inside a branch.
@@ -648,6 +682,7 @@ export const PrRow = ({
     numberCols,
     gutter,
     focusGutter: focusCell !== undefined,
+    typeGutter,
   })
 
   return (
@@ -669,6 +704,7 @@ export const PrRow = ({
           <Text>{"  "}</Text>
         )
       ) : null}
+      {typeGutter ? <Text>{typeGutterBlank}</Text> : null}
       <Text dimColor>{prefix}</Text>
       <Text color={color as any} bold>
         {icon + " "}

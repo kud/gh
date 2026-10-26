@@ -266,7 +266,10 @@ export type TaskRow = {
   note?: string
   /**
    * A category this row BELONGS to — `epic`, `blocked`, `spike` — drawn as a
-   * filled pill after the summary.
+   * filled pill in the list's fixed type gutter, ahead of the tree, so the
+   * word sits in one column rather than drifting after titles of different
+   * lengths. The gutter belongs to the list, not the row: every row reserves
+   * it while any row carries a pill, so keys and `#n`s stay aligned.
    *
    * Deliberately not a second spelling of `note`, which the epic marker used to
    * borrow. The two want opposite weights: a pill says the word itself is the
@@ -295,10 +298,18 @@ export type TaskRow = {
    */
   pillColor?: string
   /**
-   * A sentence saying something about this row is wrong, drawn right after the
-   * pill in the warning colour and led by the warning mark: `⚠ PR merged ·
-   * move to QA?`. The host decides what counts as wrong; this package draws it
-   * and counts it.
+   * The board column this row sits in — `In development`, `QA` — drawn as a
+   * quiet grey pill right after the summary, `icon label` or the label alone.
+   * Its own field rather than a `note`, because a row can hang off a parent
+   * AND sit in a stage, and the two want different weights. Charged to the
+   * title budget, so a long title truncates before the pill does.
+   */
+  stage?: { label: string; icon?: string }
+  /**
+   * A sentence saying something about this row is wrong, drawn after the
+   * summary and any stage pill, in the warning colour and led by the warning
+   * mark: `⚠ PR merged · move to QA?`. The host decides what counts as wrong;
+   * this package draws it and counts it.
    *
    * Its own field rather than a `note`, because a note is dim by contract — a
    * breadcrumb you follow — and a warning dimmed is a warning missed. The words

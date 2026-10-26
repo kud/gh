@@ -7,7 +7,7 @@ import { App, COLS } from "./inbox.js"
 import type { TaskRow, Section } from "./inbox.js"
 
 /*
- * `pill` and `note` are the two trailing annotations a task row can carry, and
+ * `pill` and `note` are two annotations a task row can carry, and
  * they are deliberately not one field wearing two hats.
  *
  * `pill` is a category the row BELONGS to — the word itself is the information,

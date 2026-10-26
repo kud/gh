@@ -9,7 +9,7 @@ import { stripGlyph } from "../components/status-strip.js"
 
 /*
  * `warning` says something about a row is wrong — a ticket sitting in a column
- * its PRs contradict, say. It is drawn right after the pill, in the strip's
+ * its PRs contradict, say. It is drawn right after the stage, in the strip's
  * warn mark and colour, and the tab holding the row counts it as `⚠ N` after
  * its badge. The count is read off the rows, so a tab can never warn about a
  * row that is silent.
@@ -76,14 +76,14 @@ const [MARK] = stripGlyph("warn")
 const CAP_R = glyph("plCapRight")
 
 describe("task row warning", () => {
-  it("draws the mark and the words right after the pill", async () => {
+  it("draws the mark and the words right after the stage", async () => {
     const frame = await mount([
       {
         id: "review",
         label: "Review",
         items: [
           row({
-            pill: "story",
+            stage: { label: "QA" },
             warning: "PR merged · move to QA?",
             note: "SHOP-1000",
           }),
@@ -91,7 +91,7 @@ describe("task row warning", () => {
       },
     ])
     expect(frame).toContain(
-      `story${CAP_R} ${MARK} PR merged · move to QA? SHOP-1000`,
+      `QA${CAP_R} ${MARK} PR merged · move to QA? SHOP-1000`,
     )
   })
 

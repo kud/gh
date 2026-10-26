@@ -30,6 +30,10 @@ import {
   PrRow,
   sectionShedOf,
   trailingColumnsOf,
+  TYPE_GUTTER_COLS,
+  typeGutterBlank,
+  typeGutterLabel,
+  typeGutterPad,
   type TrailingColumns,
   type TrailingShed,
   type RowAnnouncement,
@@ -3055,6 +3059,7 @@ const ItemRow = ({
   shed,
   numberCols,
   focus,
+  typeGutter = false,
 }: {
   item: AnyItem
   active: boolean
@@ -3126,6 +3131,12 @@ const ItemRow = ({
    * they name no url, so there is no row for the mark to point at.
    */
   focus?: FocusSlot | null
+  /**
+   * Whether this list reserves the type gutter: every row draws the cell,
+   * filled on a task row with a `pill` and blank elsewhere, so the tree and
+   * the key or `#n` columns line up across both kinds. See `TYPE_GUTTER_COLS`.
+   */
+  typeGutter?: boolean
 }) => {
   // One vocabulary, because the row is saying the same thing either way: it is
   // leaving. Who caused it is the flash's business — the row's is that it will
@@ -3186,6 +3197,7 @@ const ItemRow = ({
     return (
       <Box width={cols} backgroundColor={selBg}>
         <Text color={colors.info}>{active ? "❯ " : "  "}</Text>
+        {typeGutter ? <Text>{typeGutterBlank}</Text> : null}
         {/* The computed run, not a bare corner. A collapsed group under a
             non-last story still needs its ancestor stem, or its column breaks
             while every visible sibling keeps theirs. */}
@@ -3199,6 +3211,7 @@ const ItemRow = ({
     return (
       <Box width={cols} backgroundColor={selBg}>
         <Text color={colors.info}>{active ? "❯ " : "  "}</Text>
+        {typeGutter ? <Text>{typeGutterBlank}</Text> : null}
         <Text dimColor>{prefix}</Text>
         <Text dimColor>{active ? "↵ " : "  "}</Text>
         <Text dimColor>show less</Text>
@@ -3208,6 +3221,11 @@ const ItemRow = ({
   if (item.kind === "task") {
     const note = item.note ?? ""
     const warning = item.warning ?? ""
+    const stage = item.stage
+      ? item.stage.icon
+        ? `${item.stage.icon} ${item.stage.label}`
+        : item.stage.label
+      : ""
     // Same refresh vocabulary the GitHub row has always had, which this branch
     // returned before ever reaching: a row arriving coalesces, a row leaving
     // dissolves, and either way it says which in words. Without it a refresh on
@@ -3259,7 +3277,9 @@ const ItemRow = ({
       cols -
         item.key.length -
         note.length -
-        (item.pill ? pillWidth(item.pill) + 1 : 0) -
+        // The type pill lives in the gutter now, priced once for the list.
+        (typeGutter ? TYPE_GUTTER_COLS : 0) -
+        (stage ? pillWidth(stage) + 1 : 0) -
         (warning ? warning.length + 3 : 0) -
         (farewellLabel ? pillWidth(farewellLabel) + 2 : 0) -
         prefix.length -
@@ -3292,6 +3312,27 @@ const ItemRow = ({
             <Text color={focusCell.color} bold>{`${focusCell.mark} `}</Text>
           ) : (
             <Text>{"  "}</Text>
+          )
+        ) : null}
+        {/* The type gutter: after the lead cell, before the tree, so the type
+            is read on the same scan as the cursor and the tree keeps one
+            column across task and PR rows. Blank behind an overlay — `Pill`
+            renders `@kud/ink-ui`'s own `Text`, which the backdrop cannot
+            shade — but still drawn, so the row does not reflow under it. */}
+        {typeGutter ? (
+          item.pill && !backdropped ? (
+            <>
+              <Pill
+                tone="soft"
+                variant={item.pillVariant ?? "muted"}
+                {...(item.pillColor ? { color: item.pillColor } : {})}
+              >
+                {typeGutterLabel(item.pill)}
+              </Pill>
+              <Text>{typeGutterPad(item.pill)}</Text>
+            </>
+          ) : (
+            <Text>{typeGutterBlank}</Text>
           )
         ) : null}
         <Text dimColor>{prefix}</Text>
@@ -3328,30 +3369,18 @@ const ItemRow = ({
         >
           {truncate(item.summary, titleMax)}
         </Text>
-        {/* Before the note, because a pill says what the row IS and a note says
-            what it hangs off — and a filled shape sitting after a dim reference
-            reads as belonging to the reference rather than to the row.
-
-            Suppressed entirely behind an overlay rather than recoloured: `Pill`
-            is `@kud/ink-ui`'s and renders that package's `Text`, so the shadow
-            above cannot reach its fill. A pill is an announcement, and behind a
-            The law: the column says where it sits, soft says what it is,
-            solid says something happened. This pill is a classification, so it
-            takes the quiet fill; `mergedLabel` and `farewellLabel` below are
-            events, so they stay solid. */}
-        {item.pill && !backdropped ? (
+        {/* The stage: chrome, so the quietest filled form — tonal, muted —
+            beside the note rather than instead of it. Suppressed behind an
+            overlay like every `Pill`, with its width still charged. */}
+        {stage && !backdropped ? (
           <>
             <Text> </Text>
-            <Pill
-              tone="soft"
-              variant={item.pillVariant ?? "muted"}
-              {...(item.pillColor ? { color: item.pillColor } : {})}
-            >
-              {item.pill}
+            <Pill tone="tonal" variant="muted">
+              {stage}
             </Pill>
           </>
         ) : null}
-        {/* Right after the pill: the pill says what the row is, the warning
+        {/* Right after the stage: the stage says where the row is, the warning
             says what is wrong with it, and the note is only where it hangs.
             The strip's own warn mark and colour, so one mark means one thing
             across the cockpit; the mark bold, the words not. Plain `Text`
@@ -3470,6 +3499,7 @@ const ItemRow = ({
       motion={motion}
       announcements={announcements}
       focusCell={focusCellFor(focus, "url" in item ? item.url : undefined)}
+      typeGutter={typeGutter}
     />
   )
 }
@@ -4697,6 +4727,9 @@ const BrowseScreen = ({
       i.kind === "task" ? Math.max(w, [...(i.marker ?? "")].length) : w,
     0,
   )
+  // The type gutter, on every row or none, and over the whole section for the
+  // same reason: a list whose task rows carry no type pays no columns for one.
+  const typeGutter = section.items.some((i) => i.kind === "task" && !!i.pill)
   /*
    * Labels every row in this section carries, and which therefore classify
    * nothing — the section header repeated once per row.
@@ -4901,6 +4934,7 @@ const BrowseScreen = ({
       // Presence only: every row holds the same two gutter columns while a
       // focus is on screen, so the shed ladder prices the cost once for all.
       focusGutter: focus !== undefined,
+      typeGutter,
     },
   )
 
@@ -6270,6 +6304,7 @@ const BrowseScreen = ({
                     shed={trailingShed}
                     numberCols={numberCols}
                     focus={focus}
+                    typeGutter={typeGutter}
                     // `i > 0` is window-relative and stays that way: the window's
                     // first row never draws its gap, and fitCount does not charge
                     // for one. The rule itself is gapsAbove, shared with fitCount so
