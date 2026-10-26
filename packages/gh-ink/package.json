@@ -1,6 +1,6 @@
 {
   "name": "@kud/gh-ink",
-  "version": "0.79.2",
+  "version": "0.80.0",
   "description": "Ink components for rendering GitHub PR review comments and health — controlled, presentation-only, built on @kud/ink-ui and fed by @kud/gh.",
   "type": "module",
   "main": "dist/index.js",
@@ -50,7 +50,7 @@
   },
   "dependencies": {
     "@kud/gh": "0.21.2",
-    "@kud/gh-workflow": "0.18.1",
+    "@kud/gh-workflow": "0.19.0",
     "zx": "8.8.5"
   },
   "devDependencies": {
