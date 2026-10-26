@@ -359,17 +359,16 @@ export const stripRows = (
           { text: ` ${fineCount} fine`, color: colors.muted },
         ]
       : []
-  const fineWidth = fineSpans.length
-    ? ITEM_GAP.length + widthOf(fineSpans)
-    : 0
+  const fineWidth = fineSpans.length ? ITEM_GAP.length + widthOf(fineSpans) : 0
 
   const candidates = issueCandidates(strip)
   const chosen =
     candidates.find(
       (c) => widthOf(c.spans) + (c.age ? ageWidth : 0) <= budget - fineWidth,
     ) ?? candidates[candidates.length - 1]!
-  const tail: StripSpan[] =
-    fineSpans.length ? [{ text: ITEM_GAP } as StripSpan, ...fineSpans] : []
+  const tail: StripSpan[] = fineSpans.length
+    ? [{ text: ITEM_GAP } as StripSpan, ...fineSpans]
+    : []
   const spans = [...chosen.spans, ...tail]
 
   return {
@@ -426,9 +425,8 @@ export const StatusStripLine = ({
   if (strip === undefined)
     return (
       <Box marginBottom={1}>
-        <Text>{"  "}</Text>
+        <Text dimColor>{`  ${label}  `}</Text>
         <Spinner />
-        <Text dimColor>{` ${label}  loading…`}</Text>
       </Box>
     )
   // The "no reading" mark, so the row with no strip at all and an item with no

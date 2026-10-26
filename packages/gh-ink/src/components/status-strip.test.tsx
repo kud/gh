@@ -222,9 +222,7 @@ describe("stripRows: what row 1 names", () => {
     // The six names on the line: only the problem items are named; the fine
     // three are behind the count.
     const names = new Set(
-      badDay.items
-        .filter((i) => i.state !== "ok" || i.alarm)
-        .map((i) => i.key),
+      badDay.items.filter((i) => i.state !== "ok" || i.alarm).map((i) => i.key),
     )
     const nameSpans = spans.filter((s) => names.has(s.text))
     expect(nameSpans).toHaveLength(names.size)
@@ -261,13 +259,16 @@ describe("stripRows: narrow rows shed the least actionable first", () => {
   const tail = `   ${OK} 3 fine`
   const noUnknowns =
     `billing: ${FAIL} alerting   search: ${WARN} slow · build ${FAIL}   ` +
-    `events: ${WARN} errors   payments: ${OK} · build ${FAIL}   ? 2` + tail
+    `events: ${WARN} errors   payments: ${OK} · build ${FAIL}   ? 2` +
+    tail
   const noBuilds =
     `billing: ${FAIL} alerting   search: ${WARN} slow · build ${FAIL}   ` +
-    `events: ${WARN} errors   build ${FAIL} 1   ? 2` + tail
+    `events: ${WARN} errors   build ${FAIL} 1   ? 2` +
+    tail
   // `search` was a warning with a red build: folding it counts it under both,
   // so the build it carried is never dropped with its name.
-  const noWarns = `billing: ${FAIL} alerting   ${WARN} 2   build ${FAIL} 2   ? 2` + tail
+  const noWarns =
+    `billing: ${FAIL} alerting   ${WARN} 2   build ${FAIL} 2   ? 2` + tail
   const nothingNamed = `${FAIL} 1   ${WARN} 2   build ${FAIL} 2   ? 2` + tail
 
   it("names everything while it fits", () => {
@@ -405,11 +406,12 @@ describe("StatusStripLine", () => {
     expect(heightOf(undefined)).toBe(heightOf(badDay))
   })
 
-  it("shows a loading state on the row while the strip is undefined", () => {
+  it("shows the label then a bare spinner while the strip is undefined", () => {
     const frame = frameOf(
       <StatusStripLine strip={undefined} label="services" width={80} />,
     )
-    expect(frame).toContain("services  loading…")
+    expect(frame).toMatch(/^  services  [⠀-⣿]/m)
+    expect(frame).not.toContain("loading")
     expect(frame).not.toContain("success")
   })
 
