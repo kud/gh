@@ -3037,7 +3037,6 @@ const ItemRow = ({
   pending,
   transitAt,
   prefix = "",
-  parent,
   sparkFrame = 0,
   cols,
   markerCols = 0,
@@ -3091,8 +3090,6 @@ const ItemRow = ({
    * draw three closing corners and no tree.
    */
   prefix?: string
-  /** This row has deeper rows hanging off it, so it opens the branch. */
-  parent?: boolean
   /** Just merged from this cockpit: sparkle in place, then the row is dropped. */
   merged?: boolean
   /** What the refresh just did to this row, for the length of the hold. */
@@ -3240,6 +3237,13 @@ const ItemRow = ({
     // instead, having context worth giving up; this one has only a note.
     // Width is still charged for a suppressed pill. A row that reflowed as the
     // overlay opened would move under the panel that just appeared over it.
+    //
+    // The fixed ten covers the cursor gutter, the transit cell, the ticket key's
+    // two-column trail and the row's margins. It used to be twelve: the ticket
+    // row once charged an opener cell ("┬ ") between the tree run and the
+    // transit cell, and when it went — so a child ticket's key could share one
+    // identity column with its PR siblings' `#n` — the two columns went back
+    // to the title, priced nothing.
     const titleMax = Math.max(
       1,
       cols -
@@ -3253,7 +3257,7 @@ const ItemRow = ({
         // The focus gutter, priced only when it is drawn: two columns on every
         // url-bearing row while a focus is on screen, none at all without one.
         (focus !== undefined ? 2 : 0) -
-        12,
+        10,
     )
     // Resolved once for the row: the mark on the row `g` would land on, blanks
     // on every other url-bearing row while a focus is on screen, nothing at
@@ -3262,24 +3266,17 @@ const ItemRow = ({
     return (
       <Box marginTop={gap ? 1 : 0} width={cols} backgroundColor={selBg}>
         <Text color={colors.info}>{active ? "❯ " : "  "}</Text>
-        <Text dimColor>{prefix}</Text>
-        {/* The branch this ticket opens, and it must come BEFORE the transit
-            cell: the children draw their own glyph run immediately after this
-            row's, so anything between the two pushes the trunk off the stem
-            below it. Immediately after the row's OWN prefix, not the cursor —
-            a story is itself a child, so it draws `└─┬ `, where the corner
-            closes the epic's branch and the tee opens its own. Sat after the transit cell for one release and
-            read as a stray character beside the ticket rather than the top of
-            the branch.
-            `parent` is a fact about the row BELOW, which is why the list
-            supplies it: a ticket whose PRs are all hidden behind `show-more`, or
-            one with none at all, correctly draws no branch. The cell is
-            fixed-width either way, so nothing shifts when a ticket gains or
-            loses its last PR. */}
-        <Text dimColor>{parent ? "┬ " : "  "}</Text>
-        {/* The focus gutter, between the tree run and the row's own cells: the
-            eye learns one place for it beside the marker cell, and a fixed cell
-            means the mark never moves the title it is pointing at. */}
+        {/* The focus gutter sits directly after the cursor, BEFORE the tree
+            run: the stem then just precedes the row's own first mark, the
+            marked row is found on the same scan that reads `❯`, and the tree
+            is the parent-child relationship only — the opener cell `┬ ` that
+            used to draw here, announcing a branch, went with this move, which
+            is why a child ticket's key now shares one identity column with
+            its PR siblings' `#n` and the stem "─" reaches the child row's
+            first glyph. The opener went on 2026-10-26 because it existed only
+            on ticket rows, so a child ticket was pushed two columns right of
+            the PR siblings it sits under. A fixed cell either way, so the
+            mark never moves the title it is pointing at. */}
         {focusCell !== undefined ? (
           focusCell ? (
             <Text color={focusCell.color} bold>{`${focusCell.mark} `}</Text>
@@ -3287,6 +3284,7 @@ const ItemRow = ({
             <Text>{"  "}</Text>
           )
         ) : null}
+        <Text dimColor>{prefix}</Text>
         {pending ? (
           <Text dimColor>{transitIcon + " "}</Text>
         ) : (
@@ -4540,8 +4538,9 @@ const BrowseScreen = ({
   // list's height budget so the tree never grows taller than the terminal
   // (Ink clips overflow from the top, which would eat the CI line).
   const reserveCiRow = ciStatusState != null
-  // The strip costs three: its issues row, its success row and the margin.
-  // Both rows are drawn in every state, so the reservation never moves.
+  // The strip costs two: its one line and the margin. The strip is one row in
+  // every state, so the reservation never moves. It used to cost three, when
+  // the fine services had a second row to themselves under a `success` title.
   const reserveStripRow = stripState != null
   // The focus slot costs the same two rows once it is drawn — or reserved by
   // either label prop, so the row reads `loading…` from the first paint rather
@@ -4558,7 +4557,7 @@ const BrowseScreen = ({
       10 -
       (filterActive ? 2 : 0) -
       (reserveCiRow ? 2 : 0) -
-      (reserveStripRow ? 3 : 0) -
+      (reserveStripRow ? 2 : 0) -
       (reserveFocusRow ? 2 : 0),
   )
 
@@ -6233,10 +6232,6 @@ const BrowseScreen = ({
                     // window boundary is not the end of a group, and slicing first
                     // would draw a closing corner wherever the scroll happens to cut.
                     prefix={treePrefix(section.items, viewStart + i)}
-                    parent={
-                      item.kind === "task" &&
-                      depthOf(section.items[viewStart + i + 1]) > depthOf(item)
-                    }
                     sparkFrame={sparkFrame}
                     // The PR rows end at `ROW_MAX_COLS`, and so do the two header
                     // kinds, so every band ends on the same column — see
@@ -7484,14 +7479,13 @@ export const App = ({
             draws, is the only height that does not move. Not a row more:
             Ink clips overflow from the TOP, so guessing high eats the header.
 
-            Every row drawn above the body comes out of it: the CI line and
-            the focus slot two rows each, the strip three (two lines since
-            2026-10-23), the same reservations BrowseScreen's listHeight
-            makes. Only the CI line used to, so a
-            cold cockpit with a strip and a focus slot ran three rows past the
-            terminal: Ink cleared and repainted the whole screen on every
-            spinner tick with the header scrolled off, and the frame dropped
-            back into place when the fetch landed. */}
+            Every row drawn above the body comes out of it: the CI line two
+            rows, the focus slot two, the strip two — its one line plus the
+            margin — the same reservations BrowseScreen's listHeight makes.
+            Only the CI line used to, so a cold cockpit with a strip and a
+            focus slot ran rows past the terminal: Ink cleared and repainted
+            the whole screen on every spinner tick with the header scrolled
+            off, and the frame dropped back into place when the fetch landed. */}
         <Box
           flexDirection="column"
           minHeight={Math.max(
@@ -7499,7 +7493,7 @@ export const App = ({
             rows -
               5 -
               (hasCiStatus ? 2 : 0) -
-              (hasStrip ? 3 : 0) -
+              (hasStrip ? 2 : 0) -
               (hasFocusSlot ? 2 : 0),
           )}
         >

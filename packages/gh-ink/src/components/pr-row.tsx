@@ -655,10 +655,12 @@ export const PrRow = ({
     // background covers its full measure, not just the inked cells.
     <Box width={cols} backgroundColor={selectionBg}>
       {gutter ? <Text color={colors.info}>{active ? "❯ " : "  "}</Text> : null}
-      <Text dimColor>{prefix}</Text>
-      {/* The focus gutter, right after the tree run and before the row's own
-          cells: the eye learns one place for it, and a fixed cell means the
-          mark never moves the title it is pointing at. Absent entirely without
+      {/* The focus gutter, directly after the cursor and BEFORE the tree run:
+          the stem then just precedes the row's own health cell, the marked row
+          is found on the same scan that reads `❯`, and a child row's tree stem
+          reaches the row's first glyph. It used to sit after the tree run,
+          which put it a different distance from the cursor on parents and
+          children — the scan read two places, not one. Absent entirely without
           a focus, so a host that never wired one draws byte-identical rows. */}
       {focusCell !== undefined ? (
         focusCell ? (
@@ -667,6 +669,7 @@ export const PrRow = ({
           <Text>{"  "}</Text>
         )
       ) : null}
+      <Text dimColor>{prefix}</Text>
       <Text color={color as any} bold>
         {icon + " "}
       </Text>

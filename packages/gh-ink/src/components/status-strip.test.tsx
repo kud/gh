@@ -51,7 +51,7 @@ const badDay: StatusStrip = {
 const fullIssues =
   `billing: ${FAIL} alerting   search: ${WARN} slow · build ${FAIL}   ` +
   `events: ${WARN} errors   payments: ${OK} · build ${FAIL}   ` +
-  `web: ? no data   cron: ? no data`
+  `web: ? no data   cron: ? no data   ${OK} 3 fine`
 
 // The width at which `issues` plus the title — and the age, when kept — fills
 // the row exactly. One column less must shed the next thing.
@@ -116,7 +116,7 @@ describe("stripRows: what row 1 names", () => {
   })
 
   it("draws the host's cause after the mark, and none for ok", () => {
-    const { issues, success } = stripRows(
+    const { issues } = stripRows(
       {
         title: "services",
         items: [
@@ -127,8 +127,27 @@ describe("stripRows: what row 1 names", () => {
       },
       200,
     )
-    expect(issues).toBe(`a: ${FAIL} errors · slow   b: ${WARN} errors`)
-    expect(success).toBe(`${OK} c`)
+    expect(issues).toBe(
+      `a: ${FAIL} errors · slow   b: ${WARN} errors   ${OK} 1 fine`,
+    )
+  })
+
+  it("counts the fine services after the last problem, tick green, words muted, nothing when none", () => {
+    const mixed: StatusStrip = {
+      title: "services",
+      items: [
+        { key: "a", state: "fail" },
+        { key: "b", state: "unknown" },
+      ],
+    }
+    expect(stripRows(mixed, 200).issues).toBe(`a: ${FAIL}   b: ? no data`)
+    const withFine: StatusStrip = {
+      ...mixed,
+      items: [...mixed.items, { key: "api", state: "ok" }],
+    }
+    expect(stripRows(withFine, 200).issues).toBe(
+      `a: ${FAIL}   b: ? no data   ${OK} 1 fine`,
+    )
   })
 
   it("says `no data` for unknown itself, ignoring any cause", () => {
@@ -142,8 +161,8 @@ describe("stripRows: what row 1 names", () => {
     expect(issues).toBe("web: ? no data")
   })
 
-  it("pulls a healthy service with a red build out of row 2 and names it", () => {
-    const { issues, success } = stripRows(
+  it("names the healthy-with-red-build service and counts the fine behind it", () => {
+    const { issues } = stripRows(
       {
         title: "services",
         items: [
@@ -153,8 +172,7 @@ describe("stripRows: what row 1 names", () => {
       },
       200,
     )
-    expect(issues).toBe(`payments: ${OK} · build ${FAIL}`)
-    expect(success).toBe(`${OK} api`)
+    expect(issues).toBe(`payments: ${OK} · build ${FAIL}   ${OK} 1 fine`)
   })
 
   it("appends the red build to a no-data item too", () => {
@@ -168,7 +186,7 @@ describe("stripRows: what row 1 names", () => {
     expect(issues).toBe(`web: ? no data · build ${FAIL}`)
   })
 
-  it("says `all N fine` only when nothing else would be on row 1", () => {
+  it("says `all N fine` only when nothing else would be on the line", () => {
     const calm: StatusStrip = {
       title: "services",
       at: AGED,
@@ -180,7 +198,6 @@ describe("stripRows: what row 1 names", () => {
     }
     const rows = stripRows(calm, 200, NOW)
     expect(rows.issues).toBe(`${OK} all 3 fine`)
-    expect(rows.success).toBe(`${OK} api · web · auth`)
     expect(rows.age).toBe("8m ago")
   })
 
@@ -198,18 +215,21 @@ describe("stripRows: what row 1 names", () => {
     expect(rows.issues).toBe(
       `? no data for all 3 · monitoring unreachable   search: build ${FAIL}`,
     )
-    expect(rows.success).toBe("nothing measured")
   })
 
-  it("draws every name bold in the default foreground, whatever its state", () => {
+  it("draws every name regular in the default foreground, whatever its state", () => {
     const { spans } = stripRows(badDay, 200, NOW)
-    const names = new Set(badDay.items.map((i) => i.key))
-    const nameSpans = [...spans.issues, ...spans.success].filter((s) =>
-      names.has(s.text),
+    // The six names on the line: only the problem items are named; the fine
+    // three are behind the count.
+    const names = new Set(
+      badDay.items
+        .filter((i) => i.state !== "ok" || i.alarm)
+        .map((i) => i.key),
     )
-    expect(nameSpans).toHaveLength(badDay.items.length)
+    const nameSpans = spans.filter((s) => names.has(s.text))
+    expect(nameSpans).toHaveLength(names.size)
     for (const span of nameSpans) {
-      expect(span.bold).toBe(true)
+      expect(span.bold).toBeFalsy()
       expect(span.color).toBeUndefined()
       expect(span.dim).toBeFalsy()
     }
@@ -217,26 +237,38 @@ describe("stripRows: what row 1 names", () => {
 
   it("colours the cross bold red, the warning bold amber, and no data grey", () => {
     const { spans } = stripRows(badDay, 200, NOW)
-    const fail = spans.issues.find((s) => s.text === FAIL)
-    const warn = spans.issues.find((s) => s.text === WARN)
-    const noData = spans.issues.find((s) => s.text === "? no data")
+    const fail = spans.find((s) => s.text === FAIL)
+    const warn = spans.find((s) => s.text === WARN)
+    const noData = spans.find((s) => s.text === "? no data")
     expect(fail).toMatchObject({ color: colors.error, bold: true })
     expect(warn).toMatchObject({ color: colors.warning, bold: true })
     expect(noData).toMatchObject({ dim: true })
   })
+
+  it("wears the fine count muted behind a green tick", () => {
+    const spans = stripRows(badDay, 200, NOW).spans
+    const fine = spans.find((s) => s.text === " 3 fine")
+    expect(fine).toBeDefined()
+    expect(fine).toMatchObject({ color: colors.muted })
+    expect(spans[spans.indexOf(fine!) - 1]).toMatchObject({
+      text: OK,
+      color: colors.success,
+    })
+  })
 })
 
-describe("stripRows: narrow row 1 sheds the least actionable first", () => {
+describe("stripRows: narrow rows shed the least actionable first", () => {
+  const tail = `   ${OK} 3 fine`
   const noUnknowns =
     `billing: ${FAIL} alerting   search: ${WARN} slow · build ${FAIL}   ` +
-    `events: ${WARN} errors   payments: ${OK} · build ${FAIL}   ? 2`
+    `events: ${WARN} errors   payments: ${OK} · build ${FAIL}   ? 2` + tail
   const noBuilds =
     `billing: ${FAIL} alerting   search: ${WARN} slow · build ${FAIL}   ` +
-    `events: ${WARN} errors   build ${FAIL} 1   ? 2`
+    `events: ${WARN} errors   build ${FAIL} 1   ? 2` + tail
   // `search` was a warning with a red build: folding it counts it under both,
   // so the build it carried is never dropped with its name.
-  const noWarns = `billing: ${FAIL} alerting   ${WARN} 2   build ${FAIL} 2   ? 2`
-  const nothingNamed = `${FAIL} 1   ${WARN} 2   build ${FAIL} 2   ? 2`
+  const noWarns = `billing: ${FAIL} alerting   ${WARN} 2   build ${FAIL} 2   ? 2` + tail
+  const nothingNamed = `${FAIL} 1   ${WARN} 2   build ${FAIL} 2   ? 2` + tail
 
   it("names everything while it fits", () => {
     expect(stripRows(badDay, fits(fullIssues), NOW).issues).toBe(fullIssues)
@@ -317,40 +349,17 @@ describe("stripRows: narrow row 1 sheds the least actionable first", () => {
       age: "",
     })
   })
-})
 
-describe("stripRows: row 2 is the whole list or the count", () => {
-  const strip: StatusStrip = {
-    title: "services",
-    items: [
-      { key: "api", state: "ok" },
-      { key: "web", state: "fail" },
-      { key: "auth", state: "ok" },
-      { key: "queue", state: "ok" },
-    ],
-  }
-  const list = `${OK} api · auth · queue`
-
-  it("lists every fine name behind one shared tick while it fits", () => {
-    expect(stripRows(strip, TITLES + list.length).success).toBe(list)
-  })
-
-  it("drops to the count alone, never a partial list", () => {
-    expect(stripRows(strip, TITLES + list.length - 1).success).toBe(
-      `${OK} 3 services`,
-    )
-  })
-
-  it("says `none` when things were measured and nothing is fine", () => {
-    const { success } = stripRows(
-      { title: "services", items: [{ key: "web", state: "warn" }] },
-      200,
-    )
-    expect(success).toBe("none")
+  it("keeps the fine count on the line at the width where the items just stop fitting", () => {
+    const rows = stripRows(badDay, fits(nothingNamed, false), NOW)
+    expect(rows.issues).toBe(nothingNamed)
+    expect(rows.age).toBe("")
   })
 })
 
 describe("StatusStripLine", () => {
+  // A sentinel below the strip, so the height is measured where the next row
+  // starts — trailing blank lines are not something a frame reports reliably.
   // A sentinel below the strip, so the height is measured where the next row
   // starts — trailing blank lines are not something a frame reports reliably.
   const heightOf = (strip: StatusStrip | null | undefined) => {
@@ -363,11 +372,11 @@ describe("StatusStripLine", () => {
     return frame.split("\n").findIndex((line) => line.includes("END"))
   }
 
-  it("keeps one height — two lines and a margin — loading, absent and ready", () => {
-    expect(heightOf(undefined)).toBe(3)
-    expect(heightOf(null)).toBe(3)
-    expect(heightOf(badDay)).toBe(3)
-    expect(heightOf({ title: "services", items: [] })).toBe(3)
+  it("keeps one height — one line and a margin — loading, absent and ready", () => {
+    expect(heightOf(undefined)).toBe(2)
+    expect(heightOf(null)).toBe(2)
+    expect(heightOf(badDay)).toBe(2)
+    expect(heightOf({ title: "services", items: [] })).toBe(2)
   })
 
   // The spinner owns its interval and clears it on unmount, so the frame that
@@ -396,12 +405,12 @@ describe("StatusStripLine", () => {
     expect(heightOf(undefined)).toBe(heightOf(badDay))
   })
 
-  it("shows a loading state on both rows while the strip is undefined", () => {
+  it("shows a loading state on the row while the strip is undefined", () => {
     const frame = frameOf(
       <StatusStripLine strip={undefined} label="services" width={80} />,
     )
     expect(frame).toContain("services  loading…")
-    expect(frame).toContain("· success")
+    expect(frame).not.toContain("success")
   })
 
   it("says there is no signal when the host has nothing configured", () => {
@@ -411,7 +420,7 @@ describe("StatusStripLine", () => {
     expect(frame).toContain("? services  no signal / not configured")
   })
 
-  it("draws the issues row and the success row under padded titles", () => {
+  it("draws the line under its padded title, fine count before the age", () => {
     // ink-testing-library's stdout is 100 columns, so the strip is kept
     // inside it rather than drawn at a width that would wrap.
     const strip: StatusStrip = {
@@ -426,9 +435,9 @@ describe("StatusStripLine", () => {
     const frame = frameOf(
       <StatusStripLine strip={strip} width={100} now={NOW} />,
     )
-    const [issues, success] = frame.split("\n")
-    expect(issues).toBe(`  services  billing: ${FAIL} alerting   8m ago`)
-    expect(success).toBe(`  success   ${OK} api · auth`)
+    expect(frame.split("\n")[0]).toBe(
+      `  services  billing: ${FAIL} alerting   ${OK} 2 fine   8m ago`,
+    )
   })
 
   it("draws a frame no wider than its width when it has to shed", () => {

@@ -39,11 +39,11 @@ export type StatusStrip = {
   /** What the row is a strip OF, in the host's words: `services`, say. */
   title: string
   items: StripItem[]
-  /** When this snapshot was taken (ms). Drawn as an age at the end of row 1. */
+  /** When this snapshot was taken (ms). Drawn as an age at the end of the line. */
   at?: number
   /**
    * Why every item is unknown, when it is one shared reason (`monitoring
-   * unreachable`). Turns row 1 into one sentence instead of one `? no data`
+   * unreachable`). Turns the line into one sentence instead of one `? no data`
    * per item — thirteen identical items say less than the sentence does.
    */
   note?: string
@@ -84,23 +84,30 @@ export const stripGlyph = (state: StripState): [string, string] => {
   }
 }
 
-// Two rows, from the 2026-10-23 ruling, which amends 2026-09-21's single roll
-// call (`✓ api  ? web  ⚠ search …`) after it proved unreadable: thirteen
-// marks in a line, each a different colour, with a fire beside a tick meaning
-// "serving fine, build red". Row 1, titled with the strip's own title, names
+// One row, always one row. The split into two rows on 2026-10-23 — which
+// amended 2026-09-21's single roll call (`✓ api  ? web  ⚠ search …`) because
+// thirteen marks in a line were unreadable, fire beside tick meaning "serving
+// fine, build red" — was amended again on 2026-10-26, when the ruling that
+// settled what a bold name means on this terminal arrived: some terminals
+// repaint bold default-foreground text in a custom colour, so the bold names
+// the two-row layout drew for the fine services read as a fourth state the
+// strip never declared. The strip is one line again, titled with its own
+// title, naming
 // ONLY what needs a look, worst first, as `name: mark cause · build ✕`, three
-// spaces apart because `·` already lives inside an item. Row 2, `success`, is
-// one shared tick and then every name that is fine. Both rows are always
-// drawn, so the strip never changes height when a service turns red — which
-// is exactly the moment the board below must not jump.
+// spaces apart because `·` already lives inside an item. Fine services are
+// counted, not listed: on a busy day the last problem item is followed by
+// `✓ N fine`, green tick, muted words, and on a calm day the whole line is
+// `✓ all N fine`. Either way the row never changes height when a service
+// turns red, which is exactly the moment the board below must not jump.
 //
-// Every name is bold in the default foreground, whatever its state. The old
-// ruling let the name carry the weight — red and bold for a fire, dim for no
-// reading — and a row of coloured names became a second code beside the
-// marks. The mark and the cause word carry the state now; only `?` and its
-// `no data` go grey. The solid failure Pill and the Nerd fire went with it:
-// a bold red cross beside a red word already says "failure", and the build
-// reads as the word `build` and the same cross, after a dim `·`.
+// No name on the line is bold. Some terminals paint bold default-foreground
+// text in a custom colour, so a bold name of any state reads as tinted ink,
+// a third coding beside the marks — a whole row of such names reads as a
+// second state set. Names are regular in the default foreground; the mark and the
+// cause word carry the state. Only `?` and its `no data` go grey. The solid
+// failure Pill and the Nerd fire stay away for the old reason: a bold red
+// cross beside a red word already says "failure", and the build reads as the
+// word `build` and the same cross, after a dim `·`.
 //
 // Every token is priced at its string length, which is its cell width: the
 // marks are single UTF-16 units drawing one cell each, `?` included, and no
@@ -113,7 +120,6 @@ export const stripGlyph = (state: StripState): [string, string] => {
 const OK = stripGlyph("ok")[0]
 const WARN = stripGlyph("warn")[0]
 const FAIL = stripGlyph("fail")[0]
-const SUCCESS_TITLE = "success"
 const ITEM_GAP = "   "
 
 /** One run of text in one style — the unit both the budget and the renderer read. */
@@ -133,9 +139,9 @@ const textOf = (spans: StripSpan[]): string =>
 const joinWith = (groups: StripSpan[][], sep: StripSpan): StripSpan[] =>
   groups.flatMap((group, i) => (i === 0 ? group : [sep, ...group]))
 
-// Where an item sits on row 1, worst first. A red build on a healthy service
-// outranks "no data": the build is something to act on, the missing reading
-// is not. `null` is fine — it belongs on row 2 and never on row 1.
+// Where an item sits on the strip. A red build on a healthy service outranks
+// "no data": the build is something to act on, the missing reading is not.
+// `null` means the item is fine and may be counted without being named.
 type Rank = "fail" | "warn" | "build" | "unknown"
 const SEVERITY: Record<Rank, number> = {
   fail: 0,
@@ -158,7 +164,7 @@ const buildSpans = (): StripSpan[] => [
 ]
 
 const nameSpans = (item: StripItem): StripSpan[] => [
-  { text: item.key, bold: true },
+  { text: item.key },
   dim(":"),
   { text: " " },
 ]
@@ -202,7 +208,7 @@ const countSpans = (rank: Rank, n: number): StripSpan[] => {
   }
 }
 
-// Row 1 with every rank in `folded` reduced to a count and only the first
+// The line with every rank in `folded` reduced to a count and only the first
 // `failsNamed` failures named. A folded item counts under its state AND, when
 // its build is red, under `build ✕` — so folding a warning never silently
 // drops the red build that rode on it.
@@ -238,7 +244,7 @@ const foldedIssues = (
 
 type Candidate = { spans: StripSpan[]; age: boolean }
 
-// Row 1's forms, most to least detailed; the first that fits is drawn and the
+// The row's forms, most to least detailed; the first that fits is drawn and the
 // last is drawn regardless. Narrowing sheds the least actionable first: the
 // no-data items fold to `? N`, then the healthy-with-red-build ones to
 // `build ✕ N`, then the warnings to `⚠ N`. The failures stay named longest —
@@ -275,13 +281,14 @@ const issueCandidates = (strip: StatusStrip): Candidate[] => {
     .filter((i) => rankOf(i) !== null)
     .sort((a, b) => SEVERITY[rankOf(a)!] - SEVERITY[rankOf(b)!])
   if (bad.length === 0) {
-    // "All N fine" only when row 1 would otherwise be empty — it is the
-    // answer on a calm day, so its words are the one bold sentence here.
+    // "All N fine" only when the line would otherwise be empty — it is the
+    // answer on a calm day. Regular weight: bold default-foreground is
+    // restyled by some terminals, and the tick already carries the verdict.
     const calm: StripSpan[] =
       items.length > 0
         ? [
             { text: OK, color: colors.success },
-            { text: ` all ${items.length} fine`, bold: true },
+            { text: ` all ${items.length} fine` },
           ]
         : [dim("? no data")]
     return [
@@ -307,78 +314,69 @@ const issueCandidates = (strip: StatusStrip): Candidate[] => {
   return candidates
 }
 
-// Row 2 is the whole list of fine names or their count, never a partial list:
-// a list that silently ends after the fourth name hides arbitrary services,
-// and a reader cannot tell which.
-const successSpans = (strip: StatusStrip, budget: number): StripSpan[] => {
-  const fine = strip.items.filter((i) => rankOf(i) === null)
-  if (fine.length === 0)
-    return [
-      dim(
-        strip.items.every((i) => i.state === "unknown")
-          ? "nothing measured"
-          : "none",
-      ),
-    ]
-  const tick: StripSpan = { text: OK, color: colors.success }
-  const full = [
-    tick,
-    { text: " " },
-    ...joinWith(
-      fine.map((i) => [{ text: i.key, bold: true }]),
-      dim(" · "),
-    ),
-  ]
-  if (widthOf(full) <= budget) return full
-  return [tick, { text: ` ${fine.length} ${strip.title}` }]
-}
-
 export type StripRows = {
-  /** Row 1 as plain text, without its title or age. */
+  /** The line as plain text, without its title or age. */
   issues: string
-  /** Row 2 as plain text, without its title. */
-  success: string
   /** The age as drawn (`8m ago`), or `""` when it was shed or never stamped. */
   age: string
-  /** The same rows as styled runs — exactly what the renderer draws. */
-  spans: { issues: StripSpan[]; success: StripSpan[] }
-  /** Both titles, padded to one width so the rows' content lines up. */
-  titles: [string, string]
+  /** The same line as styled runs — exactly what the renderer draws. */
+  spans: StripSpan[]
+  /** The title, as drawn, so a host laying out its own row lines up. */
+  title: string
 }
 
 /**
- * Both rows of the strip at the width they have to fit. Exported so a test —
- * or a host laying out its own row — can ask the same question the renderer
- * asks.
+ * The strip's one line at the width it has to fit. Exported so a test — or a
+ * host laying out its own row — can ask the same question the renderer asks.
+ * The fine services are reserved BEFORE the problem items are chosen: their
+ * count is paid for first, so the widest candidate that fits still leaves the
+ * tail on the row, and truncation never sheds it.
  */
 export const stripRows = (
   strip: StatusStrip,
   width: number,
   now = Date.now(),
 ): StripRows => {
-  const titleWidth = Math.max(strip.title.length, SUCCESS_TITLE.length)
-  const titles: [string, string] = [
-    `  ${strip.title.padEnd(titleWidth)}  `,
-    `  ${SUCCESS_TITLE.padEnd(titleWidth)}  `,
-  ]
+  const title = `  ${strip.title}  `
   const label = ageLabel(strip.at, now)
   const ageText = label ? `${label} ago` : ""
   const ageWidth = ageText ? 3 + ageText.length : 0
-  const budget = width - titles[0].length
+  const budget = width - title.length
+
+  // Counted, never listed: the names of the fine services could hide at
+  // arbitrary places in a truncated run, and a reader could not tell which
+  // were fine — the count can be truncated in nobody's interest but its own,
+  // which is why its width is reserved before the problems are chosen. The
+  // tail is separated from the items exactly as the items are separated.
+  const hasProblems = strip.items.some((i) => rankOf(i) !== null)
+  const fineCount = hasProblems
+    ? strip.items.filter((i) => rankOf(i) === null).length
+    : 0
+  const fineSpans: StripSpan[] =
+    fineCount > 0
+      ? [
+          { text: OK, color: colors.success },
+          { text: ` ${fineCount} fine`, color: colors.muted },
+        ]
+      : []
+  const fineWidth = fineSpans.length
+    ? ITEM_GAP.length + widthOf(fineSpans)
+    : 0
 
   const candidates = issueCandidates(strip)
   const chosen =
     candidates.find(
-      (c) => widthOf(c.spans) + (c.age ? ageWidth : 0) <= budget,
+      (c) => widthOf(c.spans) + (c.age ? ageWidth : 0) <= budget - fineWidth,
     ) ?? candidates[candidates.length - 1]!
-  const success = successSpans(strip, budget)
+  const tail: StripSpan[] =
+    fineSpans.length ? [{ text: ITEM_GAP } as StripSpan, ...fineSpans] : []
+  const spans = [...chosen.spans, ...tail]
 
   return {
-    issues: textOf(chosen.spans),
-    success: textOf(success),
+    issues: textOf(spans),
     age: chosen.age ? ageText : "",
-    spans: { issues: chosen.spans, success },
-    titles,
+    spans,
+    title,
   }
 }
 
@@ -402,11 +400,11 @@ const Spans = ({ spans }: { spans: StripSpan[] }) => (
 )
 
 /**
- * A standing two-line row, the same height across loading / absent / ready
- * — two lines and one margin — so the content below it never jumps: the same
+ * A standing single-line row, the same height across loading / absent / ready —
+ * one line and one margin — so the content below it never jumps: the same
  * contract `CiStatusLine` keeps, and drawn in the same place, because a reader
- * learns one row of glances. The host reserves those three rows out of its
- * own budget; a fourth here would clip the frame from the top.
+ * learns one row of glances. The host reserves those two rows out of its own
+ * budget; a third here would clip the frame from the top.
  */
 export const StatusStripLine = ({
   strip,
@@ -423,44 +421,33 @@ export const StatusStripLine = ({
   now?: number
 }) => {
   // A live spinner rather than a static `·`, so a first poll that is taking
-  // its time reads as working rather than stuck. It is one cell wide, the same
-  // as the dot on the row beneath it, and unmounts the moment data arrives.
+  // its time reads as working rather than stuck. It is one cell wide, and
+  // unmounts the moment data arrives.
   if (strip === undefined)
     return (
-      <Box flexDirection="column" marginBottom={1}>
-        <Box>
-          <Text>{"  "}</Text>
-          <Spinner />
-          <Text dimColor>{` ${label}  loading…`}</Text>
-        </Box>
-        <Text dimColor>{`  · ${SUCCESS_TITLE}`}</Text>
+      <Box marginBottom={1}>
+        <Text>{"  "}</Text>
+        <Spinner />
+        <Text dimColor>{` ${label}  loading…`}</Text>
       </Box>
     )
   // The "no reading" mark, so the row with no strip at all and an item with no
-  // reading say it with the same shape. The second line is drawn blank rather
-  // than left out: the height is the contract, not the content.
+  // reading say it with the same shape.
   if (strip === null)
     return (
-      <Box flexDirection="column" marginBottom={1}>
+      <Box marginBottom={1}>
         <Text dimColor>
           {`  ${stripGlyph("unknown")[0]} ${label}  no signal / not configured`}
         </Text>
-        <Text> </Text>
       </Box>
     )
 
-  const { spans, age, titles } = stripRows(strip, width, now)
+  const { spans, age, title } = stripRows(strip, width, now)
   return (
-    <Box flexDirection="column" marginBottom={1}>
-      <Box>
-        <Text dimColor>{titles[0]}</Text>
-        <Spans spans={spans.issues} />
-        {age ? <Text dimColor>{`   ${age}`}</Text> : null}
-      </Box>
-      <Box>
-        <Text dimColor>{titles[1]}</Text>
-        <Spans spans={spans.success} />
-      </Box>
+    <Box marginBottom={1}>
+      <Text dimColor>{title}</Text>
+      <Spans spans={spans} />
+      {age ? <Text dimColor>{`   ${age}`}</Text> : null}
     </Box>
   )
 }

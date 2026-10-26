@@ -272,7 +272,8 @@ describe("every other full-screen state", () => {
   })
 
   it("reserves the strip and focus rows out of the loading body, not on top of it", async () => {
-    // The services strip costs three rows above the body and the focus slot two.
+    // The strip costs two rows above the body — one line plus its margin, the
+    // second row of the old two-row strip gone with it — and the focus slot two.
     // The body used to subtract only the CI line, so with both drawn the cold
     // frame ran four rows past its budget and three past the terminal: Ink
     // cleared and repainted the whole screen on every spinner tick, the
