@@ -959,6 +959,10 @@ const treePrefix = (items: readonly AnyItem[], i: number): string => {
   return prefix + (isLastAtDepth(items, i) ? "└─ " : "├─ ")
 }
 
+// The mark a top-level row its children hang from carries, as aicommit opens a
+// step: `⊙ Files` with its lines hanging below.
+const TREE_ROOT = "⊙"
+
 // Does the next row hang off this one? Its stem drops from this row's own
 // transit cell, so a child row marks the joint there.
 const opensBranch = (items: readonly AnyItem[], i: number): boolean =>
@@ -3346,13 +3350,17 @@ const ItemRow = ({
         {/* An idle child row runs its stem through the empty transit cell up
             to the priority mark (`├─── ⌃`), so the branch visibly reaches the
             row it names, and marks with `┬` the joint where its own child drops from
-            it; a transit glyph, when there is one, takes the cell back. */}
+            it. A top-level row its children hang from roots them with `⊙` in
+            the same cell, directly above their stems. A transit glyph, when
+            there is one, takes the cell back. */}
         {prefix && !pending && !transient ? (
           <Text dimColor>{prefix.slice(0, -1) + (opensBranch ? "─┬ " : "── ")}</Text>
+        ) : !prefix && opensBranch && !pending && !transient ? (
+          <Text dimColor>{TREE_ROOT + " "}</Text>
         ) : (
           <Text dimColor>{prefix}</Text>
         )}
-        {prefix && !pending && !transient ? null : pending ? (
+        {!pending && !transient && (prefix || opensBranch) ? null : pending ? (
           <Text dimColor>{transitIcon + " "}</Text>
         ) : (
           <Text bold color={transient ? TRANSIT_COLOUR[transient] : undefined}>

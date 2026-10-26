@@ -204,4 +204,16 @@ describe("the child stem", () => {
     expect(parent).toMatch(/└──┬ ▲ SHOP-2/)
     expect(lineOf(frame, "#214").indexOf("└")).toBe(parent.indexOf("┬"))
   })
+
+  it("roots a top-level row's children with ⊙ above their stems, and only then", async () => {
+    const frame = await mount([
+      task("SHOP-1", { pill: "epic" }),
+      task("SHOP-2", { indent: true, pill: "story" }),
+      task("SHOP-3", { pill: "task" }),
+    ])
+    const root = lineOf(frame, "SHOP-1")
+    expect(root).toMatch(/⊙ ▲ SHOP-1/)
+    expect(lineOf(frame, "SHOP-2").indexOf("└")).toBe(root.indexOf("⊙"))
+    expect(lineOf(frame, "SHOP-3")).not.toContain("⊙")
+  })
 })
