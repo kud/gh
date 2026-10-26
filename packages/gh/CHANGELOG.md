@@ -1,5 +1,11 @@
 # @kud/gh
 
+## 0.21.2
+
+### Patch Changes
+
+- 430c986: `recentlyDone` now asks for the most recently updated PRs first. Search ordered them by creation, so with more closed PRs in the window than the page holds, a long-lived PR merged today could be missing while newer, older-closed ones filled the page.
+
 ## 0.21.1
 
 ### Patch Changes

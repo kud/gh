@@ -1,5 +1,12 @@
 # @kud/gh-workflow
 
+## 0.18.1
+
+### Patch Changes
+
+- Updated dependencies [430c986]
+  - @kud/gh@0.21.2
+
 ## 0.18.0
 
 ### Minor Changes
