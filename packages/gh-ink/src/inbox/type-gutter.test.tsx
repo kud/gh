@@ -193,4 +193,15 @@ describe("the child stem", () => {
     ])
     expect(lineOf(frame, "SHOP-2")).toMatch(/└─── ▲ SHOP-2/)
   })
+
+  it("joins a grandchild's stem to its parent's with ┬, on the same column", async () => {
+    const frame = await mount([
+      task("SHOP-1", { pill: "epic" }),
+      task("SHOP-2", { indent: true, pill: "story" }),
+      { ...pr(214), depth: 2 },
+    ])
+    const parent = lineOf(frame, "SHOP-2")
+    expect(parent).toMatch(/└──┬ ▲ SHOP-2/)
+    expect(lineOf(frame, "#214").indexOf("└")).toBe(parent.indexOf("┬"))
+  })
 })

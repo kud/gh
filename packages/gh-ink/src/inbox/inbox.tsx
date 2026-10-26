@@ -959,6 +959,11 @@ const treePrefix = (items: readonly AnyItem[], i: number): string => {
   return prefix + (isLastAtDepth(items, i) ? "└─ " : "├─ ")
 }
 
+// Does the next row hang off this one? Its stem drops from this row's own
+// transit cell, so a child row marks the joint there.
+const opensBranch = (items: readonly AnyItem[], i: number): boolean =>
+  depthOf(items[i + 1]) > depthOf(items[i])
+
 /**
  * Every URL in the tree the cursor is standing in: the row that opens it, then
  * each indented row hanging off it, in the order they are drawn.
@@ -3051,6 +3056,7 @@ const ItemRow = ({
   pending,
   transitAt,
   prefix = "",
+  opensBranch = false,
   sparkFrame = 0,
   cols,
   markerCols = 0,
@@ -3105,6 +3111,8 @@ const ItemRow = ({
    * draw three closing corners and no tree.
    */
   prefix?: string
+  /** A child row hangs directly below this one: its stem joins here (`┬`). */
+  opensBranch?: boolean
   /** Just merged from this cockpit: sparkle in place, then the row is dropped. */
   merged?: boolean
   /** What the refresh just did to this row, for the length of the hold. */
@@ -3337,9 +3345,10 @@ const ItemRow = ({
         ) : null}
         {/* An idle child row runs its stem through the empty transit cell up
             to the priority mark (`├─── ⌃`), so the branch visibly reaches the
-            row it names; a transit glyph, when there is one, takes the cell back. */}
+            row it names, and marks with `┬` the joint where its own child drops from
+            it; a transit glyph, when there is one, takes the cell back. */}
         {prefix && !pending && !transient ? (
-          <Text dimColor>{prefix.slice(0, -1) + "── "}</Text>
+          <Text dimColor>{prefix.slice(0, -1) + (opensBranch ? "─┬ " : "── ")}</Text>
         ) : (
           <Text dimColor>{prefix}</Text>
         )}
@@ -6283,6 +6292,7 @@ const BrowseScreen = ({
                     // window boundary is not the end of a group, and slicing first
                     // would draw a closing corner wherever the scroll happens to cut.
                     prefix={treePrefix(section.items, viewStart + i)}
+                    opensBranch={opensBranch(section.items, viewStart + i)}
                     sparkFrame={sparkFrame}
                     // The PR rows end at `ROW_MAX_COLS`, and so do the two header
                     // kinds, so every band ends on the same column — see
