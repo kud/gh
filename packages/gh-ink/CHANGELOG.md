@@ -1,5 +1,11 @@
 # @kud/gh-ink
 
+## 0.80.4
+
+### Patch Changes
+
+- 61c3ede: Titles drop the emoji presentation selector before they are drawn. An emoji like `🏗️` or `♻️` measured two columns but was drawn as one by most terminals, which shifted the rest of its line a column left and broke the frame of any overlay drawn across it.
+
 ## 0.80.3
 
 ### Patch Changes
