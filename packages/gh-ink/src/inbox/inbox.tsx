@@ -3335,8 +3335,15 @@ const ItemRow = ({
             <Text>{typeGutterBlank}</Text>
           )
         ) : null}
-        <Text dimColor>{prefix}</Text>
-        {pending ? (
+        {/* An idle child row runs its stem through the empty transit cell up
+            to the priority mark (`├─── ⌃`), so the branch visibly reaches the
+            row it names; a transit glyph, when there is one, takes the cell back. */}
+        {prefix && !pending && !transient ? (
+          <Text dimColor>{prefix.slice(0, -1) + "── "}</Text>
+        ) : (
+          <Text dimColor>{prefix}</Text>
+        )}
+        {prefix && !pending && !transient ? null : pending ? (
           <Text dimColor>{transitIcon + " "}</Text>
         ) : (
           <Text bold color={transient ? TRANSIT_COLOUR[transient] : undefined}>

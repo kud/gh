@@ -184,3 +184,13 @@ describe("the stage pill", () => {
       expect([...line].length).toBeLessThanOrEqual(COLS + 4)
   })
 })
+
+describe("the child stem", () => {
+  it("runs through the idle transit cell up to the priority mark", async () => {
+    const frame = await mount([
+      task("SHOP-1", { pill: "story" }),
+      task("SHOP-2", { indent: true, pill: "subtask" }),
+    ])
+    expect(lineOf(frame, "SHOP-2")).toMatch(/└─── ▲ SHOP-2/)
+  })
+})
