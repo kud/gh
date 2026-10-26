@@ -1,5 +1,11 @@
 # @kud/gh-ink
 
+## 0.80.5
+
+### Patch Changes
+
+- 20edd64: The move-status menu now runs in the order work moves: transitions landing in a to-do status first, then in-progress, then done. Within each group the configured moves keep their place and the rest follow the workflow's own order instead of the alphabet.
+
 ## 0.80.4
 
 ### Patch Changes
