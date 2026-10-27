@@ -1,5 +1,11 @@
 # @kud/gh-ink
 
+## 0.82.0
+
+### Minor Changes
+
+- 51349c4: The PR action menu can now flip your own pull request between draft and ready for review (`D`), refreshing the row once GitHub confirms.
+
 ## 0.81.1
 
 ### Patch Changes
