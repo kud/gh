@@ -1,5 +1,16 @@
 # @kud/gh-ink
 
+## 0.83.0
+
+### Minor Changes
+
+- 5c43f5e: The inbox search takes GitHub-style qualifiers: `author:` (with `@me`, and bot logins matched in either spelling) and `repo:`, a leading `-` to exclude any term, and quoted phrases. A single plain word filters exactly as before.
+
+### Patch Changes
+
+- Updated dependencies [5c43f5e]
+  - @kud/gh-workflow@0.20.0
+
 ## 0.82.0
 
 ### Minor Changes
