@@ -165,6 +165,51 @@ describe("the PR action menu's order", () => {
   })
 })
 
+describe("the draft toggle's offer window", () => {
+  // Shares the base PR's shape, pointed at its own invented repo so the
+  // author/health pair, not the fixture default, is what each case reads.
+  const toggled = (author: string, health?: GHItem["health"]): GHItem => ({
+    ...pr,
+    repo: "acme/api-gateway",
+    url: "https://github.com/acme/api-gateway/pull/42",
+    author,
+    health,
+  })
+
+  it("offers the viewer's own draft a way back to review", () => {
+    const rows = buildActions(toggled("octocat", "draft"), "octocat", () => {})
+    const flip = rows.find((a) => a.label === "Mark ready for review")
+    expect(flip?.group).toBe("act")
+    expect(rows.map((a) => a.label)).not.toContain("Convert to draft")
+  })
+
+  it("offers the viewer's own open PR the way back to draft", () => {
+    const rows = buildActions(toggled("octocat", "none"), "octocat", () => {})
+    const flip = rows.find((a) => a.label === "Convert to draft")
+    expect(flip?.group).toBe("act")
+    expect(rows.map((a) => a.label)).not.toContain("Mark ready for review")
+  })
+
+  it("offers neither on somebody else's PR", () => {
+    const rows = buildActions(toggled("alice", "draft"), "octocat", () => {})
+      .map((a) => a.label)
+    expect(rows).not.toContain("Mark ready for review")
+    expect(rows).not.toContain("Convert to draft")
+  })
+
+  it("offers neither on the viewer's own settled PRs", () => {
+    for (const health of ["merged", "closed"] as const) {
+      const rows = buildActions(
+        toggled("octocat", health),
+        "octocat",
+        () => {},
+      ).map((a) => a.label)
+      expect(rows).not.toContain("Mark ready for review")
+      expect(rows).not.toContain("Convert to draft")
+    }
+  })
+})
+
 describe("the issue action menu's order", () => {
   it("pins every row's label in place", () => {
     const labels = buildActions(

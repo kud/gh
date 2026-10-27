@@ -2139,6 +2139,47 @@ export const buildActions = (
     })
   }
 
+  // The draft flip is the author's move — on everyone else's row the menu
+  // stays quieter — and it is live on nothing settled: `gh pr ready --undo`
+  // sets nothing on a merged or closed PR. Which direction reads off
+  // `health`, not a second isDraft field — a draft is one of the tokens the
+  // minimal fetch keeps honest (see GHItem's `health` comment in gh-workflow).
+  if (
+    item.kind === "pr" &&
+    login &&
+    item.author === login &&
+    item.health !== "merged" &&
+    item.health !== "closed"
+  ) {
+    const draft = item.health === "draft"
+    actions.push({
+      label: draft ? "Mark ready for review" : "Convert to draft",
+      hint: "D",
+      group: "act",
+      icon: draft ? "\uEA64" : "\uF4DD",
+      run: () => {
+        showFlash(
+          draft
+            ? `⋯ Marking #${item.number} ready…`
+            : `⋯ Converting #${item.number} to draft…`,
+        )
+        const flip = draft
+          ? quietly`gh pr ready ${item.number} --repo ${item.repo}`
+          : quietly`gh pr ready ${item.number} --repo ${item.repo} --undo`
+        void flip
+          .then(() => {
+            showFlash(
+              draft
+                ? `✓ #${item.number} is ready for review`
+                : `✓ #${item.number} is now a draft`,
+            )
+            ext?.onActed?.()
+          })
+          .catch((e) => showFlash(`✗ #${item.number}: ${explainGhAction(e)}`))
+      },
+    })
+  }
+
   if (item.kind === "pr" && item.branch) {
     actions.push({
       label: "Copy branch name",
