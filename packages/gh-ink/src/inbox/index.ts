@@ -67,6 +67,7 @@ export {
   type JiraTransition,
   type JiraAvailableTransition,
   type JiraTransitionsFor,
+  type JiraStatusIcon,
   type TabForStatus,
   type CiStatus,
   type CiStatusState,

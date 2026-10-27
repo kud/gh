@@ -364,6 +364,16 @@ export type JiraTransitionsFor = (
   ticket: string,
 ) => Promise<JiraAvailableTransition[]>
 
+/**
+ * The glyph a status wears in the move submenu, by where a move lands. The host
+ * owns it because the statuses are its workflow's; `undefined` leaves the row
+ * bare. Nerd-font only, like every menu glyph.
+ */
+export type JiraStatusIcon = (status: {
+  name: string
+  category?: string
+}) => string | undefined
+
 // The session's live-transition cache, keyed by ticket with the status the
 // answer was true for. The submenu is keyed off the row's CURRENT status, so
 // a move that lands the ticket elsewhere misses the old entry on its own —
@@ -479,6 +489,7 @@ export const jiraMoveActions = (
     name: string
     category?: string
   }) => OptimisticHandle | undefined,
+  statusIcon?: JiraStatusIcon,
 ): Action[] => {
   const execute = (
     to: OrderedJiraMove["to"],
@@ -496,10 +507,12 @@ export const jiraMoveActions = (
       })
       .catch((err) => (held ? held.failed(err) : showFlash(failed)))
   }
-  return moves.map(({ label, transition, resolutions, to }) =>
-    resolutions && resolutions.length > 0
+  return moves.map(({ label, transition, resolutions, to }) => {
+    const icon = to ? statusIcon?.(to) : undefined
+    return resolutions && resolutions.length > 0
       ? {
           label,
+          ...(icon && { icon }),
           hint: "",
           run: () => {},
           subActions: resolutions.map((resolution) => ({
@@ -519,6 +532,7 @@ export const jiraMoveActions = (
         }
       : {
           label,
+          ...(icon && { icon }),
           hint: "",
           run: () => {
             showFlash(`⋯ Moving to ${label}…`)
@@ -529,8 +543,8 @@ export const jiraMoveActions = (
               `✗ Move to ${label} failed`,
             )
           },
-        },
-  )
+        }
+  })
 }
 
 /** The single dim row a move submenu shows while the hook is in flight. */
@@ -560,6 +574,7 @@ export const openJiraMoves = (deps: {
     name: string
     category?: string
   }) => OptimisticHandle | undefined
+  statusIcon?: JiraStatusIcon
 }): void => {
   const {
     ticket,
@@ -571,6 +586,7 @@ export const openJiraMoves = (deps: {
     showFlash,
     onActed,
     optimistic,
+    statusIcon,
   } = deps
   // An empty answer still earns a row: `open([])` is a deliberate no-op (see
   // useActionMenu), so opening nothing would leave the loading row — or, on a
@@ -579,7 +595,14 @@ export const openJiraMoves = (deps: {
     const ordered = orderJiraMoves(moves, configured)
     open(
       ordered.length > 0
-        ? jiraMoveActions(ticket, ordered, showFlash, onActed, optimistic)
+        ? jiraMoveActions(
+            ticket,
+            ordered,
+            showFlash,
+            onActed,
+            optimistic,
+            statusIcon,
+          )
         : [
             {
               label: "No transitions available",
@@ -3371,7 +3394,9 @@ const ItemRow = ({
             the same cell, directly above their stems. A transit glyph, when
             there is one, takes the cell back. */}
         {prefix && !pending && !transient ? (
-          <Text dimColor>{prefix.slice(0, -1) + (opensBranch ? "─┬ " : "── ")}</Text>
+          <Text dimColor>
+            {prefix.slice(0, -1) + (opensBranch ? "─┬ " : "── ")}
+          </Text>
         ) : !prefix && opensBranch && !pending && !transient ? (
           <Text dimColor>{TREE_ROOT + " "}</Text>
         ) : (
@@ -4329,6 +4354,7 @@ const BrowseScreen = ({
   jiraSetupHint,
   jiraTransitions,
   jiraTransitionsFor,
+  jiraStatusIcon,
   onRefresh,
   onActed,
   onSettled,
@@ -4428,6 +4454,7 @@ const BrowseScreen = ({
   // against `jiraTransitions` above, which keeps naming the labels); absent,
   // the static list is the whole submenu, exactly as before.
   jiraTransitionsFor?: JiraTransitionsFor
+  jiraStatusIcon?: JiraStatusIcon
   onRefresh?: () => void
   /** A mutation landed: drop the cached glance now, refresh shortly. */
   onActed?: () => void
@@ -5115,6 +5142,7 @@ const BrowseScreen = ({
       showFlash,
       onActed,
       optimistic: optimisticMove ? (to) => optimisticMove(task, to) : undefined,
+      statusIcon: jiraStatusIcon,
     })
   }
 
@@ -6507,6 +6535,7 @@ export const App = ({
   jiraSetupHint,
   jiraTransitions,
   jiraTransitionsFor,
+  jiraStatusIcon,
   tabForStatus,
   hasCiStatus,
   ciJob,
@@ -6596,6 +6625,9 @@ export const App = ({
   // The live transitions for a ticket — see BrowseScreen. Threaded straight
   // through to it; App never calls it, it only carries it.
   jiraTransitionsFor?: JiraTransitionsFor
+  // Each move's glyph in that submenu, by the status it lands in — see
+  // JiraStatusIcon. Absent, the rows stay bare.
+  jiraStatusIcon?: JiraStatusIcon
   /**
    * Which tab a moved ticket lands in — see TabForStatus. Supplying it makes
    * moves through `jiraTransitionsFor` optimistic; leaving it out keeps every
@@ -7702,6 +7734,7 @@ export const App = ({
         jiraSetupHint={jiraSetupHint}
         jiraTransitions={jiraTransitions}
         jiraTransitionsFor={jiraTransitionsFor}
+        jiraStatusIcon={jiraStatusIcon}
         optimisticMove={optimisticMove}
         optimistic={optimistic}
         departing={departing}

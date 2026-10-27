@@ -9,6 +9,7 @@ import {
 import type {
   Action,
   JiraAvailableTransition,
+  JiraStatusIcon,
   JiraTransition,
   TaskRow,
 } from "./inbox.js"
@@ -103,6 +104,7 @@ const opener = (
     status?: string
     configured?: JiraTransition[]
     onActed?: () => void
+    statusIcon?: JiraStatusIcon
   } = {},
 ) => {
   const flashes: string[] = []
@@ -116,6 +118,7 @@ const opener = (
     isOpen: menu.isOpen,
     showFlash: (msg) => flashes.push(msg),
     onActed: over.onActed ?? (() => acted++),
+    statusIcon: over.statusIcon,
   })
   return { flashes, acted: () => acted }
 }
@@ -208,6 +211,20 @@ describe("orderJiraMoves", () => {
 describe("openJiraMoves", () => {
   beforeEach(() => {
     shells.length = 0
+  })
+
+  it("gives each move the host's glyph for the status it lands in, and none where the host has none", async () => {
+    const menu = menuDouble()
+    opener(
+      "SHOP-190",
+      async () => [live("Done", "21"), live("Blocked", "41")],
+      menu,
+      { statusIcon: ({ name }) => (name === "Done" ? "✓" : undefined) },
+    )
+    await flush()
+    const [finish, blocked] = menu.opened.at(-1)!
+    expect(finish!.icon).toBe("✓")
+    expect(blocked!.icon).toBeUndefined()
   })
 
   it("opens one dim loading row, swapped in place for the ordered moves", async () => {
