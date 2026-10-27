@@ -1,5 +1,11 @@
 # @kud/gh-ink
 
+## 0.81.0
+
+### Minor Changes
+
+- 005484a: Add `jiraStatusIcon`: the host can give each move in the status submenu a glyph, chosen by the status the move lands in.
+
 ## 0.80.5
 
 ### Patch Changes
