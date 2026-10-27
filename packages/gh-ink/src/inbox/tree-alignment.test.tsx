@@ -93,15 +93,14 @@ const mount = async (items: Array<TaskRow | GHItem>) => {
 }
 
 const columnOf = (frame: string, text: string): number =>
-  frame.split("\n").find((l) => l.includes(text))?.indexOf(text) ?? -1
+  frame
+    .split("\n")
+    .find((l) => l.includes(text))
+    ?.indexOf(text) ?? -1
 
 describe("the identity column in the board list", () => {
   it("starts a child ticket's key where its PR sibling starts its number", async () => {
-    const frame = await mount([
-      parent("PROJ-1"),
-      child("PROJ-2"),
-      pr(214),
-    ])
+    const frame = await mount([parent("PROJ-1"), child("PROJ-2"), pr(214)])
     expect(frame).toContain("PROJ-2")
     expect(frame).toContain("#214")
     // At the same tree depth: both rows indented under PROJ-1, drawn with the
@@ -112,11 +111,7 @@ describe("the identity column in the board list", () => {
   })
 
   it("renders the child ticket and the PR as siblings under the parent", async () => {
-    const frame = await mount([
-      parent("PROJ-1"),
-      child("PROJ-2"),
-      pr(214),
-    ])
+    const frame = await mount([parent("PROJ-1"), child("PROJ-2"), pr(214)])
     const childLine = frame.split("\n").find((l) => l.includes("PROJ-2"))
     const prLine = frame.split("\n").find((l) => l.includes("#214"))
     expect(childLine).toBeDefined()
@@ -126,8 +121,12 @@ describe("the identity column in the board list", () => {
     expect(prLine).toMatch(/[├└]/)
   })
 
-  it("is the tree's job now, never the opener's: no `┬` anywhere", async () => {
+  it("is the tree's job now, never the opener's: the only `┬` is the root's, over its child's stem", async () => {
     const frame = await mount([parent("PROJ-1"), pr(214)])
-    expect(frame).not.toContain("┬")
+    const lines = frame.split("\n")
+    const parentLine = lines.find((l) => l.includes("PROJ-1")) ?? ""
+    const prLine = lines.find((l) => l.includes("#214")) ?? ""
+    expect(lines.filter((l) => l.includes("┬"))).toEqual([parentLine])
+    expect(prLine.indexOf("└")).toBe(parentLine.indexOf("┬"))
   })
 })

@@ -999,9 +999,9 @@ const treePrefix = (items: readonly AnyItem[], i: number): string => {
   return prefix + (isLastAtDepth(items, i) ? "└─ " : "├─ ")
 }
 
-// The mark a top-level row its children hang from carries, as aicommit opens a
-// step: `⊙ Files` with its lines hanging below.
-const TREE_ROOT = "⊙"
+// The mark a top-level row its children hang from carries: a tee whose foot
+// meets the cell's bottom edge, so the stem below runs out of it as one line.
+const TREE_ROOT = "┬"
 
 // Does the next row hang off this one? Its stem drops from this row's own
 // transit cell, so a child row marks the joint there.
