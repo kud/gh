@@ -1,5 +1,11 @@
 # @kud/gh-ink
 
+## 0.81.1
+
+### Patch Changes
+
+- 7a14596: The tree's root mark is now `┬`, which joins the stem below it instead of floating above it like `⊙`.
+
 ## 0.81.0
 
 ### Minor Changes
