@@ -10,3 +10,8 @@ export * from "./core.js"
 export * from "./map.js"
 export * from "./config.js"
 export * from "./ref.js"
+export {
+  parseSearchQuery,
+  matchesSearchQuery,
+  type QueryTerm,
+} from "./search-query.js"

@@ -4,6 +4,7 @@
 // address was.
 
 import type { Health } from "@kud/gh/health"
+import { matchesSearchQuery, parseSearchQuery } from "./search-query.js"
 import { inboxConfig } from "./config.js"
 
 /**
@@ -1115,20 +1116,16 @@ export const filterByOrigin = (
       ),
     )
 
-const searchText = (i: AnyItem): string =>
-  i.kind === "pr" || i.kind === "issue"
-    ? `${i.title} ${i.repo} #${i.number}${i.needsYou?.decision ? ` ${i.needsYou.decision}` : ""}`
-    : i.kind === "task"
-      ? `${i.summary} ${i.key}`
-      : ""
-
 export const filterBySearch = (
   sections: Section[],
   query: string,
   login: string,
 ): Section[] => {
-  const q = query.trim().toLowerCase()
-  if (!q) return sections
+  // Signature unchanged, but the query is now the small qualifier language in
+  // search-query.ts; an empty parse (all terms dropped or none given) keeps
+  // sections untouched rather than filtering everything out.
+  const terms = parseSearchQuery(query)
+  if (terms.length === 0) return sections
   return sections
     .map((s) => {
       const kept = s.items.filter(
@@ -1137,7 +1134,7 @@ export const filterBySearch = (
           i.kind !== "subgroup-header" &&
           i.kind !== "show-more" &&
           i.kind !== "show-less" &&
-          searchText(i).toLowerCase().includes(q),
+          matchesSearchQuery(i, terms, login),
       )
       const gh = kept.filter(
         (i): i is GHItem => i.kind === "pr" || i.kind === "issue",

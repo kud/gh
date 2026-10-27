@@ -4114,7 +4114,7 @@ export const HelpModal = ({
       ? ([["t", "Jira: move / open ticket"]] as [string, string][])
       : []),
     ["⌃K", "launch · open a ticket or PR by name"],
-    ["/", "search"],
+    ["/", "search · author: repo:"],
     ["f", "filter by repo"],
     ["r", "refresh"],
     ["w", "restore a change that failed"],

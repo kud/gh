@@ -226,4 +226,56 @@ describe("needs-you layout", () => {
       ),
     ).toBe(true)
   })
+
+  /*
+   * The search is now the small qualifier language in search-query.ts; these
+   * pin the pieces the unit tests there cannot: that filterBySearch routes the
+   * query through the matcher, and that the layout step survives (band headers
+   * re-counted around what survived, not lost).
+   */
+  describe("filterBySearch with qualifiers", () => {
+    const sections = [
+      {
+        id: NEEDS_YOU_SECTION,
+        label: "Needs you",
+        items: layoutGHItems(
+          [
+            needsYouItem({
+              number: 1,
+              title: "bump the pricing service",
+              author: "octocat",
+              needsYou: { band: "decide" },
+            }),
+            needsYouItem({
+              number: 2,
+              title: "bump the invoice service",
+              author: "dependabot[bot]",
+              needsYou: { band: "decide" },
+            }),
+          ],
+          NEEDS_YOU_SECTION,
+          "kud",
+        ),
+      },
+    ]
+    const numbers = (kept: ReturnType<typeof filterBySearch>): number[] =>
+      kept[0]!.items
+        .filter((i): i is GHItem => i.kind === "pr" || i.kind === "issue")
+        .map((i) => i.number)
+
+    it("filters by author through the bot login's bare spelling", () => {
+      const kept = filterBySearch(sections, "author:dependabot", "kud")
+      expect(numbers(kept)).toEqual([2])
+    })
+
+    it("re-lays the surviving rows, band header included", () => {
+      const kept = filterBySearch(sections, "-author:octocat", "kud")
+      expect(kept).toHaveLength(1)
+      expect(numbers(kept)).toEqual([2])
+      const labels = kept[0]!.items
+        .filter((i) => i.kind === "subgroup-header")
+        .map((i) => (i.kind === "subgroup-header" ? i.label : ""))
+      expect(labels).toEqual(["Decide (1)"])
+    })
+  })
 })
