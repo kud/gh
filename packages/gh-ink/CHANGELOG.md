@@ -1,5 +1,11 @@
 # @kud/gh-ink
 
+## 0.83.1
+
+### Patch Changes
+
+- 7e4418e: Align the `+N more` and `show less` tree corners with their siblings' stem while the focus gutter is drawn.
+
 ## 0.83.0
 
 ### Minor Changes
