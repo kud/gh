@@ -105,6 +105,43 @@ export type ExtensionTarget = {
   // and the two would disagree the first time the host's pattern moved.
   query?: string
   ticketKey?: string
+  // The row's own activity line, for a verb that runs on the row instead of in
+  // an overlay. Present only when the shell hosts activities; a body mounted
+  // without it keeps its full-screen behaviour.
+  activity?: RowActivityHandle
+}
+
+/**
+ * What a row-scoped verb draws on its row while it works: the dashboard stays
+ * live and the row itself says what is happening. The host decides WHAT to say;
+ * the inbox owns how it looks and moves (spinner frames, the nudge, expiring a
+ * notice, the prompt's keys and its 400 ms guard).
+ *
+ * The three shapes, by what is set:
+ * - `glyph: "spin"` — running. The quit key asks before leaving while any row
+ *   spins, and a second start on the row is refused.
+ * - `glyph: "failed"` — stopped short. Stays until looked at: ↵ opens the
+ *   verb's own view, `esc` on the row dismisses it.
+ * - no glyph, no prompt — a notice: the trailing word stands for a moment and
+ *   then the row is itself again. Error notices stand for FAILURE_NOTICE_MS.
+ */
+export type RowActivity = {
+  glyph?: "spin" | "failed"
+  trailing?: { text: string; tone: "muted" | "error" | "success" }
+  /**
+   * A confirm asked on the row. It takes the keyboard while open: a one-letter
+   * `word` is a keypress, a longer one is typed and then ↵. `esc` cancels;
+   * other keys are ignored rather than cancelling, so a stray key costs nothing.
+   */
+  prompt?: { text: string; word: string; onConfirm(): void; onCancel(): void }
+  /** Bump to shake the row once — a refusal with no panel to say so. */
+  nudge?: number
+}
+
+export type RowActivityHandle = {
+  set(url: string, activity: RowActivity | null): void
+  /** The verb merged it: the row plays the merged sparkle, then drops. */
+  merged(url: string): void
 }
 
 // One row of the launcher, contributed by an extension. `run` is what Enter
@@ -169,6 +206,11 @@ export interface InboxExtension {
   // `target` is the optional context the opener passes — the body decides what to
   // do with it, and ignores the parts it has no use for.
   body: (onExit: () => void, target?: ExtensionTarget) => ReactNode
+  // A verb that runs ON the row rather than in an overlay: its key calls this
+  // instead of mounting `body`, with `target.activity` to draw on the row. While
+  // the row carries this extension's activity, its key and ↵ mount `body`
+  // instead — the verb's full view of the run in flight or just finished.
+  run?: (target: ExtensionTarget) => void
   // Rows this extension adds to the launcher (Ctrl+K) for the current target.
   // Called on every keystroke, so it must be sync and pure — anything that
   // resolves config does so once at extension init, not in here. The host

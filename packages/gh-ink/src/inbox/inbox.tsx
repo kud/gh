@@ -11,7 +11,7 @@ import React, {
   useContext,
   type ReactNode,
 } from "react"
-import { Box, useInput, useWindowSize } from "ink"
+import { Box, useApp, useInput, useWindowSize } from "ink"
 // The backdrop's `Text` shadows Ink's on purpose — see backdrop.tsx. Importing
 // it here rather than Ink's is what makes every `<Text>` below overlay-aware
 // without a single call site saying so.
@@ -39,7 +39,13 @@ import {
   type RowAnnouncement,
   type RowMotion,
 } from "../components/pr-row.js"
-import type { Command, InboxExtension, ExtensionTarget } from "./extension.js"
+import type {
+  Command,
+  InboxExtension,
+  ExtensionTarget,
+  RowActivity,
+  RowActivityHandle,
+} from "./extension.js"
 import { InboxChromeContext } from "./extension.js"
 import {
   claimFor,
@@ -3015,6 +3021,92 @@ const PENDING_GLYPH = "\u25CC"
  */
 export const FAILURE_NOTICE_MS = 8000
 
+/**
+ * A row's activity as the shell holds it: what the verb said, which verb said
+ * it, and when — the prompt's key guard counts from `since`, a notice expires
+ * from it, and the nudge plays from `nudgedAt`.
+ */
+export type LiveActivity = RowActivity & {
+  extId: string
+  since: number
+  nudgedAt?: number
+}
+
+// A success notice stands as long as a flash does (and LEAVING_HOLD_MS), so a row's "submitted" and
+// the footer saying the same thing leave together. An error notice is a reason
+// to read, and stands for FAILURE_NOTICE_MS.
+export const SUCCESS_NOTICE_MS = 1500
+// The prompt ignores keys this long after it appears, so a key pressed while
+// the dry run was still going cannot land on a confirm nobody read.
+export const PROMPT_GUARD_MS = 400
+// Its own clock rather than the shared ticker, which settles after
+// PULSE_SETTLE_MS: a land that polls checks runs for minutes, and a spinner
+// that stops at twelve seconds reads as a hang.
+export const ACTIVITY_FRAME_MS = 80
+const ACTIVITY_SPIN = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+// The nudge: three frames of the glyph cell blinking a cross, the refusal's
+// whole vocabulary when there is no panel to explain it in.
+export const NUDGE_FRAME_MS = 60
+const NUDGE_FRAMES = 3
+
+const isNotice = (a: RowActivity) => !a.glyph && !a.prompt
+export const isRunning = (a: RowActivity) => a.glyph === "spin"
+export const noticeHoldOf = (a: RowActivity): number =>
+  a.trailing?.tone === "error" ? FAILURE_NOTICE_MS : SUCCESS_NOTICE_MS
+const nudging = (a: LiveActivity, now: number) =>
+  a.nudgedAt != null && now - a.nudgedAt < NUDGE_FRAME_MS * NUDGE_FRAMES
+
+/** The glyph cell for a row with an activity, or undefined to leave it be. */
+export const activityIconOf = (
+  a: LiveActivity,
+  frame: number,
+  now = Date.now(),
+): { glyph: string; color: string } | undefined => {
+  if (nudging(a, now)) {
+    const at = Math.floor((now - (a.nudgedAt ?? now)) / NUDGE_FRAME_MS)
+    return { glyph: at % 2 === 0 ? "✗" : " ", color: colors.error }
+  }
+  if (a.glyph === "spin")
+    return {
+      glyph: ACTIVITY_SPIN[frame % ACTIVITY_SPIN.length] as string,
+      color: colors.accent,
+    }
+  if (a.glyph === "failed") return { glyph: "✗", color: colors.error }
+  if (a.prompt) return { glyph: "›", color: colors.accent }
+  if (a.trailing?.tone === "success")
+    return { glyph: "✓", color: colors.success }
+  if (a.trailing?.tone === "error") return { glyph: "!", color: colors.error }
+  return undefined
+}
+
+const TONE_COLOUR = {
+  muted: colors.muted,
+  error: colors.error,
+  success: colors.success,
+} as const
+
+/** The words an activity puts in the row's trailing column. */
+export const activityWordsOf = (
+  a: RowActivity,
+  typed = "",
+): RowAnnouncement | undefined => {
+  if (a.prompt) {
+    const { text, word } = a.prompt
+    const ask =
+      word.length > 1
+        ? `type ${word} ↵${typed ? ` ${typed}` : ""}`
+        : `${word} to confirm`
+    return { label: `${text} · ${ask}`, color: colors.accent }
+  }
+  if (a.trailing)
+    return { label: a.trailing.text, color: TONE_COLOUR[a.trailing.tone] }
+  return undefined
+}
+
+// A run in flight anywhere is worth one more `q` before leaving: quitting
+// mid-land can merge a pull request and leave its ticket where it was.
+export const QUIT_CONFIRM_MS = 3000
+
 const TRANSIT_OUT_FRAMES = ["◉", "◎", "○", "·"]
 const TRANSIT_IN_FRAMES = ["·", "○", "◎", "◉"]
 // Reinforcement only. NEW / GONE / UPDATED below are the actual signal, for the
@@ -3151,6 +3243,9 @@ const ItemRow = ({
   numberCols,
   focus,
   typeGutter = false,
+  activity,
+  activityFrame = 0,
+  promptTyped = "",
 }: {
   item: AnyItem
   active: boolean
@@ -3231,6 +3326,12 @@ const ItemRow = ({
    * the key or `#n` columns line up across both kinds. See `TYPE_GUTTER_COLS`.
    */
   typeGutter?: boolean
+  /** A verb running on this row — see `RowActivity`. PR rows only. */
+  activity?: LiveActivity
+  /** The activity clock's frame, for the spinner. */
+  activityFrame?: number
+  /** What has been typed into this row's prompt so far. */
+  promptTyped?: string
 }) => {
   // One vocabulary, because the row is saying the same thing either way: it is
   // leaving. Who caused it is the flash's business — the row's is that it will
@@ -3548,27 +3649,37 @@ const ItemRow = ({
   // yet agreed it went anywhere. Muted rather than coloured, as the task row's
   // is dimmed — it is the frame before anything has happened. Only a merge
   // outranks it, and the two never meet: a merge is not taken optimistically.
+  //
+  // A verb's activity sits between the two: it is the newest thing the reader
+  // asked for, so it outranks a patch in flight and the refresh ramps, and a
+  // merge outranks it because a merge is how a landing ends.
+  const activityIcon =
+    !merged && activity ? activityIconOf(activity, activityFrame) : undefined
+  const activityWords =
+    !merged && activity ? activityWordsOf(activity, promptTyped) : undefined
   const icon = merged
     ? {
         glyph: MERGED_FRAMES[sparkFrame % MERGED_FRAMES.length] as string,
         color: MERGED_COLOUR,
       }
-    : pending
-      ? { glyph: PENDING_GLYPH, color: colors.muted }
-      : transient
-        ? {
-            glyph: isDeparture(transient)
-              ? (TRANSIT_OUT_FRAMES[
-                  rampAt(TRANSIT_OUT_FRAMES.length)
-                ] as string)
-              : isArrival(transient)
-                ? (TRANSIT_IN_FRAMES[
-                    rampAt(TRANSIT_IN_FRAMES.length)
+    : activityIcon
+      ? activityIcon
+      : pending
+        ? { glyph: PENDING_GLYPH, color: colors.muted }
+        : transient
+          ? {
+              glyph: isDeparture(transient)
+                ? (TRANSIT_OUT_FRAMES[
+                    rampAt(TRANSIT_OUT_FRAMES.length)
                   ] as string)
-                : displayFor(item.health).glyph,
-            color: TRANSIT_COLOUR[transient],
-          }
-        : undefined
+                : isArrival(transient)
+                  ? (TRANSIT_IN_FRAMES[
+                      rampAt(TRANSIT_IN_FRAMES.length)
+                    ] as string)
+                  : displayFor(item.health).glyph,
+              color: TRANSIT_COLOUR[transient],
+            }
+          : undefined
   // `changed` is deliberately absent: the row changed, it did not arrive and it
   // is not leaving, so its title reads exactly as it did before. The glyph above
   // is what says something happened.
@@ -3591,6 +3702,7 @@ const ItemRow = ({
   // row that gained one paid for it by squeezing the very title you were reading.
   const announcements: RowAnnouncement[] = [
     ...(merged ? [{ label: "merged", color: MERGED_COLOUR }] : []),
+    ...(activityWords ? [activityWords] : []),
     ...(farewellLabel
       ? [{ label: farewellLabel, color: TRANSIT_COLOUR.out }]
       : []),
@@ -4429,6 +4541,9 @@ const BrowseScreen = ({
   onOpenIssue,
   onOpenExt,
   extensions,
+  activities,
+  onActivityDismiss,
+  quitGuardRef,
   ciStatusState,
   ciJob,
   stripState,
@@ -4574,6 +4689,15 @@ const BrowseScreen = ({
   // not here. Without it BrowseScreen cannot dispatch on `key` at all, which is
   // what confined extensions to the hardcoded Jenkins arm.
   extensions?: InboxExtension[]
+  /** Verbs running on rows, by url — drawn on the row, see `RowActivity`. */
+  activities?: ReadonlyMap<string, LiveActivity>
+  /** Clear a row's finished activity: `esc` on the row, the refusal read. */
+  onActivityDismiss?: (url: string) => void
+  /**
+   * Where this screen publishes its quit guard: true means it held the quit
+   * (a run is in flight and this is the first `q`), and the root stays put.
+   */
+  quitGuardRef?: React.MutableRefObject<(() => boolean) | null>
   // The CI line renders here, between the inbox header and the tabs. Its
   // full poll state (loading / error / ready) is passed so the row is always
   // present once wired; undefined means "no CI row at all" (home's cockpit).
@@ -5008,6 +5132,21 @@ const BrowseScreen = ({
     // Dismissing, not restoring: the row stays where the failed patch put it,
     // and `w` still restores it with the line gone.
     if (noticeUp && failure) return (setDismissedSeq(failure.seq), true)
+    // A finished run on the selected row — a failure waiting to be looked at,
+    // or a notice still standing — is the nearest thing to close. A running one
+    // is not dismissible: the run goes on whatever the row says.
+    const settledActivity =
+      activeItem && "url" in activeItem
+        ? activities?.get(activeItem.url)
+        : undefined
+    if (
+      settledActivity &&
+      !isRunning(settledActivity) &&
+      !settledActivity.prompt &&
+      activeItem &&
+      "url" in activeItem
+    )
+      return (onActivityDismiss?.(activeItem.url), true)
     if (search != null) return (filter.clear(), true)
     if (repoFilter.size > 0) return (setRepoFilter(new Set()), true)
     return false
@@ -5022,9 +5161,64 @@ const BrowseScreen = ({
 
   // The palette's query field owns the keyboard exactly as the search box does,
   // so the root stands `q`/`esc`/`backspace` down for both.
+  // A row's confirm prompt takes the keyboard the same way, so `q` typed
+  // towards a word cannot quit and `esc` reaches the prompt rather than a peel.
+  // One at a time: the newest wins, and the shell cancels any older one.
+  const promptEntry = useMemo(() => {
+    let found: [string, LiveActivity] | undefined
+    for (const entry of activities ?? [])
+      if (entry[1].prompt && (!found || entry[1].since > found[1].since))
+        found = entry
+    return found
+  }, [activities])
+  const [promptTyped, setPromptTyped] = useState("")
+  const promptId = promptEntry
+    ? `${promptEntry[0]}@${promptEntry[1].since}`
+    : ""
+  useEffect(() => setPromptTyped(""), [promptId])
   useEffect(() => {
-    onTyping?.(searchInput || palette !== null)
-  }, [searchInput, palette, onTyping])
+    onTyping?.(searchInput || palette !== null || !!promptEntry)
+  }, [searchInput, palette, onTyping, promptEntry])
+
+  // The activity clock: ticks only while a row spins or shakes, so an idle
+  // board costs nothing — see ACTIVITY_FRAME_MS.
+  const [activityFrame, setActivityFrame] = useState(0)
+  const animatingActivity = [...(activities?.values() ?? [])].some(
+    (a) =>
+      isRunning(a) ||
+      (a.nudgedAt != null &&
+        Date.now() - a.nudgedAt < NUDGE_FRAME_MS * NUDGE_FRAMES),
+  )
+  useEffect(() => {
+    if (!animatingActivity) return
+    const id = setInterval(
+      () => setActivityFrame((f) => f + 1),
+      ACTIVITY_FRAME_MS,
+    )
+    return () => clearInterval(id)
+  }, [animatingActivity])
+
+  // The first `q` while a run is in flight is held and explained; a second
+  // inside QUIT_CONFIRM_MS leaves anyway. Published like the peel, so the root
+  // that owns `q` asks this screen rather than knowing about activities.
+  const quitArmedAt = useRef(0)
+  const quitGuard = (): boolean => {
+    const live = [...(activities?.values() ?? [])].filter(isRunning).length
+    if (live === 0) return false
+    if (Date.now() - quitArmedAt.current < QUIT_CONFIRM_MS) return false
+    quitArmedAt.current = Date.now()
+    showFlash(
+      `${live === 1 ? "A run is" : `${live} runs are`} still going · q again to quit anyway`,
+    )
+    return true
+  }
+  useEffect(() => {
+    if (!quitGuardRef) return
+    quitGuardRef.current = quitGuard
+    return () => {
+      quitGuardRef.current = null
+    }
+  })
   // What the LIST has, which is the frame minus whatever the rail took. Computed
   // once here and handed down: a row cannot see the rail, and a budget that does
   // not know about it overflows by exactly the rail's width.
@@ -5161,6 +5355,14 @@ const BrowseScreen = ({
       fn(i)
       return true
     }
+    // A row a verb is running on opens that verb's own view of the run, not
+    // the PR: the run is what the row is saying, so it is what ↵ shows.
+    const live = "url" in item ? activities?.get(item.url) : undefined
+    if (live && !live.prompt && onOpenExt) {
+      menu.close()
+      onOpenExt(live.extId, extensionTargetFor(item))
+      return true
+    }
     if (item.kind === "pr" && onOpenPr) return open(onOpenPr, item)
     if (item.kind === "issue" && onOpenIssue) return open(onOpenIssue, item)
     // The generic arm: a row kind the host has claimed through an extension's
@@ -5250,6 +5452,30 @@ const BrowseScreen = ({
     if (idleFor >= PULSE_IDLE_MS && sparkKey) setPulseArm((n) => n + 1)
 
     if (hidden) return
+    // A row's confirm prompt owns the keyboard while it is open. Keys inside
+    // PROMPT_GUARD_MS of it appearing are dropped; `esc` cancels; anything that
+    // does not spell the word is ignored rather than taken as a no, because a
+    // stray key cancelling a confirm the reader meant to give is the worse
+    // failure of the two.
+    if (promptEntry) {
+      const [, live] = promptEntry
+      const prompt = live.prompt
+      if (!prompt || Date.now() - live.since < PROMPT_GUARD_MS) return
+      if (key.escape) return prompt.onCancel()
+      if (prompt.word.length === 1) {
+        if (input === prompt.word) prompt.onConfirm()
+        return
+      }
+      if (key.return) {
+        if (promptTyped === prompt.word) prompt.onConfirm()
+        return
+      }
+      if (key.backspace || key.delete)
+        return setPromptTyped((t) => t.slice(0, -1))
+      const next = promptTyped + input
+      if (input && prompt.word.startsWith(next)) setPromptTyped(next)
+      return
+    }
     // The one chord this screen answers, carved out ABOVE the guard below that
     // swallows every other ctrl/meta press. Toggles: a second Ctrl+K with the
     // launcher up closes it, the way `?` closes the legend.
@@ -6431,6 +6657,17 @@ const BrowseScreen = ({
                     prefix={treePrefix(section.items, viewStart + i)}
                     opensBranch={opensBranch(section.items, viewStart + i)}
                     sparkFrame={sparkFrame}
+                    activity={
+                      "url" in item ? activities?.get(item.url) : undefined
+                    }
+                    activityFrame={activityFrame}
+                    promptTyped={
+                      promptEntry &&
+                      "url" in item &&
+                      promptEntry[0] === item.url
+                        ? promptTyped
+                        : ""
+                    }
                     // The PR rows end at `ROW_MAX_COLS`, and so do the two header
                     // kinds, so every band ends on the same column — see
                     // `rowCols` and `RepoHeaderRow`. Tasks and the show-more/less
@@ -6856,8 +7093,17 @@ export const App = ({
     [chromeSpec, setChrome],
   )
 
+  // The list's quit guard (see BrowseScreen's `quitGuardRef`): asked first, so a
+  // run in flight costs one more `q` rather than a half-landed pull request.
+  const quitGuard = useRef<(() => boolean) | null>(null)
+  const { exit } = useApp()
+
   useAppKeys({
     isActive: !typing,
+    onQuit: () => {
+      if (quitGuard.current?.()) return
+      exit()
+    },
     onBack: () => {
       // Inside a drill the drill's own layers peel first; when it reports none
       // left, closing the drill IS the next layer out. An `ext` body registers
@@ -7608,6 +7854,103 @@ export const App = ({
    * roster grow for the life of the process, one entry per merge or close, each
    * pinning a row that left the screen seconds later.
    */
+  // Verbs running on rows (see `RowActivity`), by url. Held here rather than in
+  // BrowseScreen because a run outlives every overlay: its own view opens and
+  // closes over it, and the row has to say the same thing either side.
+  const [activities, setActivities] = useState<
+    ReadonlyMap<string, LiveActivity>
+  >(() => new Map())
+  const dismissActivity = (url: string) =>
+    setActivities((prev) => {
+      if (!prev.has(url)) return prev
+      const next = new Map(prev)
+      next.delete(url)
+      return next
+    })
+  // Built per open rather than once: the handle stamps which verb is speaking,
+  // and that is what ↵ on the row later routes by.
+  const activityHandle = (extId: string): RowActivityHandle => ({
+    set: (url, activity) => {
+      if (!activity) return dismissActivity(url)
+      setActivities((prev) => {
+        const old = prev.get(url)
+        const now = Date.now()
+        const next = new Map(prev)
+        next.set(url, {
+          ...activity,
+          extId,
+          since: now,
+          nudgedAt:
+            activity.nudge != null && activity.nudge !== old?.nudge
+              ? now
+              : old?.nudgedAt,
+        })
+        return next
+      })
+    },
+    // markMerged's hold without its `toBrowse`: a run finishes on its own
+    // clock, and yanking the reader out of whatever they opened meanwhile to
+    // watch it would undo the whole point of running on the row. The row
+    // drops from every phase's copy of the list, not just the browse one.
+    merged: (url) => {
+      dismissActivity(url)
+      setMergedUrls((prev) => (prev.includes(url) ? prev : [...prev, url]))
+      holdFor(() => {
+        setMergedUrls((prev) => prev.filter((u) => u !== url))
+        setState((s) => {
+          if (!("sections" in s)) return s
+          const row = s.sections
+            .flatMap((section) => section.items)
+            .find((i) => "url" in i && i.url === url)
+          return row && (row.kind === "pr" || row.kind === "issue")
+            ? { ...s, sections: withoutItem(s.sections, row) }
+            : s
+        })
+      }, MERGED_HOLD_MS)
+    },
+  })
+  // A notice stands for its hold and then steps aside; a newer word on the
+  // same row (a later `since`) keeps its own clock.
+  useEffect(() => {
+    const timers = [...activities]
+      .filter(([, a]) => isNotice(a))
+      .map(([url, a]) =>
+        setTimeout(
+          () =>
+            setActivities((prev) => {
+              if (prev.get(url)?.since !== a.since) return prev
+              const next = new Map(prev)
+              next.delete(url)
+              return next
+            }),
+          Math.max(0, a.since + noticeHoldOf(a) - Date.now()),
+        ),
+      )
+    return () => timers.forEach(clearTimeout)
+  }, [activities])
+  // A refetch that no longer lists the row settles whatever finished on it:
+  // the failure was about a pull request that has since merged or gone. A run
+  // still in flight, or a confirm still asked, is kept — the run is real
+  // whether or not the list has caught up.
+  const listed = "sections" in state ? state.sections : undefined
+  useEffect(() => {
+    if (!listed) return
+    const urls = new Set(
+      listed.flatMap((section) =>
+        section.items.flatMap((i) => ("url" in i ? [i.url] : [])),
+      ),
+    )
+    setActivities((prev) => {
+      const gone = [...prev].filter(
+        ([url, a]) => !isRunning(a) && !a.prompt && !urls.has(url),
+      )
+      if (gone.length === 0) return prev
+      const next = new Map(prev)
+      for (const [url] of gone) next.delete(url)
+      return next
+    })
+  }, [listed])
+
   const holdFor = (fn: () => void, ms: number) => {
     const id = setTimeout(() => {
       holdTimers.current = holdTimers.current.filter((t) => t !== id)
@@ -7883,16 +8226,41 @@ export const App = ({
           })
         }}
         onOpenExt={(id, target) => {
+          // One verb per row at a time, across verbs: a row that is running
+          // or asking a confirm answers a second verb with a flash, never a
+          // second run. Its own verb gets through and mounts its view below.
+          const item = target?.item
+          const url = item && "url" in item ? item.url : undefined
+          const live = url ? activities.get(url) : undefined
+          if (live && live.extId !== id && (isRunning(live) || live.prompt)) {
+            target?.showFlash?.("This row is busy · wait for its run to finish")
+            return
+          }
+          const withActivity = target && {
+            ...target,
+            activity: activityHandle(id),
+          }
+          // A verb that runs on the row starts there, and the list stays
+          // live. Once the row carries its activity, the same key (and ↵)
+          // mounts its body instead: the full view of that run.
+          const ext = extensions?.find((e) => e.id === id)
+          if (ext?.run && withActivity && !live) {
+            ext.run(withActivity)
+            return
+          }
           setChromeSpec({})
           setState({
             phase: "ext",
             extId: id,
-            target,
+            target: withActivity,
             sections: state.sections,
             login: state.login,
           })
         }}
         extensions={extensions}
+        activities={activities}
+        onActivityDismiss={dismissActivity}
+        quitGuardRef={quitGuard}
       />
     </InboxChromeContext.Provider>
   )

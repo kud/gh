@@ -36,14 +36,34 @@ seam as `@kud/jenkins` → `@kud/jenkins-ink`.
 
 A host contributes verbs and screens to the inbox through `InboxExtension`:
 
-| Field       | What                                                                                                        |
-| ----------- | ----------------------------------------------------------------------------------------------------------- |
-| `key`       | The keypress that opens it, matched after the inbox's own bindings, so an extension never shadows them.     |
-| `scope`     | `"item"` acts on the selected row and earns a place in its action menu; `"global"` does not.                |
-| `menuGroup` | `"act"` (does something to the row) or `"open"` (opens something); absent or `"other"` joins the quiet end. |
+| Field       | What                                                                                                            |
+| ----------- | --------------------------------------------------------------------------------------------------------------- |
+| `key`       | The keypress that opens it, matched after the inbox's own bindings, so an extension never shadows them.         |
+| `scope`     | `"item"` acts on the selected row and earns a place in its action menu; `"global"` does not.                    |
+| `menuGroup` | `"act"` (does something to the row) or `"open"` (opens something); absent or `"other"` joins the quiet end.     |
 | `hint`      | Short footer label. The action menu capitalises it for the row ("submit" → "Submit"); the legend keeps `title`. |
-| `icon`      | Nerd-font glyph for the menu row, as a `"\uF4FA"` escape. Shown only in nerd icon mode (see below).         |
-| `body`      | `(onExit, target) => ReactNode` — rendered inside the inbox frame; claims header/footer via `useChrome`.    |
+| `icon`      | Nerd-font glyph for the menu row, as a `"\uF4FA"` escape. Shown only in nerd icon mode (see below).             |
+| `body`      | `(onExit, target) => ReactNode` — rendered inside the inbox frame; claims header/footer via `useChrome`.        |
+| `run`       | `(target) => void` — a verb that runs on the row instead of mounting `body`. See below.                         |
+
+### Verbs that run on the row
+
+An extension with `run` keeps the list on screen while it works. Its key calls
+`run(target)`, and `target.activity.set(url, activity)` says what the row
+shows; `target.activity.merged(url)` plays the merged sparkle and drops the
+row. The inbox owns the look and the timing.
+
+| `RowActivity`     | The row shows                                                                                                                                                 |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `glyph: "spin"`   | A spinner in the glyph cell. The first `q` asks before quitting, and a second verb on the row is refused.                                                     |
+| `glyph: "failed"` | A red cross, until ↵ opens the verb's view or `esc` on the row dismisses it.                                                                                  |
+| `prompt`          | `Land #2902 · y to confirm`. It takes the keyboard: `esc` cancels, other keys are ignored, a 400 ms guard drops early keys. A longer `word` is typed, then ↵. |
+| `trailing`        | Words in the trailing column, muted, red or green. With no glyph and no prompt they are a notice that expires (8 s for an error, 1.5 s otherwise).            |
+| `nudge`           | Bump it to shake the glyph cell once: a refusal with no panel to explain it.                                                                                  |
+
+While the row carries a verb's activity, that verb's key and ↵ mount its
+`body` instead, as the full view of the run. A row the list no longer holds
+after a refetch drops whatever finished on it.
 
 Nerd-font icons render only when the host calls `setIconMode("nerd")` from
 `@kud/ink-ui` before the first render. In the default text mode the menu's icon
@@ -51,15 +71,15 @@ column is dropped entirely — no stand-in, nothing to align — so a terminal
 without a Nerd Font loses nothing but decoration. The built-ins use these
 codepoints; sibling host verbs should match them rather than invent neighbours:
 
-| Verb                          | Codepoint |
-| ----------------------------- | --------- |
-| Submit / Resubmit              | U+F4FA / U+F46A |
-| Land                           | U+F419    |
-| Open PR / in browser / ticket  | U+F440 / U+F465 / U+F41B |
-| Switch here / tab / pane       | U+EBCB / U+EAE4 / U+EB56 |
-| Copy URL / repo / branch       | U+F44C / U+F401 / U+F418 |
+| Verb                                 | Codepoint                |
+| ------------------------------------ | ------------------------ |
+| Submit / Resubmit                    | U+F4FA / U+F46A          |
+| Land                                 | U+F419                   |
+| Open PR / in browser / ticket        | U+F440 / U+F465 / U+F41B |
+| Switch here / tab / pane             | U+EBCB / U+EAE4 / U+EB56 |
+| Copy URL / repo / branch             | U+F44C / U+F401 / U+F418 |
 | Unsubscribe / Mute / Remove reviewer | U+F478 / U+F466 / U+F468 |
-| Close PR / and delete / issue  | U+F4DC / U+F48E / U+F41D |
+| Close PR / and delete / issue        | U+F4DC / U+F48E / U+F41D |
 
 ## Inbox focus slot and tab icons
 
@@ -70,12 +90,12 @@ row is drawn; `null` means nothing to point at and draws the dim empty line.
 It rides the fetch (and the cache beside the rows) because it goes stale the
 same way they do.
 
-| Prop / field       | What                                                                                                |
-| ------------------ | --------------------------------------------------------------------------------------------------- |
-| `focusLabel`       | What to call the row (default `focus`). Passing this or `focusEmpty` reserves the row from first paint. |
-| `focusEmpty`       | The empty sentence, drawn dim after the label when focus comes back `null`.                         |
-| `FocusSlot`        | `label`, `ref` (a ticket key, or a PR-style `#427`), `title`, `reason`, optional `marker` (the host's priority glyph), `mark`/`markColor`/`refColor` overrides, and `target: { tab, url }`. |
-| `g`                | Jumps to `focus.target`: switches to that tab and lands the cursor on that row, opening a collapsed tail it is folded into. Listed in the `?` legend only while a focus is on screen. |
+| Prop / field | What                                                                                                                                                                                        |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `focusLabel` | What to call the row (default `focus`). Passing this or `focusEmpty` reserves the row from first paint.                                                                                     |
+| `focusEmpty` | The empty sentence, drawn dim after the label when focus comes back `null`.                                                                                                                 |
+| `FocusSlot`  | `label`, `ref` (a ticket key, or a PR-style `#427`), `title`, `reason`, optional `marker` (the host's priority glyph), `mark`/`markColor`/`refColor` overrides, and `target: { tab, url }`. |
+| `g`          | Jumps to `focus.target`: switches to that tab and lands the cursor on that row, opening a collapsed tail it is folded into. Listed in the `?` legend only while a focus is on screen.       |
 
 A row whose url matches the target draws the mark in a fixed gutter between
 the tree glyph and the marker cell; every other row holds two blanks there, so

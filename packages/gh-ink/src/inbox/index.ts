@@ -85,7 +85,13 @@ export {
   type OriginSplit,
   type SettledResult,
 } from "./inbox.js"
-export type { Command, InboxExtension, ExtensionTarget } from "./extension.js"
+export type {
+  Command,
+  InboxExtension,
+  ExtensionTarget,
+  RowActivity,
+  RowActivityHandle,
+} from "./extension.js"
 export {
   LookupMiss,
   useChrome,
