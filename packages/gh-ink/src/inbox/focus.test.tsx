@@ -270,6 +270,32 @@ describe("the focus slot", () => {
   })
 })
 
+describe("the focus gutter on a collapsed tail", () => {
+  // The gutter sits before the tree run on every url-bearing row, so a tail row
+  // that skipped it drew its corner two columns left of the stem it closes.
+  it("keeps the show-more corner under its siblings' stem", async () => {
+    const hidden = [{ ...pr(9), depth: 1 }]
+    const tree: Section[] = [
+      {
+        id: "review",
+        label: "Review",
+        items: [
+          task(),
+          { ...pr(3), depth: 1 },
+          { kind: "show-more", hidden, depth: 1 },
+        ],
+      },
+    ]
+    const { frame, done } = await browse(tree, { focus: ticketFocus() })
+    const lines = frame().split("\n")
+    done()
+    const stem = lines.find((l) => l.includes("pull request number 3")) ?? ""
+    const corner = lines.find((l) => l.includes("+1 more")) ?? ""
+    expect(corner.indexOf("└")).toBeGreaterThan(-1)
+    expect(corner.indexOf("└")).toBe(stem.indexOf("├"))
+  })
+})
+
 describe("g jumps to the focus", () => {
   const sections: Section[] = [
     { id: "open", label: "Open", items: [pr(1), pr(2)] },

@@ -3220,8 +3220,9 @@ const ItemRow = ({
    * The focus slot's current answer, for the gutter mark. `undefined` draws no
    * gutter at all — no focus feature, byte-identical rows. Anything else
    * reserves the two columns on every url-bearing row: the mark on the row `g`
-   * would land on, blanks elsewhere. Headers and collapsed rows carry none —
-   * they name no url, so there is no row for the mark to point at.
+   * would land on, blanks elsewhere. Headers carry none. The show-more and
+   * show-less rows carry the blank cell: they name no url, but they close a
+   * tree whose stem runs after the gutter.
    */
   focus?: FocusSlot | null
   /**
@@ -3290,6 +3291,10 @@ const ItemRow = ({
     return (
       <Box width={cols} backgroundColor={selBg}>
         <Text color={colors.info}>{active ? "❯ " : "  "}</Text>
+        {/* Blank, never a mark: the tail names no url. But the stem it closes
+            runs after the focus gutter on every row above it, so skipping the
+            cell drew the corner two columns left of that stem (2026-10-29). */}
+        {focus !== undefined ? <Text>{"  "}</Text> : null}
         {typeGutter ? <Text>{typeGutterBlank}</Text> : null}
         {/* The computed run, not a bare corner. A collapsed group under a
             non-last story still needs its ancestor stem, or its column breaks
@@ -3304,6 +3309,7 @@ const ItemRow = ({
     return (
       <Box width={cols} backgroundColor={selBg}>
         <Text color={colors.info}>{active ? "❯ " : "  "}</Text>
+        {focus !== undefined ? <Text>{"  "}</Text> : null}
         {typeGutter ? <Text>{typeGutterBlank}</Text> : null}
         <Text dimColor>{prefix}</Text>
         <Text dimColor>{active ? "↵ " : "  "}</Text>
