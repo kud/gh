@@ -1,6 +1,6 @@
 {
   "name": "@kud/gh-pr-comments",
-  "version": "0.1.162",
+  "version": "0.1.163",
   "description": "Browse, reply to, and resolve GitHub PR review comments in the terminal.",
   "type": "module",
   "bin": {
