@@ -1,5 +1,11 @@
 # @kud/gh-pr-health
 
+## 0.1.163
+
+### Patch Changes
+
+- 5725fd9: Bump `@kud/ink-ui` to 0.43.0 so hosts on the new release share one copy.
+
 ## 0.1.162
 
 ### Patch Changes
