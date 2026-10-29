@@ -4070,6 +4070,7 @@ export const HelpModal = ({
   extensions,
   hasJira,
   hasFocus,
+  rail,
   tabHelp,
   maxRows,
   scroll = 0,
@@ -4083,6 +4084,9 @@ export const HelpModal = ({
   // place a reader goes to find out what they can press — so the row is
   // advertised only where it acts, the way `t` is Jira's.
   hasFocus?: boolean
+  // The rail's title where the host supplies one, so `i` and `I` are listed
+  // only where they act, in the rail's own words.
+  rail?: string
   tabHelp?: [string, string][]
   // Rows the panel may occupy — the caller's list budget, not the terminal's
   // height, since the modal sits inside the frame with the header and tabs above
@@ -4126,6 +4130,12 @@ export const HelpModal = ({
     ["w", "restore a change that failed"],
     ...(hasFocus
       ? ([[FOCUS_JUMP_KEY, "jump to focus"]] as [string, string][])
+      : []),
+    ...(rail
+      ? ([
+          ["i", `show / hide ${rail}`],
+          ["I", `${rail} · first that wants you`],
+        ] as [string, string][])
       : []),
     ...extensionLegend(extensions),
     ["?", "this help"],
@@ -5333,6 +5343,20 @@ const BrowseScreen = ({
       })
       return
     }
+    // `I` is "show me what wants me": the rail opened, focused, and the cursor
+    // already on the first row asking for you, so the question costs one key
+    // rather than `i`, tab and a scan. With nothing asking, the top row.
+    if (input === "I" && hasRail && railRows.length > 0) {
+      setRailOpen(true)
+      setRailFocus(true)
+      setRailCursor(
+        Math.max(
+          0,
+          railRows.findIndex((row) => row.wantsYou),
+        ),
+      )
+      return
+    }
     // Tab crosses between the two regions, and only ever between them: it is the
     // one key in this UI that means "somewhere else on this screen", where ←→
     // already mean "another tab" and ↑↓ mean "another row".
@@ -5394,6 +5418,15 @@ const BrowseScreen = ({
         if (!row?.url) return
         clipboard(row.url)
         showFlash(`✓ Copied URL for ${row.key}`)
+        return
+      }
+      // `O` is the row's other place, as it is the wider `o` on a list row.
+      // Silent without one, for the reason `o` is.
+      if (input === "O") {
+        const row = railRows[railAt]
+        if (!row?.alt) return
+        quietly`open ${row.alt.url}`.catch(() => {})
+        showFlash(`↗ Opened ${row.alt.label} for ${row.key}`)
         return
       }
       // Everything the rail does not claim still works while it holds focus —
@@ -5895,6 +5928,9 @@ const BrowseScreen = ({
         ["↑↓", "row"],
         ["↵", "open"],
         ["o", "browser"],
+        ...(railRows[railAt]?.alt
+          ? ([["O", railRows[railAt]!.alt!.label]] as [string, string][])
+          : []),
         ["c", "copy url"],
         ["⇥/esc", "back to list"],
         ["?", "help"],
@@ -6141,6 +6177,7 @@ const BrowseScreen = ({
         extensions={extensions}
         hasJira={!!jiraBase}
         hasFocus={focus != null}
+        rail={hasRail ? railTitle : undefined}
         tabHelp={tabHelp}
         maxRows={listHeight}
         scroll={helpScroll}

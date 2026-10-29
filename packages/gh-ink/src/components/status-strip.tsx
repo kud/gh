@@ -31,6 +31,24 @@ export type StripItem = {
    * against on 2026-10-23: it loses which system is broken.
    */
   alarm?: boolean
+  /**
+   * When the item entered its current state (ms). A `fail` or `warn` draws its
+   * age right after the cause — `ledger: ✕ alerting 3d` — in the cause's
+   * colour and weight, because "failing" is incomplete without "since when":
+   * an alert that started this minute and one that has held for three days
+   * ask for very different levels of attention. Absent draws nothing.
+   */
+  since?: number
+  /**
+   * The host says this failure is long-standing and known — triaged, being
+   * watched, not news. The cross stays, because it is still real, but the
+   * item draws dim — mark and cause, no bold, no colour — and ranks after
+   * fresh fails, warnings and red builds, before `no data`. Answering "do I
+   * need to look?" with "not first" is exactly what the strip is for, and a
+   * settled item with a red build still counts under `build ✕` when folded:
+   * the build comes from a different source, which did not agree.
+   */
+  settled?: boolean
   /** Where `o` goes when this item is opened from a rail row. Unused here. */
   url?: string
 }
@@ -140,18 +158,29 @@ const joinWith = (groups: StripSpan[][], sep: StripSpan): StripSpan[] =>
   groups.flatMap((group, i) => (i === 0 ? group : [sep, ...group]))
 
 // Where an item sits on the strip. A red build on a healthy service outranks
-// "no data": the build is something to act on, the missing reading is not.
-// `null` means the item is fine and may be counted without being named.
-type Rank = "fail" | "warn" | "build" | "unknown"
+// "no data": the build is something to act on, the missing reading is not. A
+// settled failure sits between them: still real, already known, so it neither
+// jumps the queue ahead of fresh trouble nor hides behind a missing reading.
+// An unknown with a red build ranks as the build, since the build is the part
+// that answered. `null` means the item is fine and may be counted unnamed.
+type Rank = "fail" | "warn" | "build" | "settled" | "unknown"
 const SEVERITY: Record<Rank, number> = {
   fail: 0,
   warn: 1,
   build: 2,
-  unknown: 3,
+  settled: 3,
+  unknown: 4,
 }
+
+// Only a failure settles. A warning is already the quiet tier, and a dimmer
+// warning would be a fifth state the reader has to learn for no decision.
+const isSettled = (item: StripItem): boolean =>
+  item.state === "fail" && item.settled === true
 
 const rankOf = (item: StripItem): Rank | null => {
   if (item.state === "ok") return item.alarm ? "build" : null
+  if (isSettled(item)) return "settled"
+  if (item.state === "unknown" && item.alarm) return "build"
   return item.state
 }
 
@@ -169,18 +198,30 @@ const nameSpans = (item: StripItem): StripSpan[] => [
   { text: " " },
 ]
 
-const itemSpans = (item: StripItem): StripSpan[] => {
+// The cause and, when the host stamped one, how long it has held: `alerting
+// 3d`. One run, so the age always rides in the cause's own style.
+const causeText = (item: StripItem, now: number): string =>
+  [item.cause, ageLabel(item.since, now)]
+    .filter(Boolean)
+    .map((part) => ` ${part}`)
+    .join("")
+
+const itemSpans = (item: StripItem, now: number): StripSpan[] => {
   const spans = nameSpans(item)
+  const cause = causeText(item, now)
   switch (item.state) {
     case "fail":
+      if (isSettled(item)) {
+        spans.push(dim(FAIL))
+        if (cause) spans.push(dim(cause))
+        break
+      }
       spans.push({ text: FAIL, color: colors.error, bold: true })
-      if (item.cause)
-        spans.push({ text: ` ${item.cause}`, color: colors.error, bold: true })
+      if (cause) spans.push({ text: cause, color: colors.error, bold: true })
       break
     case "warn":
       spans.push({ text: WARN, color: colors.warning, bold: true })
-      if (item.cause)
-        spans.push({ text: ` ${item.cause}`, color: colors.warning })
+      if (cause) spans.push({ text: cause, color: colors.warning })
       break
     case "unknown":
       spans.push(dim("? no data"))
@@ -203,8 +244,10 @@ const countSpans = (rank: Rank, n: number): StripSpan[] => {
       return [{ text: `${WARN} ${n}`, color: colors.warning, bold: true }]
     case "build":
       return [...buildSpans(), { text: ` ${n}`, color: colors.error }]
+    case "settled":
+      return [dim(`${FAIL} ${n} settled`)]
     case "unknown":
-      return [dim(`? ${n}`)]
+      return [dim(`? ${n} no data`)]
   }
 }
 
@@ -216,6 +259,7 @@ const foldedIssues = (
   bad: StripItem[],
   folded: ReadonlySet<Rank>,
   failsNamed: number,
+  now: number,
 ): StripSpan[] => {
   let fails = 0
   const named: StripItem[] = []
@@ -226,14 +270,15 @@ const foldedIssues = (
     ;(keep ? named : rest).push(item)
   }
   const tallies: [Rank, number][] = [
-    ["fail", rest.filter((i) => i.state === "fail").length],
+    ["fail", rest.filter((i) => i.state === "fail" && !isSettled(i)).length],
     ["warn", rest.filter((i) => i.state === "warn").length],
     ["build", rest.filter((i) => i.alarm).length],
+    ["settled", rest.filter(isSettled).length],
     ["unknown", rest.filter((i) => i.state === "unknown").length],
   ]
   return joinWith(
     [
-      ...named.map(itemSpans),
+      ...named.map((item) => itemSpans(item, now)),
       ...tallies
         .filter(([, n]) => n > 0)
         .map(([rank, n]) => countSpans(rank, n)),
@@ -245,13 +290,16 @@ const foldedIssues = (
 type Candidate = { spans: StripSpan[]; age: boolean }
 
 // The row's forms, most to least detailed; the first that fits is drawn and the
-// last is drawn regardless. Narrowing sheds the least actionable first: the
-// no-data items fold to `? N`, then the healthy-with-red-build ones to
-// `build ✕ N`, then the warnings to `⚠ N`. The failures stay named longest —
+// last is drawn regardless. The no-data items are always folded to `? N no
+// data`: a list of names nobody heard from answers no question the count does
+// not, and on a misconfigured day it was the longest thing on the row.
+// Narrowing then sheds the least actionable first: the settled failures fold
+// to `✕ N settled`, the healthy-with-red-build ones to `build ✕ N`, then the
+// warnings to `⚠ N`. The failures stay named longest —
 // the age goes before any of them does — and when even they do not fit, the
 // worst are named while they fit and the rest counted, so the row says "and
 // N more" rather than silently dropping the fourth failure.
-const issueCandidates = (strip: StatusStrip): Candidate[] => {
+const issueCandidates = (strip: StatusStrip, now: number): Candidate[] => {
   const { items, note } = strip
   if (note !== undefined) {
     // One shared sentence for the reading, and the red builds still named:
@@ -297,20 +345,20 @@ const issueCandidates = (strip: StatusStrip): Candidate[] => {
     ]
   }
 
-  const fails = bad.filter((i) => i.state === "fail").length
+  const fails = bad.filter((i) => rankOf(i) === "fail").length
   const levels: Rank[][] = [
-    [],
     ["unknown"],
-    ["unknown", "build"],
-    ["unknown", "build", "warn"],
+    ["unknown", "settled"],
+    ["unknown", "settled", "build"],
+    ["unknown", "settled", "build", "warn"],
   ]
   const everything = new Set(levels[levels.length - 1])
   const candidates: Candidate[] = levels.map((level) => ({
-    spans: foldedIssues(bad, new Set(level), fails),
+    spans: foldedIssues(bad, new Set(level), fails, now),
     age: true,
   }))
   for (let named = fails; named >= 0; named--)
-    candidates.push({ spans: foldedIssues(bad, everything, named), age: false })
+    candidates.push({ spans: foldedIssues(bad, everything, named, now), age: false })
   return candidates
 }
 
@@ -354,14 +402,11 @@ export const stripRows = (
     : 0
   const fineSpans: StripSpan[] =
     fineCount > 0
-      ? [
-          { text: OK, color: colors.success },
-          { text: ` ${fineCount} fine` },
-        ]
+      ? [{ text: OK, color: colors.success }, { text: ` ${fineCount} fine` }]
       : []
   const fineWidth = fineSpans.length ? ITEM_GAP.length + widthOf(fineSpans) : 0
 
-  const candidates = issueCandidates(strip)
+  const candidates = issueCandidates(strip, now)
   const chosen =
     candidates.find(
       (c) => widthOf(c.spans) + (c.age ? ageWidth : 0) <= budget - fineWidth,
@@ -385,7 +430,9 @@ export const ageLabel = (at: number | undefined, now = Date.now()): string => {
   if (s < 60) return `${s}s`
   const m = Math.round(s / 60)
   if (m < 60) return `${m}m`
-  return `${Math.round(m / 60)}h`
+  const h = Math.round(m / 60)
+  if (h < 48) return `${h}h`
+  return `${Math.round(h / 24)}d`
 }
 
 const Spans = ({ spans }: { spans: StripSpan[] }) => (

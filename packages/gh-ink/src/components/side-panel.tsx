@@ -42,6 +42,13 @@ export type SidebarRow = {
    */
   url?: string
   /**
+   * A second place the row lives, reached with `O` while the rail holds focus:
+   * the build beside the monitor, say. `label` names it in the footer and the
+   * flash (`O jenkins`), because "the other link" says nothing about where
+   * the key goes. Absent, `O` does nothing and the footer does not offer it.
+   */
+  alt?: { url: string; label: string }
+  /**
    * A one-cell mark drawn before the key on the facts line — a priority
    * arrow — and its colour: the same pair `TaskRow` takes, so a host fills
    * both from one source. Absent draws the blank the cell keeps anyway.

@@ -51,7 +51,7 @@ const badDay: StatusStrip = {
 const fullIssues =
   `billing: ${FAIL} alerting   search: ${WARN} slow · build ${FAIL}   ` +
   `events: ${WARN} errors   payments: ${OK} · build ${FAIL}   ` +
-  `web: ? no data   cron: ? no data   ${OK} 3 fine`
+  `? 2 no data   ${OK} 3 fine`
 
 // The width at which `issues` plus the title — and the age, when kept — fills
 // the row exactly. One column less must shed the next thing.
@@ -91,6 +91,85 @@ describe("ageLabel", () => {
 
   it("switches to rounded hours once an hour has passed", () => {
     expect(ageLabel(NOW - 2 * 3_600_000, NOW)).toBe("2h")
+  })
+
+  it("keeps hours through the second day, then counts days", () => {
+    expect(ageLabel(NOW - 47 * 3_600_000, NOW)).toBe("47h")
+    expect(ageLabel(NOW - 3 * 86_400_000, NOW)).toBe("3d")
+  })
+})
+
+describe("stripRows: since when, and settled", () => {
+  const DAYS_3 = NOW - 3 * 86_400_000
+
+  it("draws how long a failure has held after its cause, in the cause's style", () => {
+    const { issues, spans } = stripRows(
+      {
+        title: "services",
+        items: [
+          {
+            key: "ledger",
+            state: "fail",
+            cause: "alerting",
+            since: NOW - 20 * 60_000,
+          },
+        ],
+      },
+      200,
+      NOW,
+    )
+    expect(issues).toBe(`ledger: ${FAIL} alerting 20m`)
+    expect(spans.find((s) => s.text === " alerting 20m")).toMatchObject({
+      color: colors.error,
+      bold: true,
+    })
+  })
+
+  it("draws a settled failure dim, still a cross, after fresh trouble and builds", () => {
+    const { issues, spans } = stripRows(
+      {
+        title: "services",
+        items: [
+          {
+            key: "search",
+            state: "fail",
+            cause: "alerting",
+            since: DAYS_3,
+            settled: true,
+          },
+          { key: "unread", state: "unknown" },
+          { key: "exports", state: "ok", alarm: true },
+          { key: "events", state: "warn" },
+        ],
+      },
+      200,
+      NOW,
+    )
+    expect(issues).toBe(
+      `events: ${WARN}   exports: ${OK} · build ${FAIL}   ` +
+        `search: ${FAIL} alerting 3d   ? 1 no data`,
+    )
+    const cross = spans.filter((s) => s.text === FAIL).at(-1)
+    expect(cross).toMatchObject({ dim: true })
+    expect(cross?.color).toBeUndefined()
+    expect(spans.find((s) => s.text === " alerting 3d")).toMatchObject({
+      dim: true,
+    })
+  })
+
+  it("only settles a failure: a settled warning stays a warning", () => {
+    const { spans } = stripRows(
+      {
+        title: "services",
+        items: [{ key: "a", state: "warn", settled: true }],
+      },
+      200,
+      NOW,
+    )
+    expect(spans.find((s) => s.text === WARN)).toMatchObject({
+      color: colors.warning,
+      bold: true,
+    })
   })
 })
 
@@ -140,17 +219,17 @@ describe("stripRows: what row 1 names", () => {
         { key: "b", state: "unknown" },
       ],
     }
-    expect(stripRows(mixed, 200).issues).toBe(`a: ${FAIL}   b: ? no data`)
+    expect(stripRows(mixed, 200).issues).toBe(`a: ${FAIL}   ? 1 no data`)
     const withFine: StatusStrip = {
       ...mixed,
       items: [...mixed.items, { key: "api", state: "ok" }],
     }
     expect(stripRows(withFine, 200).issues).toBe(
-      `a: ${FAIL}   b: ? no data   ${OK} 1 fine`,
+      `a: ${FAIL}   ? 1 no data   ${OK} 1 fine`,
     )
   })
 
-  it("says `no data` for unknown itself, ignoring any cause", () => {
+  it("counts the no-data items as `? N no data`, ignoring any cause", () => {
     const { issues } = stripRows(
       {
         title: "services",
@@ -158,7 +237,7 @@ describe("stripRows: what row 1 names", () => {
       },
       200,
     )
-    expect(issues).toBe("web: ? no data")
+    expect(issues).toBe("? 1 no data")
   })
 
   it("names the healthy-with-red-build service and counts the fine behind it", () => {
@@ -219,10 +298,12 @@ describe("stripRows: what row 1 names", () => {
 
   it("draws every name regular in the default foreground, whatever its state", () => {
     const { spans } = stripRows(badDay, 200, NOW)
-    // The six names on the line: only the problem items are named; the fine
-    // three are behind the count.
+    // The four names on the line: only the problem items are named; the fine
+    // three and the two with no data are behind their counts.
     const names = new Set(
-      badDay.items.filter((i) => i.state !== "ok" || i.alarm).map((i) => i.key),
+      badDay.items
+        .filter((i) => (i.state !== "ok" && i.state !== "unknown") || i.alarm)
+        .map((i) => i.key),
     )
     const nameSpans = spans.filter((s) => names.has(s.text))
     expect(nameSpans).toHaveLength(names.size)
@@ -237,7 +318,7 @@ describe("stripRows: what row 1 names", () => {
     const { spans } = stripRows(badDay, 200, NOW)
     const fail = spans.find((s) => s.text === FAIL)
     const warn = spans.find((s) => s.text === WARN)
-    const noData = spans.find((s) => s.text === "? no data")
+    const noData = spans.find((s) => s.text === "? 2 no data")
     expect(fail).toMatchObject({ color: colors.error, bold: true })
     expect(warn).toMatchObject({ color: colors.warning, bold: true })
     expect(noData).toMatchObject({ dim: true })
@@ -257,32 +338,38 @@ describe("stripRows: what row 1 names", () => {
 
 describe("stripRows: narrow rows shed the least actionable first", () => {
   const tail = `   ${OK} 3 fine`
-  const noUnknowns =
-    `billing: ${FAIL} alerting   search: ${WARN} slow · build ${FAIL}   ` +
-    `events: ${WARN} errors   payments: ${OK} · build ${FAIL}   ? 2` +
-    tail
   const noBuilds =
     `billing: ${FAIL} alerting   search: ${WARN} slow · build ${FAIL}   ` +
-    `events: ${WARN} errors   build ${FAIL} 1   ? 2` +
+    `events: ${WARN} errors   build ${FAIL} 1   ? 2 no data` +
     tail
   // `search` was a warning with a red build: folding it counts it under both,
   // so the build it carried is never dropped with its name.
   const noWarns =
-    `billing: ${FAIL} alerting   ${WARN} 2   build ${FAIL} 2   ? 2` + tail
-  const nothingNamed = `${FAIL} 1   ${WARN} 2   build ${FAIL} 2   ? 2` + tail
+    `billing: ${FAIL} alerting   ${WARN} 2   build ${FAIL} 2   ? 2 no data` +
+    tail
+  const nothingNamed =
+    `${FAIL} 1   ${WARN} 2   build ${FAIL} 2   ? 2 no data` + tail
 
-  it("names everything while it fits", () => {
+  it("names everything while it fits, the no-data items always counted", () => {
     expect(stripRows(badDay, fits(fullIssues), NOW).issues).toBe(fullIssues)
   })
 
-  it("1. folds the no-data items into `? N` first", () => {
-    const rows = stripRows(badDay, fits(fullIssues) - 1, NOW)
-    expect(rows.issues).toBe(noUnknowns)
-    expect(stripRows(badDay, fits(noUnknowns), NOW).issues).toBe(noUnknowns)
+  it("1. folds a settled failure into `✕ N settled` before any build", () => {
+    const known: StatusStrip = {
+      title: "services",
+      items: [
+        { key: "aaa", state: "fail", cause: "alerting", settled: true },
+        { key: "bbb", state: "ok", alarm: true },
+      ],
+    }
+    const named = `bbb: ${OK} · build ${FAIL}   aaa: ${FAIL} alerting`
+    const folded = `bbb: ${OK} · build ${FAIL}   ${FAIL} 1 settled`
+    expect(stripRows(known, fits(named, false), NOW).issues).toBe(named)
+    expect(stripRows(known, fits(named, false) - 1, NOW).issues).toBe(folded)
   })
 
   it("2. then the healthy-with-red-build items into `build ✕ N`", () => {
-    expect(stripRows(badDay, fits(noUnknowns) - 1, NOW).issues).toBe(noBuilds)
+    expect(stripRows(badDay, fits(fullIssues) - 1, NOW).issues).toBe(noBuilds)
     expect(stripRows(badDay, fits(noBuilds), NOW).issues).toBe(noBuilds)
   })
 

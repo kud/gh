@@ -60,7 +60,10 @@ vi.mock("zx", () => {
  */
 class FakeStdout extends EventEmitter {
   frames: string[] = []
-  constructor(public columns: number, public rows: number) {
+  constructor(
+    public columns: number,
+    public rows: number,
+  ) {
     super()
   }
   write = (frame: string) => {
@@ -132,6 +135,7 @@ const mount = async (
   withSidebar: boolean,
   columns = 120,
   cacheKey?: string,
+  rail: Sidebar = sidebar,
 ) => {
   const stdout = new FakeStdout(columns, 40)
   const stdin = new FakeStdin()
@@ -140,7 +144,7 @@ const mount = async (
       fetcher={async () => ({
         sections,
         login: "kud",
-        ...(withSidebar ? { sidebar } : {}),
+        ...(withSidebar ? { sidebar: rail } : {}),
       })}
       title="cockpit"
       cacheKey={cacheKey}
@@ -333,6 +337,61 @@ describe("browsing the rail", () => {
     await press("c")
     expect(copied).toEqual(["https://example.invalid/PROJ-900"])
     expect(frame()).toContain("✓ Copied URL for PROJ-900")
+    stop()
+  })
+
+  it("opens the row's other place on O, named in the footer and the flash", async () => {
+    const withAlt: Sidebar = {
+      ...sidebar,
+      rows: [
+        {
+          ...sidebar.rows[0]!,
+          alt: { url: "https://ci.example.invalid/job/x/", label: "jenkins" },
+        },
+        sidebar.rows[1]!,
+      ],
+    }
+    const { frame, press, stop } = await mount(true, 120, undefined, withAlt)
+    await press("i")
+    shells.length = 0
+    await press(TAB)
+    expect(frame()).toContain("O jenkins")
+    await press("O")
+    expect(shells).toEqual(["open https://ci.example.invalid/job/x/"])
+    expect(frame()).toContain("↗ Opened jenkins for PROJ-900")
+    // The second row has no other place: O stays silent and is not offered.
+    shells.length = 0
+    await press(DOWN)
+    expect(frame()).not.toContain("O jenkins")
+    await press("O")
+    expect(shells).toEqual([])
+    stop()
+  })
+
+  // One key for "what wants me": rail open, focused, on the first row asking.
+  it("opens and focuses the rail on I, on the first row that wants you", async () => {
+    const asking: Sidebar = {
+      title: "Initiatives",
+      rows: [
+        {
+          key: "PROJ-1",
+          label: "Quiet",
+          url: "https://example.invalid/PROJ-1",
+        },
+        {
+          key: "PROJ-2",
+          label: "Asking",
+          wantsYou: true,
+          url: "https://example.invalid/PROJ-2",
+        },
+      ],
+    }
+    const { frame, press, stop } = await mount(true, 120, undefined, asking)
+    shells.length = 0
+    await press("I")
+    expect(frame()).toContain("● focus")
+    await press("o")
+    expect(shells).toEqual(["open https://example.invalid/PROJ-2"])
     stop()
   })
 
