@@ -113,3 +113,57 @@ describe("fitCount pays for exactly the gaps that get drawn", () => {
     expect(fitCount(ROWS, 0, 1)).toBe(1)
   })
 })
+
+// Two levels: a side's header, then its bands one level down. The side keeps
+// its air from whatever came before it; its first band sits flush beneath it,
+// and a later band still gets its own line.
+describe("gapsAbove under two levels", () => {
+  const side = (label: string): AnyItem => ({
+    kind: "subgroup-header",
+    label,
+    age: "",
+    depth: 0,
+  })
+  const band = (label: string): AnyItem => ({
+    kind: "subgroup-header",
+    label,
+    age: "",
+    depth: 1,
+  })
+  const row = { ...(pr(1) as object), indent: false } as AnyItem
+
+  //  0 side · 1 band · 2 pr · 3 band · 4 pr · 5 side · 6 band · 7 pr
+  const TWO: AnyItem[] = [
+    side("Mine (2)"),
+    band("Your move (1)"),
+    row,
+    band("Their move (1)"),
+    row,
+    side("Others (1)"),
+    band("Your move (1)"),
+    row,
+  ]
+
+  it("never gaps a side's first band from the side above it", () => {
+    expect(gapsAbove(TWO, 1)).toBe(false)
+    expect(gapsAbove(TWO, 6)).toBe(false)
+  })
+
+  it("gaps a band that follows rows, and a side that follows rows", () => {
+    expect(gapsAbove(TWO, 3)).toBe(true)
+    expect(gapsAbove(TWO, 5)).toBe(true)
+  })
+
+  // A band header is not a child in any tree: the row before it closes its
+  // band rather than opening a branch into the header.
+  it("keeps a top-level ticket before a depth-1 band a plain line", () => {
+    const rows = [task("SHOP-1"), task("SHOP-2"), band("Their move (1)")]
+    expect(gapsAbove(rows, 1)).toBe(false)
+  })
+
+  it("prices those gaps the same in fitCount", () => {
+    // 8 rows, gapping at 3 and 5 only: ten lines for all of them.
+    expect(fitCount(TWO, 0, 10)).toBe(8)
+    expect(fitCount(TWO, 0, 9)).toBe(7)
+  })
+})

@@ -165,3 +165,45 @@ describe("copyUrls out of range", () => {
     expect(copyUrls([], 0)).toEqual([])
   })
 })
+
+describe("copyUrls under two levels", () => {
+  const level = (label: string, depth: number): AnyItem => ({
+    kind: "subgroup-header",
+    label,
+    age: "",
+    depth,
+  })
+
+  //  0 side(Mine) · 1 band(Your move) · 2 fence · 3 #1 · 4 band(Their move) ·
+  //  5 fence · 6 #2 · 7 side(Others) · 8 band(Your move) · 9 fence · 10 #3
+  const TWO: AnyItem[] = [
+    level("Mine (2)", 0),
+    level("Your move (1)", 1),
+    fence("acme/api"),
+    pr(1, "acme/api"),
+    level("Their move (1)", 1),
+    fence("acme/bus"),
+    pr(2, "acme/bus"),
+    level("Others (1)", 0),
+    level("Your move (1)", 1),
+    fence("acme/api"),
+    pr(3, "acme/api"),
+  ]
+
+  it("takes every band under a side, and stops at the next side", () => {
+    expect(copyUrls(TWO, 0)).toEqual([
+      prUrl("acme/api", 1),
+      prUrl("acme/bus", 2),
+    ])
+    expect(copyUrls(TWO, 7)).toEqual([prUrl("acme/api", 3)])
+  })
+
+  it("keeps a band inside a side to its own rows", () => {
+    expect(copyUrls(TWO, 1)).toEqual([prUrl("acme/api", 1)])
+    expect(copyUrls(TWO, 4)).toEqual([prUrl("acme/bus", 2)])
+  })
+
+  it("never carries a side's last band into the next side", () => {
+    expect(bandUrls(TWO, 4)).not.toContain(prUrl("acme/api", 3))
+  })
+})

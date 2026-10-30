@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest"
 
-import { layoutGHItems, whoseMove, bandOf, type GHItem } from "./inbox.js"
+import {
+  layoutGHItems,
+  layoutSides,
+  rowKey,
+  withoutItem,
+  whoseMove,
+  bandOf,
+  type GHItem,
+} from "./inbox.js"
 
 /*
  * The 2026-08-26 case: the Review tab held 20 rows across five repos, of which
@@ -468,5 +476,79 @@ describe("the authored bands", () => {
     expect(labels(layoutGHItems(rows, "open", "viewer"))).toEqual([
       "Ready to merge (2)",
     ])
+  })
+})
+
+/*
+ * Sides over bands: a host groups first ("Mine", "Others"), and each side runs
+ * the same whose-move banding a whole tab does. The labels collide by design,
+ * so what keeps two "Your move" headers apart is their id — and what keeps a
+ * side alive when one of its rows leaves is that its first child is a header.
+ */
+describe("layoutSides through the inbox", () => {
+  const mine = item({
+    repo: "kud/epure",
+    number: 1,
+    url: "https://github.com/kud/epure/pull/1",
+    health: "approved",
+  })
+  const theirs = item({
+    repo: "acme/api-gateway",
+    number: 2,
+    url: "https://github.com/acme/api-gateway/pull/2",
+    health: "approved",
+  })
+  const laid = layoutSides(
+    [
+      { key: "mine", label: "Mine", items: [mine] },
+      { key: "others", label: "Others", items: [theirs] },
+    ],
+    "open",
+    "kud",
+  )
+
+  it("bands each side the way the tab would", () => {
+    expect(labels(laid)).toEqual([
+      "Mine (1)",
+      "Ready to merge (1)",
+      "Others (1)",
+      "Ready to merge (1)",
+    ])
+  })
+
+  it("keys the two same-named bands apart", () => {
+    const keys = laid
+      .filter((r) => r.kind === "subgroup-header")
+      .map((r) => rowKey(r))
+    expect(new Set(keys).size).toBe(keys.length)
+  })
+
+  it("keys a header without an id on its label, as before", () => {
+    const [header] = layoutGHItems([mine], "open", "kud")
+    expect(rowKey(header!)).toBe("subgroup:Ready to merge (1)")
+  })
+
+  it("keeps a side's header while the side still holds rows", () => {
+    const sections = withoutItem(
+      [
+        {
+          id: "open",
+          label: "Open",
+          items: layoutSides(
+            [
+              {
+                key: "mine",
+                label: "Mine",
+                items: [mine, { ...mine, number: 3, url: "u3" }],
+              },
+            ],
+            "open",
+            "kud",
+          ),
+        },
+      ],
+      mine,
+    )
+    expect(labels(sections[0]!.items)).toContain("Mine (2)")
   })
 })

@@ -159,6 +159,7 @@ import {
   bandOf,
   PIN_MARK,
   layoutGHItems,
+  layoutSides,
   NEEDS_YOU_SECTION,
   filterByOrigin,
   filterBySearch,
@@ -181,6 +182,7 @@ import type {
   Band,
   Standing,
   OriginSplit,
+  LayoutSide,
 } from "@kud/gh-workflow"
 export {
   depthOf,
@@ -195,6 +197,7 @@ export {
   bandOf,
   PIN_MARK,
   layoutGHItems,
+  layoutSides,
   NEEDS_YOU_SECTION,
   filterByOrigin,
   filterBySearch,
@@ -217,6 +220,7 @@ export type {
   Band,
   Standing,
   OriginSplit,
+  LayoutSide,
 }
 
 // ─── Work filter ─────────────────────────────────────────────────────────────
@@ -798,13 +802,17 @@ const isHeader = (i: AnyItem) =>
 // insertRepoHeaders emits a repo-header immediately before its own rows, so for
 // one the test is just whether the next element is a row. A subgroup-header sits
 // a level up, above repo-headers, so it scans past those and gives up only at
-// the next subgroup or the end of the list.
+// the next subgroup of its own level or shallower, or the end of the list. A
+// side's header is followed directly by its first band's, and stopping at any
+// subgroup would have dropped every side header on the first close.
 const headerOwnsContent = (items: AnyItem[], idx: number): boolean => {
-  const kind = items[idx].kind
+  const header = items[idx]
   for (let i = idx + 1; i < items.length; i++) {
     const next = items[i]
     if (!isHeader(next)) return true
-    if (kind === "repo-header" || next.kind === "subgroup-header") return false
+    if (header.kind === "repo-header") return false
+    if (next.kind === "subgroup-header" && depthOf(next) <= depthOf(header))
+      return false
   }
   return false
 }
@@ -936,6 +944,17 @@ export const budgetNotice = (
 // it used to sit — `gapsAbove` depends on it, and a dependency 1,100 lines
 // below the thing that needs it survives only by module-evaluation order.
 
+// Where an item sits in the TREE, which for a band header is nowhere: it fences
+// trees rather than hanging in one. A header's own depth is a heading level —
+// `layoutSides` puts its bands at 1 under a side at 0 — and read as a tree depth
+// that level made the last PR of every band open a branch (`┬`) into the next
+// band's header, a child before it close with `├─` as if a sibling followed, and
+// the tab count skip that PR as a container. So every tree walk below reads
+// this, and only the heading logic (`bandUrls`, the gap between a side and its
+// first band, the header's render) reads `depthOf` on a header.
+const treeDepthOf = (item?: AnyItem): number =>
+  item?.kind === "subgroup-header" ? 0 : depthOf(item)
+
 // A row that hangs UNDER something rather than beside it.
 //
 // show-more / show-less used to be children unconditionally, whatever they
@@ -945,7 +964,7 @@ export const budgetNotice = (
 // held. That is the loss the treeUrls comment below warns about — nothing on
 // screen reports it — so the depth a collapsed row carries has to be readable
 // from the same predicate that places every other row.
-const isChildRow = (item?: AnyItem): boolean => depthOf(item) > 0
+const isChildRow = (item?: AnyItem): boolean => treeDepthOf(item) > 0
 
 /**
  * Is this the last row at its own level, or does a sibling follow?
@@ -958,9 +977,9 @@ const isChildRow = (item?: AnyItem): boolean => depthOf(item) > 0
  * shallower means the parent's boundary, falling off the end means last.
  */
 const isLastAtDepth = (items: readonly AnyItem[], i: number): boolean => {
-  const depth = depthOf(items[i])
+  const depth = treeDepthOf(items[i])
   for (let j = i + 1; j < items.length; j += 1) {
-    const d = depthOf(items[j])
+    const d = treeDepthOf(items[j])
     if (d > depth) continue
     return d < depth
   }
@@ -985,7 +1004,7 @@ const isLastAtDepth = (items: readonly AnyItem[], i: number): boolean => {
  * one column too many scrolls the whole panel instead of clipping.
  */
 const treePrefix = (items: readonly AnyItem[], i: number): string => {
-  const depth = depthOf(items[i])
+  const depth = treeDepthOf(items[i])
   if (depth === 0) return ""
 
   // Nearest ancestor first: walk up, taking the row that owns each level above
@@ -994,7 +1013,7 @@ const treePrefix = (items: readonly AnyItem[], i: number): string => {
   const ancestorLast: boolean[] = []
   let level = depth - 1
   for (let j = i - 1; j >= 0 && level >= 1; j -= 1) {
-    if (depthOf(items[j]) === level) {
+    if (treeDepthOf(items[j]) === level) {
       ancestorLast[level] = isLastAtDepth(items, j)
       level -= 1
     }
@@ -1011,8 +1030,21 @@ const TREE_ROOT = "┬"
 
 // Does the next row hang off this one? Its stem drops from this row's own
 // transit cell, so a child row marks the joint there.
+// Does a deeper header follow this one directly? That makes it a side over
+// bands rather than a band over rows. Read off the list rather than the header,
+// so a host that never lays out sides cannot draw one by accident.
+export const opensBands = (items: readonly AnyItem[], i: number): boolean => {
+  const item = items[i]
+  const next = items[i + 1]
+  return (
+    item?.kind === "subgroup-header" &&
+    next?.kind === "subgroup-header" &&
+    depthOf(next) > depthOf(item)
+  )
+}
+
 const opensBranch = (items: readonly AnyItem[], i: number): boolean =>
-  depthOf(items[i + 1]) > depthOf(items[i])
+  treeDepthOf(items[i + 1]) > treeDepthOf(items[i])
 
 /**
  * Every URL in the tree the cursor is standing in: the row that opens it, then
@@ -1083,13 +1115,17 @@ export const treeUrls = (items: readonly AnyItem[], i: number): string[] => {
   // pair cannot drift apart later.
   if (items[i]?.kind === "repo-header") return groupUrls(items, i)
   let root = i
-  while (root > 0 && depthOf(items[root]) > 0 && items[root]?.kind !== "task")
+  while (
+    root > 0 &&
+    treeDepthOf(items[root]) > 0 &&
+    items[root]?.kind !== "task"
+  )
     root -= 1
-  const rootDepth = depthOf(items[root])
+  const rootDepth = treeDepthOf(items[root])
   const urls: string[] = []
   for (let j = root; j < items.length; j += 1) {
     const item = items[j]
-    if (j > root && depthOf(item) <= rootDepth) break
+    if (j > root && treeDepthOf(item) <= rootDepth) break
     if (item.kind === "show-more") {
       for (const child of item.hidden) if (child.url) urls.push(child.url)
       continue
@@ -1109,12 +1145,17 @@ export const treeUrls = (items: readonly AnyItem[], i: number): string[] => {
  * the same over-copy `groupUrls` refuses between fences, one level up. The
  * count in the header is what the key promises, so the run stops where the
  * header's own tally does.
+ *
+ * Under two levels the run ends at the next header of the SAME level or
+ * shallower: a side's header (`Mine (6)`) owns the bands beneath it, so `c` on
+ * it takes all six, while a band inside it stops at its sibling band.
  */
 export const bandUrls = (items: readonly AnyItem[], i: number): string[] => {
   const urls: string[] = []
+  const level = depthOf(items[i])
   for (let j = i + 1; j < items.length; j += 1) {
     const item = items[j]
-    if (item.kind === "subgroup-header") break
+    if (item.kind === "subgroup-header" && depthOf(item) <= level) break
     // A collapsed row is not a gap in the band, it IS the rest of it — same
     // reasoning as groupUrls above.
     if (item.kind === "show-more") {
@@ -1149,8 +1190,15 @@ export const copyUrls = (items: readonly AnyItem[], i: number): string[] => {
 export const gapsAbove = (items: readonly AnyItem[], i: number): boolean => {
   const item = items[i]
   if (!item || i === 0) return false
-  if (item.kind === "repo-header" || item.kind === "subgroup-header")
-    return true
+  // A side's first band sits flush under the side: the header above it is its
+  // parent, and air between them would read as the side holding nothing.
+  if (item.kind === "subgroup-header") {
+    const above = items[i - 1]
+    return !(
+      above?.kind === "subgroup-header" && depthOf(above) < depthOf(item)
+    )
+  }
+  if (item.kind === "repo-header") return true
   if (item.kind !== "task") return false
 
   // The gap separates one TREE from the next, which is not the same as one
@@ -1170,8 +1218,8 @@ export const gapsAbove = (items: readonly AnyItem[], i: number): boolean => {
   // story — air inside a tree, which is the opposite of what this exists for.
   // The gap stays binary on purpose: `fitCount` prices it, and a cost with more
   // than two values is where 2026-08-27 came from.
-  if (depthOf(item) > 0) return false
-  return depthOf(items[i + 1]) > 0 || depthOf(items[i - 1]) > 0
+  if (treeDepthOf(item) > 0) return false
+  return treeDepthOf(items[i + 1]) > 0 || treeDepthOf(items[i - 1]) > 0
 }
 
 export const fitCount = (
@@ -1227,6 +1275,10 @@ export const maxViewStart = (items: AnyItem[], budget: number): number => {
  * `instanceKey` before `key` on a task, because one ticket can legitimately be
  * drawn twice in a section under different subgroup headers, and the two copies
  * must not collapse into one identity.
+ *
+ * `id` before `label` on a subgroup header for the same reason: two sides of a
+ * tab each carry a "Your move", and keyed on the label the cursor restored onto
+ * whichever came first.
  */
 export const rowKey = (item: AnyItem): string =>
   item.kind === "task"
@@ -1234,7 +1286,7 @@ export const rowKey = (item: AnyItem): string =>
     : item.kind === "repo-header"
       ? `header:${item.repo}`
       : item.kind === "subgroup-header"
-        ? `subgroup:${item.label}`
+        ? `subgroup:${item.id ?? item.label}`
         : item.kind === "show-more"
           ? `show-more:${item.hidden[0]?.repo ?? ""}`
           : item.kind === "show-less"
@@ -1636,7 +1688,7 @@ export const workCount = (s: Section): number => {
     if ("role" in item && item.role === "container") continue
     // The next row deeper than this one means something hangs here. `depthOf`
     // answers 0 for a missing row, so the last item in a section is a leaf.
-    if (depthOf(s.items[i + 1]) > depthOf(item)) continue
+    if (treeDepthOf(s.items[i + 1]) > treeDepthOf(item)) continue
     n += 1
   }
   return n
@@ -3234,6 +3286,7 @@ const ItemRow = ({
   transitAt,
   prefix = "",
   opensBranch = false,
+  opensBands = false,
   sparkFrame = 0,
   cols,
   markerCols = 0,
@@ -3293,6 +3346,8 @@ const ItemRow = ({
   prefix?: string
   /** A child row hangs directly below this one: its stem joins here (`┬`). */
   opensBranch?: boolean
+  /** A header with deeper headers under it: a side, drawn as a section rule. */
+  opensBands?: boolean
   /** Just merged from this cockpit: sparkle in place, then the row is dropped. */
   merged?: boolean
   /** What the refresh just did to this row, for the length of the hold. */
@@ -3377,6 +3432,35 @@ const ItemRow = ({
   // A band header is a selectable row like a fence, so it wears the same cursor
   // in the same column: a fixed two-column cell, so standing on it shifts
   // nothing sideways and leaving it draws byte-identical output to before.
+  // Under two levels the header says which level it is by its shape, since the
+  // labels alone cannot: a side is a section rule — bold label, then a rule to
+  // the fence column, so it ends where every repo fence ends — and a band inside
+  // it steps in and takes `›`, the lighter of the two chevrons. A depth-0 header
+  // with no bands beneath it is a band like any other and keeps its `»`, so a
+  // one-level tab draws exactly what it always did.
+  if (item.kind === "subgroup-header" && depthOf(item) > 0)
+    return (
+      <Box marginTop={gap ? 1 : 0} width={cols} backgroundColor={selBg}>
+        <Text color={colors.info}>{active ? "❯ " : "  "}</Text>
+        <Text>{"  ".repeat(depthOf(item))}</Text>
+        <Text color={colors.accent} bold>
+          {"› "}
+        </Text>
+        <Text bold>{item.label}</Text>
+      </Box>
+    )
+
+  if (item.kind === "subgroup-header" && opensBands)
+    return (
+      <Box marginTop={gap ? 1 : 0} width={cols} backgroundColor={selBg}>
+        <Text color={colors.info}>{active ? "❯ " : "  "}</Text>
+        <Text bold>{item.label}</Text>
+        <Text dimColor={!active}>
+          {" " + "─".repeat(Math.max(4, FENCE_COLS - item.label.length - 1))}
+        </Text>
+      </Box>
+    )
+
   if (item.kind === "subgroup-header")
     return (
       <Box marginTop={gap ? 1 : 0} width={cols} backgroundColor={selBg}>
@@ -6656,6 +6740,7 @@ const BrowseScreen = ({
                     // would draw a closing corner wherever the scroll happens to cut.
                     prefix={treePrefix(section.items, viewStart + i)}
                     opensBranch={opensBranch(section.items, viewStart + i)}
+                    opensBands={opensBands(section.items, viewStart + i)}
                     sparkFrame={sparkFrame}
                     activity={
                       "url" in item ? activities?.get(item.url) : undefined

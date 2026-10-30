@@ -70,6 +70,7 @@ export {
   impliedLabels,
   labelPriority,
   layoutGHItems,
+  layoutSides,
   LookupMiss,
   NEEDS_YOU_SECTION,
   matchesFilter,

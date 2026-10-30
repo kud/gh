@@ -287,12 +287,7 @@ describe("the band header on screen", () => {
     {
       id: "open",
       label: "Open",
-      items: [
-        band,
-        fence("kud/ambre"),
-        pr(1, "kud/ambre"),
-        pr(2, "kud/ambre"),
-      ],
+      items: [band, fence("kud/ambre"), pr(1, "kud/ambre"), pr(2, "kud/ambre")],
     },
   ]
 
@@ -370,5 +365,105 @@ describe("the band header on screen", () => {
       "https://github.com/kud/ambre/pull/1\nhttps://github.com/kud/ambre/pull/2",
     ])
     expect(frame).toContain("✓ Copied 2 links")
+  })
+})
+
+// Two levels: a side over its bands. The shape is what says which level a
+// header is, since the labels collide by design — a side is a section rule,
+// a band inside it steps in under `›`.
+describe("side and band headers on screen", () => {
+  const level = (id: string, label: string, depth: number): AnyItem => ({
+    kind: "subgroup-header",
+    id,
+    label,
+    age: "",
+    depth,
+  })
+
+  const TWO_LEVEL: Section[] = [
+    {
+      id: "open",
+      label: "Open",
+      items: [
+        level("open:mine", "Mine (2)", 0),
+        level("open:mine:you", "Your move (1)", 1),
+        fence("kud/ambre"),
+        pr(1, "kud/ambre"),
+        level("open:mine:them", "Their move (1)", 1),
+        fence("kud/gh"),
+        pr(2, "kud/gh"),
+        level("open:others", "Others (1)", 0),
+        level("open:others:you", "Your move (1)", 1),
+        fence("kud/epure"),
+        pr(3, "kud/epure"),
+      ],
+    },
+  ]
+
+  const lines = (frame: string) =>
+    frame.split("\n").map((l) => l.replace(ANSI, ""))
+
+  it("draws a side as a bold label over a rule, with no chevron", async () => {
+    const { stdout, done } = mount(TWO_LEVEL)
+    await settle()
+    await settle()
+    const frame = lines(stdout.lastFrame())
+    done()
+    const side = frame.find((l) => l.includes("Mine (2)")) ?? ""
+    expect(side).toMatch(/Mine \(2\) ─{4,}/)
+    expect(side).not.toContain("»")
+    expect(side).not.toContain("›")
+  })
+
+  it("steps a band in under `›`, once per side", async () => {
+    const { stdout, done } = mount(TWO_LEVEL)
+    await settle()
+    await settle()
+    const frame = lines(stdout.lastFrame())
+    done()
+    const bands = frame.filter((l) => l.includes("› Your move"))
+    expect(bands).toHaveLength(2)
+    for (const band of bands) expect(band).toMatch(/│ {5}› Your move \(1\)/)
+    expect(frame.some((l) => l.includes("»"))).toBe(false)
+  })
+
+  it("sits the first band flush under its side", async () => {
+    const { stdout, done } = mount(TWO_LEVEL)
+    await settle()
+    await settle()
+    const frame = lines(stdout.lastFrame())
+    done()
+    const at = frame.findIndex((l) => l.includes("Others (1)"))
+    expect(frame[at + 1]).toContain("› Your move (1)")
+  })
+
+  // The gap the list prices for a band after rows has to be drawn too, or the
+  // window is bought one line short of what it shows.
+  it("draws the gap above a band that follows rows", async () => {
+    const { stdout, done } = mount(TWO_LEVEL)
+    await settle()
+    await settle()
+    const frame = lines(stdout.lastFrame())
+    done()
+    const at = frame.findIndex((l) => l.includes("› Their move (1)"))
+    expect(frame[at - 1]).toMatch(/^│ +│$/)
+  })
+
+  it("copies every row under a side on `c`", async () => {
+    copied.length = 0
+    const { stdin, done } = mount(TWO_LEVEL)
+    await settle()
+    await settle()
+    // The cursor starts on #1: fence, band, side.
+    for (let n = 0; n < 3; n += 1) {
+      stdin.press(UP)
+      await settle()
+    }
+    stdin.press("c")
+    await settle()
+    done()
+    expect(copied).toEqual([
+      "https://github.com/kud/ambre/pull/1\nhttps://github.com/kud/gh/pull/2",
+    ])
   })
 })

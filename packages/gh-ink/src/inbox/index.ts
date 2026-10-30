@@ -7,6 +7,7 @@ export {
   useActionMenu,
   CiStatusLine,
   layoutGHItems,
+  layoutSides,
   NEEDS_YOU_SECTION,
   whoseMove,
   bandOf,
@@ -83,6 +84,7 @@ export {
   type ExplainSection,
   type DetailContext,
   type OriginSplit,
+  type LayoutSide,
   type SettledResult,
 } from "./inbox.js"
 export type {
