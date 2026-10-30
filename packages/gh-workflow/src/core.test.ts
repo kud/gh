@@ -5,7 +5,9 @@ import {
   filterByOrigin,
   filterBySearch,
   layoutGHItems,
+  layoutSides,
   NEEDS_YOU_SECTION,
+  type AnyItem,
   sizeOf,
   sizePartsOf,
   type GHItem,
@@ -277,5 +279,120 @@ describe("needs-you layout", () => {
         .map((i) => (i.kind === "subgroup-header" ? i.label : ""))
       expect(labels).toEqual(["Decide (1)"])
     })
+  })
+})
+
+/*
+ * Two levels: the host's sides, then the whose-move bands inside each. The
+ * labels collide by design (both sides can owe a "Ready to merge"), so the ids
+ * are what keep the two apart, and depth is what tells a side from a band.
+ */
+describe("layoutSides", () => {
+  const headers = (laid: AnyItem[]) =>
+    laid.flatMap((i) =>
+      i.kind === "subgroup-header"
+        ? [{ id: i.id, label: i.label, depth: i.depth }]
+        : [],
+    )
+
+  const approved = (number: number, repo = "acme/api-gateway") =>
+    needsYouItem({ number, repo, health: "approved", standing: "authored" })
+  const draft = (number: number) =>
+    needsYouItem({ number, health: "draft", standing: "authored" })
+
+  it("opens each side with a counted depth-0 header, bands at depth 1", () => {
+    const laid = layoutSides(
+      [
+        { key: "mine", label: "Mine", items: [approved(1), draft(2)] },
+        { key: "others", label: "Others", items: [approved(3)] },
+      ],
+      "mine",
+      "sam",
+    )
+    expect(headers(laid)).toEqual([
+      { id: "mine:mine", label: "Mine (2)", depth: 0 },
+      { id: "mine:mine:merge", label: "Ready to merge (1)", depth: 1 },
+      { id: "mine:mine:draft", label: "Drafts (1)", depth: 1 },
+      { id: "mine:others", label: "Others (1)", depth: 0 },
+      { id: "mine:others:merge", label: "Ready to merge (1)", depth: 1 },
+    ])
+  })
+
+  it("never gives two headers the same id, whatever their labels", () => {
+    const ids = headers(
+      layoutSides(
+        [
+          { key: "a", label: "Mine", items: [approved(1)] },
+          { key: "b", label: "Others", items: [approved(2)] },
+        ],
+        "mine",
+        "sam",
+      ),
+    ).map((h) => h.id)
+    expect(new Set(ids).size).toBe(ids.length)
+  })
+
+  it("omits an empty side rather than naming it with a zero", () => {
+    const laid = layoutSides(
+      [
+        { key: "mine", label: "Mine", items: [] },
+        { key: "others", label: "Others", items: [approved(1)] },
+      ],
+      "mine",
+      "sam",
+    )
+    expect(headers(laid).map((h) => h.label)).toEqual([
+      "Others (1)",
+      "Ready to merge (1)",
+    ])
+  })
+
+  it("keeps a single-band side's band header", () => {
+    const laid = layoutSides(
+      [{ key: "mine", label: "Mine", items: [approved(1), approved(2)] }],
+      "mine",
+      "sam",
+    )
+    expect(headers(laid).map((h) => h.depth)).toEqual([0, 1])
+  })
+
+  it("lays each side out exactly as a whole tab of its rows", () => {
+    const rows = [approved(1), draft(2), approved(3, "kud/epure")]
+    const [, ...inner] = layoutSides(
+      [{ key: "mine", label: "Mine", items: rows }],
+      "mine",
+      "sam",
+    )
+    const strip = (i: AnyItem) =>
+      i.kind === "subgroup-header" ? { kind: i.kind, label: i.label } : i
+    expect(inner.map(strip)).toEqual(
+      layoutGHItems(rows, "mine", "sam").map(strip),
+    )
+  })
+
+  it("keeps rows at depth 0", () => {
+    const laid = layoutSides(
+      [{ key: "mine", label: "Mine", items: [approved(1)] }],
+      "mine",
+      "sam",
+    )
+    for (const row of laid.filter((i) => i.kind === "pr"))
+      expect(row.depth ?? 0).toBe(0)
+  })
+
+  it("leaves Done flat inside each side", () => {
+    const laid = layoutSides(
+      [{ key: "others", label: "Others", items: [approved(1)] }],
+      "done",
+      "sam",
+    )
+    expect(headers(laid)).toEqual([
+      { id: "done:others", label: "Others (1)", depth: 0 },
+    ])
+  })
+
+  it("leaves layoutGHItems' headers without an id", () => {
+    for (const h of headers(layoutGHItems([approved(1)], "mine", "sam")))
+      expect(h.id).toBeUndefined()
   })
 })

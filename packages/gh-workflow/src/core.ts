@@ -364,6 +364,12 @@ export type ShowLess = {
 
 export type SubgroupHeader = {
   kind: "subgroup-header"
+  /**
+   * A stable identity, when the label cannot be one. Two sides of a tab each
+   * carry a "Your move" band, so a surface keying headers on the label alone
+   * would fold them into one. Omitted, the label is the identity, as before.
+   */
+  id?: string
   label: string
   age: string
   /** How deep this row hangs. See `GHItem.depth`; read it through `depthOf`. */
@@ -935,35 +941,17 @@ export const bandOf = (
 // before.
 export const NEEDS_YOU_SECTION = "needs-you"
 
-// Lay out a section's GH items. The Done tab is a flat newest-first list; every
-// other tab splits into two whose-move bands, each keeping its own repo grouping
-// so the outer key stays legible inside a band. Repo headers are inserted in
-// every case, and restart per band — a repo with work on both sides of the line
-// appears under each.
-//
-// A single-sided tab still gets its one header. The label is the information —
-// eight rows under "Their move" says nothing is owed by you, which is the
-// answer the tab was opened to get, and an unlabelled list says it only to
-// somebody who already knows how the bands work. The empty side is still
-// omitted: a "(0)" header names a band with nothing in it.
-export const layoutGHItems = (
+// The bands a non-Done section splits into, in order, each already sorted and
+// with its empty siblings dropped. Shared by `layoutGHItems` and
+// `layoutSides` so a side runs exactly the banding a whole tab does: two
+// copies of this ordering would be two answers to whose move it is.
+type BandGroup = { key: string; label: string; rows: GHItem[] }
+
+const bandGroupsOf = (
   items: GHItem[],
   sectionId: string,
-  // Required, and it used to be optional on the argument that an un-updated
-  // host should degrade rather than break. It did degrade — silently, and in
-  // the one direction the bands exist to prevent. Two claims here read the row
-  // against the viewer: `lastActor` is only "somebody else" against a login,
-  // and a repo is only "yours" against one. Without it both collapse to false,
-  // every row falls back to the health table, and a PR you are owed a reply on
-  // files under Their move while the turn arrow beside it (which reads
-  // `lastActor` alone) still points at you. The three filters below re-run this
-  // layout, and ambre's host called one of them without the login for weeks;
-  // nothing failed, one band was simply wrong. A host with no viewer yet shows
-  // its loading state, not bands laid out against nobody.
   login: string,
-): AnyItem[] => {
-  if (sectionId === "done") return insertRepoHeaders(sortByRecency(items))
-
+): BandGroup[] => {
   // The needs-you tab is laid out by the host's marker, not by whose-move:
   // two bands in fixed order, "decide" then "merge", each with its own repo
   // grouping like every other band. A row the host flagged without a band is
@@ -981,15 +969,11 @@ export const layoutGHItems = (
     const NEEDS_YOU_LABEL = { decide: "Decide", merge: "Merge" } as const
     return bands
       .filter((b) => b.rows.length > 0)
-      .flatMap(({ side, rows }) => [
-        {
-          kind: "subgroup-header" as const,
-          label: `${NEEDS_YOU_LABEL[side]} (${rows.length})`,
-          age: "",
-          indent: false,
-        },
-        ...insertRepoHeaders(rows),
-      ])
+      .map(({ side, rows }) => ({
+        key: side,
+        label: NEEDS_YOU_LABEL[side],
+        rows,
+      }))
   }
 
   const sorted = sortItems(items)
@@ -1031,18 +1015,109 @@ export const layoutGHItems = (
       ),
     }),
   )
-  const filled = bands.filter((b) => b.rows.length > 0)
+  return bands
+    .filter((b) => b.rows.length > 0)
+    .map(({ side, rows }) => ({ key: side, label: BAND_LABEL[side], rows }))
+}
 
-  return filled.flatMap(({ side, rows }) => [
+// Lay out a section's GH items. The Done tab is a flat newest-first list; every
+// other tab splits into two whose-move bands, each keeping its own repo grouping
+// so the outer key stays legible inside a band. Repo headers are inserted in
+// every case, and restart per band — a repo with work on both sides of the line
+// appears under each.
+//
+// A single-sided tab still gets its one header. The label is the information —
+// eight rows under "Their move" says nothing is owed by you, which is the
+// answer the tab was opened to get, and an unlabelled list says it only to
+// somebody who already knows how the bands work. The empty side is still
+// omitted: a "(0)" header names a band with nothing in it.
+export const layoutGHItems = (
+  items: GHItem[],
+  sectionId: string,
+  // Required, and it used to be optional on the argument that an un-updated
+  // host should degrade rather than break. It did degrade — silently, and in
+  // the one direction the bands exist to prevent. Two claims here read the row
+  // against the viewer: `lastActor` is only "somebody else" against a login,
+  // and a repo is only "yours" against one. Without it both collapse to false,
+  // every row falls back to the health table, and a PR you are owed a reply on
+  // files under Their move while the turn arrow beside it (which reads
+  // `lastActor` alone) still points at you. The three filters below re-run this
+  // layout, and ambre's host called one of them without the login for weeks;
+  // nothing failed, one band was simply wrong. A host with no viewer yet shows
+  // its loading state, not bands laid out against nobody.
+  login: string,
+): AnyItem[] => {
+  if (sectionId === "done") return insertRepoHeaders(sortByRecency(items))
+
+  return bandGroupsOf(items, sectionId, login).flatMap(({ label, rows }) => [
     {
       kind: "subgroup-header" as const,
-      label: `${BAND_LABEL[side]} (${rows.length})`,
+      label: `${label} (${rows.length})`,
       age: "",
       indent: false,
     },
     ...insertRepoHeaders(rows),
   ])
 }
+
+/** One side of a two-level layout: the host's grouping and its rows. */
+export type LayoutSide = { key: string; label: string; items: GHItem[] }
+
+/**
+ * Lay out a section in two levels: the host's sides, then the usual bands
+ * within each. A side is whatever the host groups by first — "Mine" against
+ * "Others", say — and this package names none of them, for the reason on
+ * `OriginSplit`.
+ *
+ * Each non-empty side opens with a depth-0 header carrying the side's count,
+ * then runs exactly what `layoutGHItems` would for its rows alone, with the
+ * band headers one level down. An empty side is omitted for the same reason an
+ * empty band is, and a side holding one band still gets that band's header:
+ * "Their move" under a side is the answer, not decoration.
+ *
+ * Header ids are namespaced by section and then by side, because the labels
+ * collide by design — every side can have a "Your move" — and a surface keying
+ * its cursor or its collapse state on the label would treat the second as the
+ * first. Rows stay at depth 0: a header's depth is a heading level, while a
+ * row's depth is where it hangs in the tree, and the rows hang no deeper for
+ * having a heading above them.
+ *
+ * Done keeps its flat newest-first list inside each side; it has no bands.
+ */
+export const layoutSides = (
+  sides: readonly LayoutSide[],
+  sectionId: string,
+  login: string,
+): AnyItem[] =>
+  sides
+    .filter((side) => side.items.length > 0)
+    .flatMap((side): AnyItem[] => {
+      const sideId = `${sectionId}:${side.key}`
+      const header: SubgroupHeader = {
+        kind: "subgroup-header",
+        id: sideId,
+        label: `${side.label} (${side.items.length})`,
+        age: "",
+        depth: 0,
+      }
+      if (sectionId === "done")
+        return [header, ...insertRepoHeaders(sortByRecency(side.items))]
+      return [
+        header,
+        ...bandGroupsOf(side.items, sectionId, login).flatMap(
+          ({ key, label, rows }): AnyItem[] => [
+            {
+              kind: "subgroup-header",
+              id: `${sideId}:${key}`,
+              label: `${label} (${rows.length})`,
+              age: "",
+              depth: 1,
+            },
+            ...insertRepoHeaders(rows),
+          ],
+        ),
+      ]
+    })
 
 /**
  * A two-way repo split, when a host has one. `undefined` — the ordinary case —
