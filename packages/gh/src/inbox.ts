@@ -132,6 +132,11 @@ export const SOURCE_LIMITS: Record<InboxSource, number> = {
   authoredIssues: 100,
   repoPRs: 30,
   recentlyDone: 30,
+  repoIssuesUnassigned: 100,
+  repoIssuesAssigned: 100,
+  authoredIssuesUnassigned: 100,
+  authoredIssuesAssigned: 100,
+  othersDone: 30,
 }
 
 export type InboxShape = "full" | "minimal"
@@ -146,6 +151,11 @@ export type InboxSource =
   | "authoredIssues"
   | "repoPRs"
   | "recentlyDone"
+  | "repoIssuesUnassigned"
+  | "repoIssuesAssigned"
+  | "authoredIssuesUnassigned"
+  | "authoredIssuesAssigned"
+  | "othersDone"
 
 /** Every source, in the order a whole-inbox query asks for them. */
 export const INBOX_SOURCES: readonly InboxSource[] = [
@@ -157,6 +167,40 @@ export const INBOX_SOURCES: readonly InboxSource[] = [
   "authoredIssues",
   "repoPRs",
   "recentlyDone",
+]
+
+/**
+ * Sources a host asks for by name, never by default.
+ *
+ * The assignment splits are `repoIssues` and `authoredIssues` cut in two, so a
+ * whole-inbox query carrying both a parent and its halves would fetch every
+ * issue twice and sum it twice. They exist for a host that groups by side —
+ * "Mine" against "Others" — and swaps the parent for its halves in `sources`;
+ * a host that never asks for them gets exactly the query it got before.
+ *
+ * `othersDone` is opt-in for a plainer reason: it is a search no existing
+ * surface reads, and the default document should not grow a cost nobody spends.
+ */
+export const OPT_IN_INBOX_SOURCES: readonly InboxSource[] = [
+  "repoIssuesUnassigned",
+  "repoIssuesAssigned",
+  "authoredIssuesUnassigned",
+  "authoredIssuesAssigned",
+  "othersDone",
+]
+
+/**
+ * Every source this file can build, default and opt-in alike.
+ *
+ * What the per-source readers walk — `limitsFor`, `sourceCoverage`,
+ * `healthIdsFrom`, `mergeHealth` — because a source fetched by name is no less
+ * fetched: walking only the defaults would leave an opt-in source uncapped by
+ * the caller's overrides and absent from coverage, the silent truncation those
+ * functions exist to report.
+ */
+export const ALL_INBOX_SOURCES: readonly InboxSource[] = [
+  ...INBOX_SOURCES,
+  ...OPT_IN_INBOX_SOURCES,
 ]
 
 /** A repo-scoped or account-wide inbox. */
@@ -243,7 +287,7 @@ export const limitsFor = (
   options: InboxQueryOptions = {},
 ): Record<InboxSource, number> => {
   const merged = { ...SOURCE_LIMITS }
-  for (const source of INBOX_SOURCES) {
+  for (const source of ALL_INBOX_SOURCES) {
     const asked = options.limits?.[source]
     if (typeof asked === "number" && Number.isFinite(asked))
       merged[source] = Math.min(100, Math.max(1, Math.trunc(asked)))
@@ -457,6 +501,23 @@ type Selections = {
  * would invite paging a source whose cap is a cost decision rather than a
  * completeness one.
  */
+/** An issue-only search, in the selection `repoIssues` carries. */
+const issueSearch = (
+  alias: string,
+  query: string,
+  { issueConversation, issueLabels }: Selections,
+  first: number,
+) => `  ${alias}: search(query: "${query}", type: ISSUE, first: ${first}) {
+    issueCount
+    nodes { __typename ... on Issue {
+      number title createdAt url
+      repository { nameWithOwner }
+      author { login }
+      ${issueConversation}
+      ${issueLabels}
+    }}
+  }`
+
 const SOURCES: Record<
   InboxSource,
   (s: Selections, first: number, after?: string) => string
@@ -630,6 +691,68 @@ const SOURCES: Record<
       repository { nameWithOwner }
     }}
   }`,
+
+  /*
+   * The two parents split by assignment, for a host that sides issues by who
+   * has picked them up. Each pair partitions its parent, so the two halves sum
+   * to the parent's `issueCount` and the merged-tab invariant above holds one
+   * level down.
+   *
+   * `assignee:*` and NOT `-no:assignee`, which reads as the obvious complement
+   * and is silently ignored. Measured 2026-10-30 on a public repo: 1,045 open
+   * issues, `no:assignee` 1,009, `assignee:*` 36, `-no:assignee` 1,045 — the
+   * negation returns the whole parent, so the "assigned" half would have held
+   * every unassigned issue too and the sum would have double-counted 1,009 rows.
+   * Identical on GraphQL and REST search.
+   */
+  repoIssuesUnassigned: (s, first) =>
+    issueSearch(
+      "repoIssuesUnassigned",
+      `${s.scope}${s.owned}is:issue is:open no:assignee archived:false`,
+      s,
+      first,
+    ),
+
+  repoIssuesAssigned: (s, first) =>
+    issueSearch(
+      "repoIssuesAssigned",
+      `${s.scope}${s.owned}is:issue is:open assignee:* archived:false`,
+      s,
+      first,
+    ),
+
+  authoredIssuesUnassigned: (s, first) =>
+    issueSearch(
+      "authoredIssuesUnassigned",
+      `${s.scope}is:issue is:open author:@me -user:@me no:assignee archived:false`,
+      s,
+      first,
+    ),
+
+  authoredIssuesAssigned: (s, first) =>
+    issueSearch(
+      "authoredIssuesAssigned",
+      `${s.scope}is:issue is:open author:@me -user:@me assignee:* archived:false`,
+      s,
+      first,
+    ),
+
+  // `recentlyDone`'s mirror on the repos you own: what other people closed
+  // there. `-author:@me` is the whole of what keeps the two disjoint, and the
+  // `owned` prefix is what keeps this from being every PR anyone closed anywhere
+  // you have ever looked. Same window, same sort, same minimal selection, plus
+  // the author — a done row of someone else's is read by whose it was.
+  othersDone: (
+    { scope, owned, doneSince },
+    first,
+  ) => `  othersDone: search(query: "${scope}${owned}is:pr -author:@me -is:open closed:>=${doneSince} sort:updated-desc", type: ISSUE, first: ${first}) {
+    issueCount
+    nodes { __typename ... on PullRequest {
+      id number title state isDraft createdAt mergedAt closedAt url
+      repository { nameWithOwner }
+      author { login }
+    }}
+  }`,
 }
 
 const REPO_SLUG = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/
@@ -713,10 +836,16 @@ const selectionsFor = ({
  * which is exactly the shape where a change like this half-lands — the
  * single-document path drops the source and the split path goes on asking.
  */
+const AUTHORED_ISSUE_SOURCES: readonly InboxSource[] = [
+  "authoredIssues",
+  "authoredIssuesUnassigned",
+  "authoredIssuesAssigned",
+]
+
 const sourcesFor = (options: InboxQueryOptions): readonly InboxSource[] => {
   const sources = options.sources ?? INBOX_SOURCES
   return options.repo
-    ? sources.filter((source) => source !== "authoredIssues")
+    ? sources.filter((source) => !AUTHORED_ISSUE_SOURCES.includes(source))
     : sources
 }
 
@@ -1028,7 +1157,7 @@ export const sourceCoverage = (
 
   const caps = limitsFor({ limits })
 
-  for (const source of INBOX_SOURCES) {
+  for (const source of ALL_INBOX_SOURCES) {
     const answered = data[source]
     if (!answered) continue
     const shown = answered.nodes?.length ?? 0
@@ -1076,7 +1205,7 @@ export const cappedSources = (
   limits: Partial<Record<InboxSource, number>> = {},
 ): InboxSource[] => {
   const coverage = sourceCoverage(data, limits)
-  return INBOX_SOURCES.filter((source) => coverage[source]?.capped)
+  return ALL_INBOX_SOURCES.filter((source) => coverage[source]?.capped)
 }
 
 /**
@@ -1152,7 +1281,7 @@ export const healthIdsFrom = (
   const ids: string[] = []
   if (!data) return ids
 
-  for (const source of sources ?? INBOX_SOURCES)
+  for (const source of sources ?? ALL_INBOX_SOURCES)
     for (const node of data[source]?.nodes ?? []) {
       if (node?.__typename !== "PullRequest") continue
       if (typeof node.id !== "string") continue
@@ -1254,7 +1383,7 @@ export const mergeHealth = (data: any, parts: readonly any[]): any => {
   if (byId.size === 0) return data
 
   const out: any = { ...data }
-  for (const source of INBOX_SOURCES) {
+  for (const source of ALL_INBOX_SOURCES) {
     const answered = data[source]
     if (!answered?.nodes) continue
     out[source] = {

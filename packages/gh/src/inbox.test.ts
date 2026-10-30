@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest"
 
 import {
+  ALL_INBOX_SOURCES,
   HEALTH_BATCH_SIZE,
   INBOX_SOURCES,
+  OPT_IN_INBOX_SOURCES,
   MY_PRS_MAX_PAGES,
   SOURCE_LIMITS,
   sourceCoverage,
@@ -354,6 +356,118 @@ describe("merged tabs stay disjoint by construction", () => {
 
   it("still asks for it when no repo scope is set", () => {
     expect(buildInboxQueries().join("\n")).toContain("authoredIssues: search(")
+  })
+})
+
+/*
+ * The assignment splits cut each issue parent in two, and the same rule holds
+ * one level down: the halves must not intersect, or a side's total double-counts.
+ * `-no:assignee` is the spelling that reads right and is silently ignored by
+ * GitHub search, so the "assigned" half is pinned to `assignee:*` explicitly.
+ */
+describe("assignment splits partition their parents", () => {
+  const SPLITS = [
+    ["repoIssues", "repoIssuesUnassigned", "repoIssuesAssigned"],
+    ["authoredIssues", "authoredIssuesUnassigned", "authoredIssuesAssigned"],
+  ] as const
+  const query = buildInboxQuery({ sources: OPT_IN_INBOX_SOURCES })
+  const parents = buildInboxQuery()
+
+  for (const [parent, unassigned, assigned] of SPLITS)
+    it(`splits ${parent} into ${unassigned} and ${assigned}`, () => {
+      const base = searchFor(parents, parent)
+      expect(searchFor(query, unassigned)).toBe(
+        base.replace(" archived:false", " no:assignee archived:false"),
+      )
+      expect(searchFor(query, assigned)).toBe(
+        base.replace(" archived:false", " assignee:* archived:false"),
+      )
+      expect(searchFor(query, assigned)).not.toContain("-no:assignee")
+    })
+
+  it("keeps the authored halves outside the repos you own", () => {
+    for (const alias of ["authoredIssuesUnassigned", "authoredIssuesAssigned"])
+      expect(searchFor(query, alias)).toContain("author:@me -user:@me")
+    for (const alias of ["repoIssuesUnassigned", "repoIssuesAssigned"])
+      expect(searchFor(query, alias)).toContain("user:@me")
+  })
+
+  it("drops the authored halves under a repo scope, like their parent", () => {
+    const scoped = buildInboxQueries({
+      repo: "kud/epure",
+      sources: OPT_IN_INBOX_SOURCES,
+    }).join("\n")
+    expect(scoped).not.toContain("authoredIssuesUnassigned: search(")
+    expect(scoped).not.toContain("authoredIssuesAssigned: search(")
+    expect(scoped).toContain("repoIssuesUnassigned: search(")
+  })
+
+  it("carries the parent's issue selection", () => {
+    expect(blockFor(query, "repoIssuesAssigned")).toContain("labels(first: 10)")
+    expect(blockFor(query, "repoIssuesAssigned")).toContain("comments(last: 1)")
+  })
+})
+
+describe("othersDone", () => {
+  const q = () =>
+    searchFor(buildInboxQuery({ sources: ["othersDone"] }), "othersDone")
+
+  it("asks for other people's closed PRs on the repos you own", () => {
+    expect(q()).toContain("user:@me")
+    expect(q()).toContain("is:pr")
+    expect(q()).toContain("-is:open")
+    expect(q()).toContain("sort:updated-desc")
+  })
+
+  // `recentlyDone` claims your own, so this one negates exactly that.
+  it("stays disjoint from recentlyDone", () => {
+    expect(q()).toContain("-author:@me")
+    expect(searchFor(buildInboxQuery(), "recentlyDone")).toContain(
+      " author:@me",
+    )
+  })
+
+  it("windows on the same day as recentlyDone", () => {
+    const both = buildInboxQuery({
+      doneWithinDays: 3,
+      sources: ["recentlyDone", "othersDone"],
+    })
+    const day = (alias: string) =>
+      searchFor(both, alias).match(/closed:>=(\S+)/)?.[1]
+    expect(day("othersDone")).toBe(day("recentlyDone"))
+  })
+
+  it("selects recentlyDone's minimal fields plus the author", () => {
+    const block = blockFor(
+      buildInboxQuery({ sources: ["othersDone"] }),
+      "othersDone",
+    )
+    expect(block).toContain("mergedAt closedAt")
+    expect(block).toContain("author { login }")
+    expect(block).not.toContain("reviewThreads")
+    expect(block).not.toContain("additions")
+  })
+})
+
+describe("opt-in sources", () => {
+  it("stay out of the default query, so existing callers fetch the same", () => {
+    expect(INBOX_SOURCES).not.toContain("othersDone")
+    const query = buildInboxQuery()
+    for (const alias of OPT_IN_INBOX_SOURCES)
+      expect(query).not.toContain(`${alias}: search(`)
+  })
+
+  it("are walked by coverage and limits like any other", () => {
+    expect(ALL_INBOX_SOURCES).toEqual([
+      ...INBOX_SOURCES,
+      ...OPT_IN_INBOX_SOURCES,
+    ])
+    expect(limitsFor({ limits: { othersDone: 7 } }).othersDone).toBe(7)
+    expect(
+      sourceCoverage({
+        repoIssuesAssigned: { issueCount: 140, nodes: new Array(100).fill({}) },
+      }).repoIssuesAssigned?.capped,
+    ).toBe(true)
   })
 })
 
