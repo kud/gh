@@ -1,5 +1,20 @@
 # @kud/gh-cockpit
 
+## 0.15.0
+
+### Minor Changes
+
+- 9b72666: Re-exports `layoutSides` from `@kud/gh-ink`, keeping the published surface in step with it.
+
+### Patch Changes
+
+- Updated dependencies [e225d1b]
+- Updated dependencies [4b68d6b]
+- Updated dependencies [9b72666]
+  - @kud/gh@0.22.0
+  - @kud/gh-workflow@0.21.0
+  - @kud/gh-ink@0.86.0
+
 ## 0.14.17
 
 ### Patch Changes
