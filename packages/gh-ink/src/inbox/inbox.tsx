@@ -812,8 +812,21 @@ const isHeader = (i: AnyItem) =>
 // the next subgroup of its own level or shallower, or the end of the list. A
 // side's header is followed directly by its first band's, and stopping at any
 // subgroup would have dropped every side header on the first close.
+// A folded side's own line (`layoutSides`' `fold`): a subgroup header naming
+// the side and nothing else. Its bands sit at its own depth, so depth cannot
+// say where it ends; the next side line does.
+const isSideHeader = (item: AnyItem | undefined): boolean =>
+  item?.kind === "subgroup-header" && !!item.side && !item.label
+
 const headerOwnsContent = (items: AnyItem[], idx: number): boolean => {
   const header = items[idx]
+  if (isSideHeader(header)) {
+    for (let i = idx + 1; i < items.length; i++) {
+      if (isSideHeader(items[i])) return false
+      if (!isHeader(items[i])) return true
+    }
+    return false
+  }
   for (let i = idx + 1; i < items.length; i++) {
     const next = items[i]
     if (!isHeader(next)) return true
@@ -3469,14 +3482,24 @@ const ItemRow = ({
       </Box>
     )
 
-  // A folded side (`layoutSides`' `fold`) rides on the band as a prefix: the
-  // word in a muted tonal block, secondary ink, no separator. It is the coarser
-  // grouping, already settled by the time the eye reaches the band, so it reads
-  // before the label without competing with it. Plain muted text was tried
-  // first (2026-11-02) and sat at the fences' lightness, where it read as
-  // furniture; the fill makes it a thing, and the word, not the hue, says
-  // which. The label stays bold, and a band with no side draws exactly what it
-  // did.
+  // A folded side (`layoutSides`' `fold`) is named once, above its bands: a
+  // header with `side` and no label, drawn as the word alone in a muted tonal
+  // block, secondary ink, no chevron. It is the coarser grouping, so it reads
+  // as a label on the stretch below rather than as one more band. Plain muted
+  // text was tried first (2026-11-02) and sat at the fences' lightness, where
+  // it read as furniture; the fill makes it a thing, and the word, not the hue,
+  // says which. It rode on every band as a prefix for an afternoon, which said
+  // the side once per band; once is enough.
+  if (item.kind === "subgroup-header" && item.side && !item.label)
+    return (
+      <Box marginTop={gap ? 1 : 0} width={cols} backgroundColor={selBg}>
+        <Text color={colors.info}>{active ? "❯ " : "  "}</Text>
+        <Text backgroundColor={tonalColors.muted.fill} color={colors.secondary}>
+          {` ${item.side} `}
+        </Text>
+      </Box>
+    )
+
   if (item.kind === "subgroup-header")
     return (
       <Box marginTop={gap ? 1 : 0} width={cols} backgroundColor={selBg}>
@@ -3484,17 +3507,6 @@ const ItemRow = ({
         <Text color={colors.accent} bold>
           {"» "}
         </Text>
-        {item.side ? (
-          <>
-            <Text
-              backgroundColor={tonalColors.muted.fill}
-              color={colors.secondary}
-            >
-              {` ${item.side} `}
-            </Text>
-            <Text> </Text>
-          </>
-        ) : null}
         <Text bold>{item.label}</Text>
       </Box>
     )

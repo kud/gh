@@ -468,8 +468,8 @@ describe("side and band headers on screen", () => {
   })
 })
 
-// One level: the side folded into each band as a quiet prefix. The label keeps
-// the column it has with no side, so a tab that never folds draws as before.
+// One level: each side named once on its own line, its bands below it at the
+// same depth, so a tab that never folds draws as before.
 describe("folded side prefix on screen", () => {
   const band = (id: string, label: string, side?: string): AnyItem => ({
     kind: "subgroup-header",
@@ -485,10 +485,12 @@ describe("folded side prefix on screen", () => {
       id: "review",
       label: "Review",
       items: [
-        band("review:mine:merge", "Ready to merge (1)", "Mine"),
+        band("review:mine", "", "Mine"),
+        band("review:mine:merge", "Ready to merge (1)"),
         fence("kud/gh"),
         pr(1, "kud/gh"),
-        band("review:others:you", "Your move (1)", "Others"),
+        band("review:others", "", "Others"),
+        band("review:others:you", "Your move (1)"),
         fence("kud/epure"),
         pr(2, "kud/epure"),
       ],
@@ -498,16 +500,16 @@ describe("folded side prefix on screen", () => {
   const lines = (frame: string) =>
     frame.split("\n").map((l) => l.replace(ANSI, ""))
 
-  it("draws the side before the band, after the chevron", async () => {
+  it("draws the side once, on its own line, above its bands", async () => {
     const { stdout, done } = mount(FOLDED)
     await settle()
     await settle()
     const frame = lines(stdout.lastFrame())
     done()
-    expect(frame.some((l) => l.includes("»  Mine  Ready to merge (1)"))).toBe(
+    expect(frame.some((l) => l.replace(/│/g, "").trim() === "Mine")).toBe(true)
+    expect(frame.some((l) => l.replace(/│/g, "").trim() === "Others")).toBe(
       true,
     )
-    expect(frame.some((l) => l.includes("»  Others  Your move (1)"))).toBe(true)
     expect(frame.some((l) => /─{4,}/.test(l) && l.includes("Mine"))).toBe(false)
   })
 })

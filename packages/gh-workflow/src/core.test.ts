@@ -461,7 +461,12 @@ describe("layoutSides folded", () => {
     })
   const fold = { fold: true }
 
-  it("prefixes every band with its side when both sides hold rows", () => {
+  // Each header as one string: a side's own line as `[Mine]`, a band as its
+  // label.
+  const outline = (laid: AnyItem[]) =>
+    headers(laid).map((h) => (h.side && !h.label ? `[${h.side}]` : h.label))
+
+  it("names each side once, above its bands", () => {
     const laid = layoutSides(
       [
         {
@@ -475,45 +480,18 @@ describe("layoutSides folded", () => {
       "sam",
       fold,
     )
-    expect(headers(laid)).toEqual([
-      {
-        id: "review:mine:merge",
-        side: "Mine",
-        label: "Ready to merge (1)",
-        depth: 0,
-      },
-      {
-        id: "review:mine:them",
-        side: "Mine",
-        label: "Their move (1)",
-        depth: 0,
-      },
-      {
-        id: "review:others:you",
-        side: "Others",
-        label: "Your move (1)",
-        depth: 0,
-      },
+    expect(outline(laid)).toEqual([
+      "[Mine]",
+      "Ready to merge (1)",
+      "Their move (1)",
+      "[Others]",
+      "Your move (1)",
     ])
+    expect(headers(laid).every((h) => h.depth === 0)).toBe(true)
+    expect(headers(laid)[0]?.id).toBe("review:mine")
   })
 
-  it("heads both sides even when neither holds an answer", () => {
-    const laid = layoutSides(
-      [
-        { key: "mine", label: "Mine", items: [authored(1, "waiting")] },
-        { key: "others", label: "Others", items: [authored(2, "waiting")] },
-      ],
-      "review",
-      "sam",
-      fold,
-    )
-    expect(headers(laid).map((h) => `${h.side} · ${h.label}`)).toEqual([
-      "Mine · Their move (1)",
-      "Others · Their move (1)",
-    ])
-  })
-
-  it("heads a lone side's lone band, unprefixed", () => {
+  it("names a lone side and heads its lone band", () => {
     const rows = [authored(1, "approved"), authored(2, "approved")]
     const laid = layoutSides(
       [
@@ -524,58 +502,11 @@ describe("layoutSides folded", () => {
       "sam",
       fold,
     )
-    expect(headers(laid).map((h) => [h.side, h.label])).toEqual([
-      [undefined, "Ready to merge (2)"],
-    ])
+    expect(outline(laid)).toEqual(["[Mine]", "Ready to merge (2)"])
     expect(laid.filter((i) => i.kind === "pr")).toHaveLength(2)
   })
 
-  it("heads a lone side's bands, unprefixed, when one is an answer", () => {
-    const laid = layoutSides(
-      [
-        {
-          key: "mine",
-          label: "Mine",
-          items: [authored(1, "approved"), authored(2, "waiting")],
-        },
-      ],
-      "review",
-      "sam",
-      fold,
-    )
-    expect(headers(laid)).toEqual([
-      {
-        id: "review:mine:merge",
-        side: undefined,
-        label: "Ready to merge (1)",
-        depth: 0,
-      },
-      {
-        id: "review:mine:them",
-        side: undefined,
-        label: "Their move (1)",
-        depth: 0,
-      },
-    ])
-  })
-
-  it("heads a lone side even when none of its bands is an answer", () => {
-    const laid = layoutSides(
-      [
-        {
-          key: "mine",
-          label: "Mine",
-          items: [authored(1, "draft"), authored(2, "waiting")],
-        },
-      ],
-      "review",
-      "sam",
-      fold,
-    )
-    expect(headers(laid)).toHaveLength(2)
-  })
-
-  it("heads the bands when a tail joins them, prefixing it like a band", () => {
+  it("puts a side's tail under its own name", () => {
     const parked: AnyItem = {
       kind: "show-more",
       hidden: [queued(9, "waiting")],
@@ -594,19 +525,11 @@ describe("layoutSides folded", () => {
       "sam",
       fold,
     )
-    expect(headers(laid)).toEqual([
-      {
-        id: "review:mine:merge",
-        side: "Mine",
-        label: "Ready to merge (1)",
-        depth: 0,
-      },
-      {
-        id: "review:others:dormant",
-        side: "Others",
-        label: "Dormant (1)",
-        depth: 0,
-      },
+    expect(outline(laid)).toEqual([
+      "[Mine]",
+      "Ready to merge (1)",
+      "[Others]",
+      "Dormant (1)",
     ])
   })
 

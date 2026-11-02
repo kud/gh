@@ -372,11 +372,10 @@ export type SubgroupHeader = {
   id?: string
   label: string
   /**
-   * The side this band belongs to, when the side has been folded into it
-   * rather than drawn as a heading of its own: "Mine" on a "Their move" band.
-   * A surface draws it before the label as a quieter prefix. Kept out of
-   * `label` so the label is still the band's own name, the one a search, a
-   * collapse key or a test reads, whichever side it sits on.
+   * A folded side's own line: with an empty `label`, this header names the
+   * side ("Mine") its bands sit under, at their depth, so a surface draws the
+   * word alone. Kept out of `label` so a band's label stays its own name, the
+   * one a search, a collapse key or a test reads.
    */
   side?: string
   age: string
@@ -1126,13 +1125,13 @@ const sideHasContent = (side: LayoutSide): boolean =>
  * under it, then the repo fence. On a calm tab two of the three restated the
  * tab's own count ("Mine (75)", "Your move (75)" under a tab chip reading 75),
  * and on a busy one the reader still had to hold two levels to place a row. So
- * the side becomes a prefix on each band ("Mine · Their move (2)", `side` on
- * the header) and every header sits at depth 0.
+ * every header sits at depth 0, and the side is named once, on a line of its
+ * own above its bands: a header with `side` and an empty label, carrying no
+ * count, so it never restates the band under it. The side rode on every band as
+ * a prefix ("Mine · Their move (2)") for an afternoon of 2026-11-02, which said
+ * it once per band.
  *
- * Folded, every group keeps its header, a lone one included. With two sides on
- * screen each header carries its side as a prefix, since that is the only thing
- * saying which side a row is on; with one the prefix is dropped, as it would
- * restate the only side there is.
+ * Folded, every group keeps its header, a lone one included.
  *
  * Until 2026-11-02 a lone group went unheaded, after the work board's ticket
  * tree: a tab of nothing but Your move was just its rows. It read as a list
@@ -1206,10 +1205,8 @@ const foldSides = (
   sectionId: string,
   login: string,
 ): AnyItem[] => {
-  const twoSided = present.length > 1
-  const groups = present.flatMap((side): LaidGroup[] => {
+  return present.flatMap((side): AnyItem[] => {
     const sideId = `${sectionId}:${side.key}`
-    const prefix = twoSided ? { side: side.label } : {}
     // Done has no bands, so the side IS its one group, and its header is the
     // side's own name rather than a prefix on nothing.
     const own: LaidGroup[] =
@@ -1234,20 +1231,35 @@ const foldSides = (
                 kind: "subgroup-header",
                 id: `${sideId}:${key}`,
                 label: `${label} (${rows.length})`,
-                ...prefix,
                 age: "",
                 depth: 0,
               },
               items: insertRepoHeaders(rows),
             }),
           )
-    const tail = tailOf(side, sideId, 0).map((g) => ({
-      ...g,
-      header: { ...g.header, ...prefix },
-    }))
-    return [...own, ...tail]
+    const groups = [...own, ...tailOf(side, sideId, 0)]
+    if (groups.length === 0) return []
+    // The side is named once, above its groups, rather than on each of them:
+    // a header carrying `side` and no label. Done needs none, its one group is
+    // already the side by name.
+    const parent: AnyItem[] =
+      sectionId === "done"
+        ? []
+        : [
+            {
+              kind: "subgroup-header",
+              id: sideId,
+              label: "",
+              side: side.label,
+              age: "",
+              depth: 0,
+            },
+          ]
+    return [
+      ...parent,
+      ...groups.flatMap(({ header, items }) => [header, ...items]),
+    ]
   })
-  return groups.flatMap(({ header, items }) => [header, ...items])
 }
 
 /**
