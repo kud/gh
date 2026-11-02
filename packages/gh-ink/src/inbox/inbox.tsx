@@ -104,6 +104,7 @@ import {
 } from "./focus-slot.js"
 import {
   colors,
+  tonalColors,
   CommandPalette,
   FooterHints,
   getIconMode,
@@ -3468,11 +3469,14 @@ const ItemRow = ({
       </Box>
     )
 
-  // A folded side (`layoutSides`' `fold`) rides on the band as a prefix, in the
-  // muted tone and not bold: it is the coarser grouping, already settled by the
-  // time the eye reaches the band, so it reads before the label without
-  // competing with it. The label stays bold and in the column it always had
-  // after `» `, so a band with no side draws exactly what it did.
+  // A folded side (`layoutSides`' `fold`) rides on the band as a prefix: the
+  // word in a muted tonal block, secondary ink, no separator. It is the coarser
+  // grouping, already settled by the time the eye reaches the band, so it reads
+  // before the label without competing with it. Plain muted text was tried
+  // first (2026-11-02) and sat at the fences' lightness, where it read as
+  // furniture; the fill makes it a thing, and the word, not the hue, says
+  // which. The label stays bold, and a band with no side draws exactly what it
+  // did.
   if (item.kind === "subgroup-header")
     return (
       <Box marginTop={gap ? 1 : 0} width={cols} backgroundColor={selBg}>
@@ -3482,10 +3486,13 @@ const ItemRow = ({
         </Text>
         {item.side ? (
           <>
-            <Text color={colors.muted}>{item.side}</Text>
-            <Text color={colors.muted} dimColor>
-              {" · "}
+            <Text
+              backgroundColor={tonalColors.muted.fill}
+              color={colors.secondary}
+            >
+              {` ${item.side} `}
             </Text>
+            <Text> </Text>
           </>
         ) : null}
         <Text bold>{item.label}</Text>

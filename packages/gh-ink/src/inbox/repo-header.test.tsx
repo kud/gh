@@ -504,10 +504,10 @@ describe("folded side prefix on screen", () => {
     await settle()
     const frame = lines(stdout.lastFrame())
     done()
-    expect(frame.some((l) => l.includes("» Mine · Ready to merge (1)"))).toBe(
+    expect(frame.some((l) => l.includes("»  Mine  Ready to merge (1)"))).toBe(
       true,
     )
-    expect(frame.some((l) => l.includes("» Others · Your move (1)"))).toBe(true)
+    expect(frame.some((l) => l.includes("»  Others  Your move (1)"))).toBe(true)
     expect(frame.some((l) => /─{4,}/.test(l) && l.includes("Mine"))).toBe(false)
   })
 })
