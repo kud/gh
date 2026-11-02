@@ -1094,14 +1094,6 @@ export type LayoutSidesOptions = {
   fold?: boolean
 }
 
-// The bands that answer the question a tab is opened to ask, whether there is
-// something for you to do. The same test the work cockpit's ticket tree applies
-// to its own groups ("action" and "ready"), spelled in this package's keys: the
-// whose-move tab's Your move and Ready to merge, the needs-you tab's Decide and
-// Merge. A tab whose groups are all waits has nothing for a header to say that
-// the rows' own turn arrows do not.
-const ANSWER_BANDS: ReadonlySet<string> = new Set(["you", "merge", "decide"])
-
 const sideHasContent = (side: LayoutSide): boolean =>
   side.items.length > 0 || (side.tail ?? []).some((g) => g.items.length > 0)
 
@@ -1137,23 +1129,15 @@ const sideHasContent = (side: LayoutSide): boolean =>
  * the side becomes a prefix on each band ("Mine · Their move (2)", `side` on
  * the header) and every header sits at depth 0.
  *
- * Folded, a header is drawn only when it tells the reader something the rows
- * would not:
+ * Folded, every group keeps its header, a lone one included. With two sides on
+ * screen each header carries its side as a prefix, since that is the only thing
+ * saying which side a row is on; with one the prefix is dropped, as it would
+ * restate the only side there is.
  *
- * - With two sides on screen, every group is headed and prefixed, since the
- *   header is the only thing that says which side a row is on.
- * - With one, the prefix is dropped (it would restate the only side there is)
- *   and the work cockpit's rule decides: headers only when there are two or
- *   more groups and one of them is an answer (`ANSWER_BANDS`). A tab of
- *   nothing but Your move is its rows; a tab of Your move and Their move needs
- *   the line between them.
- * - A tail forces headers, because its show-more under an unheaded list reads
- *   as more of the rows above it.
- *
- * That rule costs one thing `layoutGHItems` deliberately keeps: a tab of only
- * Their move rows no longer says so in words. The stage tabs pay it to read
- * the same as the board, whose ticket tree has never headed a lone group.
- * Hosts that want the label keep the default.
+ * Until 2026-11-02 a lone group went unheaded, after the work board's ticket
+ * tree: a tab of nothing but Your move was just its rows. It read as a list
+ * with no answer at the top, where "Your move (75)" is the answer, so the
+ * header stays.
  */
 export const layoutSides = (
   sides: readonly LayoutSide[],
@@ -1201,8 +1185,6 @@ export const layoutSides = (
 type LaidGroup = {
   header: SubgroupHeader
   items: AnyItem[]
-  answers: boolean
-  hostBuilt: boolean
 }
 
 const tailOf = (side: LayoutSide, sideId: string, depth: number): LaidGroup[] =>
@@ -1217,8 +1199,6 @@ const tailOf = (side: LayoutSide, sideId: string, depth: number): LaidGroup[] =>
         depth,
       },
       items: g.items,
-      answers: false,
-      hostBuilt: true,
     }))
 
 const foldSides = (
@@ -1246,8 +1226,6 @@ const foldSides = (
                   depth: 0,
                 },
                 items: insertRepoHeaders(sortByRecency(side.items)),
-                answers: false,
-                hostBuilt: false,
               },
             ]
         : bandGroupsOf(side.items, sectionId, login).map(
@@ -1261,8 +1239,6 @@ const foldSides = (
                 depth: 0,
               },
               items: insertRepoHeaders(rows),
-              answers: ANSWER_BANDS.has(key),
-              hostBuilt: false,
             }),
           )
     const tail = tailOf(side, sideId, 0).map((g) => ({
@@ -1271,13 +1247,7 @@ const foldSides = (
     }))
     return [...own, ...tail]
   })
-  const headed =
-    twoSided ||
-    groups.some((g) => g.hostBuilt) ||
-    (groups.length > 1 && groups.some((g) => g.answers))
-  return groups.flatMap(({ header, items }) =>
-    headed ? [header, ...items] : items,
-  )
+  return groups.flatMap(({ header, items }) => [header, ...items])
 }
 
 /**

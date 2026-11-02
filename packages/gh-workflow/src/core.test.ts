@@ -513,7 +513,7 @@ describe("layoutSides folded", () => {
     ])
   })
 
-  it("draws no header over a lone side's lone band", () => {
+  it("heads a lone side's lone band, unprefixed", () => {
     const rows = [authored(1, "approved"), authored(2, "approved")]
     const laid = layoutSides(
       [
@@ -524,9 +524,10 @@ describe("layoutSides folded", () => {
       "sam",
       fold,
     )
-    expect(headers(laid)).toEqual([])
+    expect(headers(laid).map((h) => [h.side, h.label])).toEqual([
+      [undefined, "Ready to merge (2)"],
+    ])
     expect(laid.filter((i) => i.kind === "pr")).toHaveLength(2)
-    expect(laid[0]?.kind).toBe("repo-header")
   })
 
   it("heads a lone side's bands, unprefixed, when one is an answer", () => {
@@ -558,7 +559,7 @@ describe("layoutSides folded", () => {
     ])
   })
 
-  it("leaves a lone side unheaded when none of its bands is an answer", () => {
+  it("heads a lone side even when none of its bands is an answer", () => {
     const laid = layoutSides(
       [
         {
@@ -571,7 +572,7 @@ describe("layoutSides folded", () => {
       "sam",
       fold,
     )
-    expect(headers(laid)).toEqual([])
+    expect(headers(laid)).toHaveLength(2)
   })
 
   it("heads the bands when a tail joins them, prefixing it like a band", () => {
@@ -632,7 +633,9 @@ describe("layoutSides folded", () => {
           fold,
         ),
       ),
-    ).toEqual([])
+    ).toEqual([
+      { id: "done:mine", side: undefined, label: "Mine (1)", depth: 0 },
+    ])
   })
 
   it("leaves the default two-level layout as it was", () => {
