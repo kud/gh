@@ -1,5 +1,11 @@
 # @kud/gh-ink
 
+## 0.86.1
+
+### Patch Changes
+
+- 2c14ec8: Refresh the list once a row's merge sparkle ends, so a ticket the merge moved (the last PR sending it to QA) shows in its new column without pressing `r`.
+
 ## 0.86.0
 
 ### Minor Changes
