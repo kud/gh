@@ -1,5 +1,11 @@
 # @kud/gh-ink
 
+## 0.86.5
+
+### Patch Changes
+
+- 85c251d: A folded band's side reads as a small muted block (`Mine`, `Others`) instead of faint text with a dot separator, so it no longer fades into the repo lines.
+
 ## 0.86.4
 
 ### Patch Changes
