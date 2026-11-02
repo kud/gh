@@ -25,6 +25,7 @@ export {
   filterBySearch,
   filterByRepos,
   withoutItem,
+  blockEnd,
   reposInSections,
   workCount,
   warningCount,

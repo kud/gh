@@ -82,6 +82,13 @@ import {
 } from "./overrides.js"
 import type { Override, Patch } from "./overrides.js"
 import {
+  blockEnd,
+  rootOrphans,
+  treeDepthOf,
+  withoutBlocks,
+} from "./block.js"
+export { blockEnd } from "./block.js"
+import {
   SidePanel,
   railWidth,
   railsOf,
@@ -817,17 +824,19 @@ const headerOwnsContent = (items: AnyItem[], idx: number): boolean => {
   return false
 }
 
+// Cut as a block (see `blockEnd`), so whatever hangs under the row goes with it
+// rather than being left to draw its corners under somebody else. For a PR or an
+// issue the block is the row alone, so a close removes exactly what it did.
 export const withoutItem = (sections: Section[], target: GHItem): Section[] =>
   sections
     .map((s) => {
-      const kept = s.items.filter(
+      const { kept } = withoutBlocks(
+        s.items,
         (i) =>
-          isHeader(i) ||
-          !(
-            i.kind === target.kind &&
-            (i as GHItem).number === target.number &&
-            (i as GHItem).repo === target.repo
-          ),
+          !isHeader(i) &&
+          i.kind === target.kind &&
+          (i as GHItem).number === target.number &&
+          (i as GHItem).repo === target.repo,
       )
       return {
         ...s,
@@ -943,17 +952,6 @@ export const budgetNotice = (
 // its only non-trivial reader, rather than down among the render helpers where
 // it used to sit — `gapsAbove` depends on it, and a dependency 1,100 lines
 // below the thing that needs it survives only by module-evaluation order.
-
-// Where an item sits in the TREE, which for a band header is nowhere: it fences
-// trees rather than hanging in one. A header's own depth is a heading level —
-// `layoutSides` puts its bands at 1 under a side at 0 — and read as a tree depth
-// that level made the last PR of every band open a branch (`┬`) into the next
-// band's header, a child before it close with `├─` as if a sibling followed, and
-// the tab count skip that PR as a container. So every tree walk below reads
-// this, and only the heading logic (`bandUrls`, the gap between a side and its
-// first band, the header's render) reads `depthOf` on a header.
-const treeDepthOf = (item?: AnyItem): number =>
-  item?.kind === "subgroup-header" ? 0 : depthOf(item)
 
 // A row that hangs UNDER something rather than beside it.
 //
@@ -1123,6 +1121,10 @@ export const treeUrls = (items: readonly AnyItem[], i: number): string[] => {
     root -= 1
   const rootDepth = treeDepthOf(items[root])
   const urls: string[] = []
+  // Not `blockEnd`, deliberately: that walk stops at a story, because a story
+  // does not move with its epic. A copy of the epic's tree is meant to take the
+  // stories' PRs too. See the comment on `blockEnd` before folding one into the
+  // other.
   for (let j = root; j < items.length; j += 1) {
     const item = items[j]
     if (j > root && treeDepthOf(item) <= rootDepth) break
@@ -1739,12 +1741,18 @@ export const countedSections = (
 ): Section[] => {
   if (!departing?.size) return sections
   const sent = new Set(sections.map((s) => s.id))
+  // `departing` names heads only, and the head takes its block with it (see
+  // `blockEnd`): a ticket's PRs are the leaves `workCount` actually counts, so
+  // dropping the ticket alone turned it from a container into nothing and left
+  // its PRs counting in a tab they had already left — the pill fell by none.
+  // `warningCount` reads these same sections, so the warning tally drops with
+  // the head too, without a cut of its own.
   return sections.map((s) => {
-    const items = s.items.filter((item) => {
+    const { kept: items } = withoutBlocks(s.items, (item) => {
       const key = keyOf(item)
-      if (!key || !departing.has(key)) return true
+      if (!key || !departing.has(key)) return false
       const to = departing.get(key)
-      return to != null && (to === s.id || !sent.has(to))
+      return !(to != null && (to === s.id || !sent.has(to)))
     })
     return items.length === s.items.length ? s : { ...s, items }
   })
@@ -5019,9 +5027,25 @@ const BrowseScreen = ({
     search != null ? filterBySearch([rawSection], search, login) : [rawSection]
   const filtered =
     repoFilter.size > 0 ? filterByRepos(searched, repoFilter, login) : searched
-  const section = filterActive
+  const shown = filterActive
     ? { ...rawSection, items: filtered[0]?.items ?? [] }
     : rawSection
+  // A row with nothing above it to hang from draws at the top level rather
+  // than borrowing whatever header is nearest as a parent — see `rootOrphans`.
+  // Every reader below (the window, the gaps, the corners, the cursor) sees the
+  // same answer, because they all read `section`.
+  const rooted = rootOrphans(shown.items)
+  const section =
+    rooted.items === shown.items
+      ? shown
+      : { ...shown, items: rooted.items as AnyItem[] }
+  useEffect(() => {
+    if (process.env.NODE_ENV !== "development") return
+    for (const orphan of rooted.orphans)
+      console.warn(
+        `gh-ink: ${rowKey(orphan)} in ${shown.id} hangs at depth ${depthOf(orphan)} under nothing; drawn at the top level`,
+      )
+  }, [rooted.orphans.map(rowKey).join("|"), shown.id])
 
   // A new query puts the cursor on the first MATCH, not on index 0. Index 0 of a
   // filtered tab is the band header the matches landed under, which is not

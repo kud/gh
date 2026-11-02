@@ -1,4 +1,5 @@
 import type { AnyItem, GHItem, TaskRow, Section } from "./inbox.js"
+import { blockEnd } from "./block.js"
 
 /**
  * What happened to a row between two fetches, IN ONE TAB.
@@ -116,6 +117,57 @@ const rowsOf = (index: Map<string, Placed>): Map<string, Set<string>> => {
   return out
 }
 
+const leavesTab = (t: Transient) => t === "out" || t === "moved-out"
+const entersTab = (t: Transient) => t === "in" || t === "moved-in"
+
+/**
+ * The rows under a marked head take the head's mark, and are reported by it.
+ *
+ * A ticket's PRs move because the ticket did (see `blockEnd`), but each of them
+ * is diffed on its own key, so a block crossing tabs used to read as a pile of
+ * separate events: the ticket `moved`, one PR `gone` because it also merged,
+ * another `new` because it had never sat in the target tab under anything —
+ * and the headline counted all three. One thing happened, to the ticket, and
+ * the rows under it say so by wearing its mark and nothing of their own.
+ *
+ * Only a mark of the same direction is replaced. A child still standing in the
+ * tab after its head left has no departure to replace — it is under another
+ * head there, and settling the tab drops departures by key, so marking it would
+ * take the copy that stayed off screen with the one that went.
+ *
+ * Returns the keys that followed, so the counts can leave them to the head. No
+ * separate clock to keep in step: a refresh ramp counts from the moment its
+ * tab was first seen (`transitSince`), so a block in one tab already shares one.
+ */
+const followHeads = (
+  sections: Section[],
+  transients: Map<string, Transient>,
+  same: (t: Transient) => boolean,
+  followers: Set<string>,
+): void => {
+  for (const section of sections) {
+    const items = section.items
+    for (let i = 0; i < items.length; i += 1) {
+      const end = blockEnd(items, i)
+      const headKey = keyOf(items[i]!)
+      const head = headKey
+        ? transients.get(markKey(section.id, headKey))
+        : undefined
+      if (head && same(head))
+        for (let j = i + 1; j < end; j += 1) {
+          const key = keyOf(items[j]!)
+          if (!key) continue
+          const mark = markKey(section.id, key)
+          const own = transients.get(mark)
+          if (!own || !same(own)) continue
+          transients.set(mark, head)
+          followers.add(key)
+        }
+      i = Math.max(i, end - 1)
+    }
+  }
+}
+
 const sameSections = (a: Set<string>, b: Set<string>): boolean =>
   a.size === b.size && [...a].every((id) => b.has(id))
 
@@ -229,6 +281,10 @@ export const diffSections = (prev: Section[], next: Section[]): DiffResult => {
     }
   }
 
+  const followers = new Set<string>()
+  followHeads(prev, transients, leavesTab, followers)
+  followHeads(next, transients, entersTab, followers)
+
   // Counted per ROW, so one move is one headline however many tabs it touched -
   // and so an epic drawn in two tabs at once is not reported twice for the one
   // edit.
@@ -237,6 +293,8 @@ export const diffSections = (prev: Section[], next: Section[]): DiffResult => {
   const changedRows = new Set<string>()
   for (const [mark, kind] of transients)
     if (kind === "changed") changedRows.add(rowKeyOfMark(mark))
+  // A row that followed its head is the head's news, already counted once.
+  const ownNews = (key: string) => !followers.has(key)
   // The headline needs the same quarantine as the marks, and needs it more: a
   // row can carry a suppressed mark quietly, but "12 new · 9 gone" in the header
   // is the loudest thing on screen and it was counting the window scrolling.
@@ -246,13 +304,15 @@ export const diffSections = (prev: Section[], next: Section[]): DiffResult => {
     sections.size > 0 && [...sections].every((id) => sampled.has(id))
 
   for (const [key, sections] of boardAfter) {
+    if (!ownNews(key)) continue
     const had = boardBefore.get(key)
     if (!had) {
       if (!onlySampled(sections)) added += 1
     } else if (!sameSections(had, sections)) changedRows.add(key)
   }
   for (const [key, sections] of boardBefore)
-    if (!boardAfter.has(key) && !onlySampled(sections)) removed += 1
+    if (!boardAfter.has(key) && !onlySampled(sections) && ownNews(key))
+      removed += 1
 
   return {
     transients,

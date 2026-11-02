@@ -122,7 +122,9 @@ describe("the type gutter", () => {
   })
 
   it("draws no gutter on a list with no task rows", async () => {
-    const plain = await mount([pr(214)])
+    // Hung from a top-level PR, so #214 keeps the tree run it has in `typed`:
+    // a nested row with nothing above it is drawn flat (see `rootOrphans`).
+    const plain = await mount([{ ...pr(213), indent: false }, pr(214)])
     const typed = await mount([task("SHOP-1", { pill: "epic" }), pr(214)])
     expect(columnOf(typed, "#214")).toBe(
       columnOf(plain, "#214") + TYPE_GUTTER_COLS,

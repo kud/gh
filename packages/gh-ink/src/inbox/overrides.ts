@@ -1,5 +1,7 @@
 import type { AnyItem, Section } from "./inbox.js"
+import { depthOf } from "@kud/gh-workflow"
 import { keyOf } from "./diff.js"
+import { withoutBlocks } from "./block.js"
 
 /**
  * What an action did to a row, said before the server has agreed to it.
@@ -51,24 +53,40 @@ export type Override = {
  */
 export const OVERRIDE_HOLD_MS = 30_000
 
-const withFields = (item: AnyItem, fields?: Record<string, unknown>): AnyItem =>
-  fields ? ({ ...item, ...fields } as AnyItem) : item
+const withFields = (
+  item: AnyItem,
+  fields?: Record<string, unknown>,
+): AnyItem => (fields ? ({ ...item, ...fields } as AnyItem) : item)
 
 /**
- * A moved row lands at the END of its new tab, at the top level.
+ * A moved block lands at the END of its new tab, its head at the top level.
  *
- * Its depth belonged to the tree it left: a story at depth 1 under an epic,
- * appended under whatever happens to close the target tab, would claim a parent
- * it does not have. The next agreeing fetch puts it under its real one and in
- * its real sort position — the diff reads that as no news, because nothing the
- * row draws has changed.
+ * The head's depth belonged to the tree it left: a story at depth 1 under an
+ * epic, appended under whatever happens to close the target tab, would claim a
+ * parent it does not have. The next agreeing fetch puts it under its real one
+ * and in its real sort position — the diff reads that as no news, because
+ * nothing the row draws has changed.
+ *
+ * Its children are REBASED by the same amount rather than flattened with it.
+ * The PRs under a ticket travel with the ticket (see `blockEnd`), and flattened
+ * to 0 they would land as three unrelated top-level rows: the ticket no longer
+ * a container, its PRs no longer under anything, and the tab counting a
+ * different shape from the one it was handed.
  */
-const placed = (item: AnyItem, fields?: Record<string, unknown>): AnyItem => {
-  const row = withFields(item, fields) as AnyItem & {
-    depth?: number
-    indent?: boolean
-  }
-  return { ...row, depth: 0, indent: false } as AnyItem
+const placed = (
+  block: readonly AnyItem[],
+  fields?: Record<string, unknown>,
+): AnyItem[] => {
+  const [head, ...children] = block
+  if (!head) return []
+  const shift = depthOf(head)
+  const rebase = (row: AnyItem): AnyItem =>
+    ({
+      ...row,
+      depth: Math.max(0, depthOf(row) - shift),
+      indent: false,
+    }) as AnyItem
+  return [rebase(withFields(head, fields)), ...children.map(rebase)]
 }
 
 const applyOne = (
@@ -89,10 +107,16 @@ const applyOne = (
         keyOf(item) === key ? withFields(item, patch.fields) : item,
       ),
     }))
-  const without = sections.map((s) => ({
-    ...s,
-    items: s.items.filter((item) => keyOf(item) !== key),
-  }))
+  // Every occurrence goes, each with its block, cut by position. A row's PRs
+  // used to be left where it stood — they carry other keys, so a filter by
+  // this one could not see them — and drew their corners under whichever head
+  // came above them next. The first block cut is the one that travels.
+  let moving: AnyItem[] | undefined
+  const without = sections.map((s) => {
+    const { kept, cut } = withoutBlocks(s.items, (item) => keyOf(item) === key)
+    if (!moving && cut[0]) moving = cut[0]
+    return cut.length ? { ...s, items: kept } : s
+  })
   if (patch.kind === "remove") return without
   // A tab the host did not send — it pushes only sections with rows — has no
   // label to give it, so the row stays where the server has it, wearing its
@@ -104,10 +128,9 @@ const applyOne = (
         keyOf(item) === key ? withFields(item, patch.fields) : item,
       ),
     }))
+  const block = placed(moving ?? [found], patch.fields)
   return without.map((s) =>
-    s.id === patch.toSection
-      ? { ...s, items: [...s.items, placed(found, patch.fields)] }
-      : s,
+    s.id === patch.toSection ? { ...s, items: [...s.items, ...block] } : s,
   )
 }
 

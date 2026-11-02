@@ -33,6 +33,7 @@
 export {
   ActionMenu,
   App,
+  blockEnd,
   budgetNotice,
   buildActions,
   buildCheckoutCmd,

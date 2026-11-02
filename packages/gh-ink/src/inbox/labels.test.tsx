@@ -3,7 +3,7 @@ import { EventEmitter } from "node:events"
 import React from "react"
 import { render } from "ink"
 import { App, COLS, labelPriority, impliedLabels } from "./inbox.js"
-import type { GHItem, Section } from "./inbox.js"
+import type { GHItem, Section, TaskRow } from "./inbox.js"
 import { configureInbox, resetInboxConfig } from "./config.js"
 import type { Sidebar } from "../components/side-panel.js"
 
@@ -150,9 +150,26 @@ const heavy = (labels: string[]): GHItem => ({
   age: "1w",
 })
 
+// What a nested row hangs from. A depth-1 row with nothing above it is drawn
+// at the top level (see `rootOrphans`), which would hand back the three
+// columns of tree run this row is nested to spend.
+const ticket: TaskRow = {
+  kind: "task",
+  key: "PROJ-1",
+  ticket: "PROJ-1",
+  summary: "Analytics",
+  url: "https://acme.example/browse/PROJ-1",
+  status: "In Progress",
+  age: "1w",
+}
+
 const frameOf = async (item: GHItem, withSidebar: boolean) => {
   const sections: Section[] = [
-    { id: "in-progress", label: "In progress", items: [item] },
+    {
+      id: "in-progress",
+      label: "In progress",
+      items: item.depth ? [ticket, item] : [item],
+    },
   ]
   const stdout = new FakeStdout(COLS + 4, 30)
   const stdin = new FakeStdin()
