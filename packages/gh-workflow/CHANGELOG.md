@@ -1,5 +1,11 @@
 # @kud/gh-workflow
 
+## 0.21.2
+
+### Patch Changes
+
+- 1ad275d: In the folded one-level layout every band keeps its heading, a lone one included, so a calm tab still opens on "Your move (75)".
+
 ## 0.21.1
 
 ### Patch Changes
