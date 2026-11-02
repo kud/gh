@@ -1,5 +1,13 @@
 # @kud/gh-ink
 
+## 0.86.6
+
+### Patch Changes
+
+- defacc8: In the folded layout each side is named once, on its own line above its bands, instead of on every band.
+- Updated dependencies [defacc8]
+  - @kud/gh-workflow@0.21.3
+
 ## 0.86.5
 
 ### Patch Changes
