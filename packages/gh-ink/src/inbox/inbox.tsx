@@ -7991,6 +7991,13 @@ export const App = ({
             ? { ...s, sections: withoutItem(s.sections, row) }
             : s
         })
+        // A merge moves more than its own row: the host's script may have
+        // moved the ticket it hangs under (the last PR on a ticket sends it to
+        // QA). Dropping the row alone left that ticket in its old column until
+        // someone pressed `r`, which read as the land having skipped Jira.
+        // Refetched after the sparkle, not during it, so the hold plays out on
+        // the list it started on.
+        onActed()
       }, MERGED_HOLD_MS)
     },
   })
