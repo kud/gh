@@ -1,5 +1,11 @@
 # @kud/gh-workflow
 
+## 0.21.3
+
+### Patch Changes
+
+- defacc8: In the folded layout each side is named once, on its own line above its bands, instead of on every band.
+
 ## 0.21.2
 
 ### Patch Changes
