@@ -124,8 +124,14 @@ describe("needs-you layout", () => {
   it("counts each band in its header", () => {
     const laid = layoutGHItems(
       [
-        needsYouItem({ number: 1, needsYou: { band: "decide", decision: "a" } }),
-        needsYouItem({ number: 2, needsYou: { band: "decide", decision: "b" } }),
+        needsYouItem({
+          number: 1,
+          needsYou: { band: "decide", decision: "a" },
+        }),
+        needsYouItem({
+          number: 2,
+          needsYou: { band: "decide", decision: "b" },
+        }),
         needsYouItem({ number: 3, needsYou: { band: "merge" } }),
       ],
       NEEDS_YOU_SECTION,
@@ -175,7 +181,10 @@ describe("needs-you layout", () => {
         label: "Needs you",
         items: layoutGHItems(
           [
-            needsYouItem({ number: 1, needsYou: { band: "decide", decision: "a" } }),
+            needsYouItem({
+              number: 1,
+              needsYou: { band: "decide", decision: "a" },
+            }),
             needsYouItem({ number: 2, needsYou: { band: "merge" } }),
           ],
           NEEDS_YOU_SECTION,
@@ -203,7 +212,10 @@ describe("needs-you layout", () => {
             needsYouItem({
               number: 1,
               title: "a pull request",
-              needsYou: { band: "decide", decision: "Approve the migration plan" },
+              needsYou: {
+                band: "decide",
+                decision: "Approve the migration plan",
+              },
             }),
             needsYouItem({
               number: 2,
@@ -394,5 +406,241 @@ describe("layoutSides", () => {
   it("leaves layoutGHItems' headers without an id", () => {
     for (const h of headers(layoutGHItems([approved(1)], "mine", "sam")))
       expect(h.id).toBeUndefined()
+  })
+
+  it("keeps a side holding only its tail, at a count of zero", () => {
+    const parked: AnyItem = { kind: "show-more", hidden: [approved(9)] }
+    const laid = layoutSides(
+      [
+        {
+          key: "others",
+          label: "Others",
+          items: [],
+          tail: [{ key: "dormant", label: "Dormant (1)", items: [parked] }],
+        },
+      ],
+      "review",
+      "sam",
+    )
+    expect(headers(laid)).toEqual([
+      { id: "review:others", label: "Others (0)", depth: 0 },
+      { id: "review:others:dormant", label: "Dormant (1)", depth: 1 },
+    ])
+    expect(laid.at(-1)).toBe(parked)
+  })
+})
+
+/*
+ * The same groups at one heading level, for the stage tabs. On 2026-11-02 a
+ * calm To do tab opened on "Mine (75)" over "› Your move (75)" over the first
+ * repo fence: three headings before a row, two of them restating the tab's own
+ * 75. Folded, the side rides on the band as a prefix, and a header is drawn
+ * only where it separates something.
+ */
+describe("layoutSides folded", () => {
+  const headers = (laid: AnyItem[]) =>
+    laid.flatMap((i) =>
+      i.kind === "subgroup-header"
+        ? [{ id: i.id, side: i.side, label: i.label, depth: i.depth }]
+        : [],
+    )
+  const authored = (number: number, health: GHItem["health"]) =>
+    needsYouItem({
+      number,
+      url: `https://github.com/acme/widget-store/pull/${number}`,
+      health,
+      standing: "authored",
+    })
+  const queued = (number: number, health: GHItem["health"]) =>
+    needsYouItem({
+      number,
+      url: `https://github.com/acme/widget-store/pull/${number}`,
+      health,
+      standing: "queued",
+      author: "pim",
+    })
+  const fold = { fold: true }
+
+  it("prefixes every band with its side when both sides hold rows", () => {
+    const laid = layoutSides(
+      [
+        {
+          key: "mine",
+          label: "Mine",
+          items: [authored(1, "approved"), authored(2, "waiting")],
+        },
+        { key: "others", label: "Others", items: [queued(3, "waiting")] },
+      ],
+      "review",
+      "sam",
+      fold,
+    )
+    expect(headers(laid)).toEqual([
+      {
+        id: "review:mine:merge",
+        side: "Mine",
+        label: "Ready to merge (1)",
+        depth: 0,
+      },
+      {
+        id: "review:mine:them",
+        side: "Mine",
+        label: "Their move (1)",
+        depth: 0,
+      },
+      {
+        id: "review:others:you",
+        side: "Others",
+        label: "Your move (1)",
+        depth: 0,
+      },
+    ])
+  })
+
+  it("heads both sides even when neither holds an answer", () => {
+    const laid = layoutSides(
+      [
+        { key: "mine", label: "Mine", items: [authored(1, "waiting")] },
+        { key: "others", label: "Others", items: [authored(2, "waiting")] },
+      ],
+      "review",
+      "sam",
+      fold,
+    )
+    expect(headers(laid).map((h) => `${h.side} · ${h.label}`)).toEqual([
+      "Mine · Their move (1)",
+      "Others · Their move (1)",
+    ])
+  })
+
+  it("draws no header over a lone side's lone band", () => {
+    const rows = [authored(1, "approved"), authored(2, "approved")]
+    const laid = layoutSides(
+      [
+        { key: "mine", label: "Mine", items: rows },
+        { key: "others", label: "Others", items: [] },
+      ],
+      "todo",
+      "sam",
+      fold,
+    )
+    expect(headers(laid)).toEqual([])
+    expect(laid.filter((i) => i.kind === "pr")).toHaveLength(2)
+    expect(laid[0]?.kind).toBe("repo-header")
+  })
+
+  it("heads a lone side's bands, unprefixed, when one is an answer", () => {
+    const laid = layoutSides(
+      [
+        {
+          key: "mine",
+          label: "Mine",
+          items: [authored(1, "approved"), authored(2, "waiting")],
+        },
+      ],
+      "review",
+      "sam",
+      fold,
+    )
+    expect(headers(laid)).toEqual([
+      {
+        id: "review:mine:merge",
+        side: undefined,
+        label: "Ready to merge (1)",
+        depth: 0,
+      },
+      {
+        id: "review:mine:them",
+        side: undefined,
+        label: "Their move (1)",
+        depth: 0,
+      },
+    ])
+  })
+
+  it("leaves a lone side unheaded when none of its bands is an answer", () => {
+    const laid = layoutSides(
+      [
+        {
+          key: "mine",
+          label: "Mine",
+          items: [authored(1, "draft"), authored(2, "waiting")],
+        },
+      ],
+      "review",
+      "sam",
+      fold,
+    )
+    expect(headers(laid)).toEqual([])
+  })
+
+  it("heads the bands when a tail joins them, prefixing it like a band", () => {
+    const parked: AnyItem = {
+      kind: "show-more",
+      hidden: [queued(9, "waiting")],
+    }
+    const laid = layoutSides(
+      [
+        { key: "mine", label: "Mine", items: [authored(1, "approved")] },
+        {
+          key: "others",
+          label: "Others",
+          items: [],
+          tail: [{ key: "dormant", label: "Dormant (1)", items: [parked] }],
+        },
+      ],
+      "review",
+      "sam",
+      fold,
+    )
+    expect(headers(laid)).toEqual([
+      {
+        id: "review:mine:merge",
+        side: "Mine",
+        label: "Ready to merge (1)",
+        depth: 0,
+      },
+      {
+        id: "review:others:dormant",
+        side: "Others",
+        label: "Dormant (1)",
+        depth: 0,
+      },
+    ])
+  })
+
+  it("names Done's sides outright, with no band to prefix", () => {
+    const laid = layoutSides(
+      [
+        { key: "mine", label: "Mine", items: [authored(1, "merged")] },
+        { key: "others", label: "Others", items: [authored(2, "merged")] },
+      ],
+      "done",
+      "sam",
+      fold,
+    )
+    expect(headers(laid)).toEqual([
+      { id: "done:mine", side: undefined, label: "Mine (1)", depth: 0 },
+      { id: "done:others", side: undefined, label: "Others (1)", depth: 0 },
+    ])
+    expect(
+      headers(
+        layoutSides(
+          [{ key: "mine", label: "Mine", items: [authored(1, "merged")] }],
+          "done",
+          "sam",
+          fold,
+        ),
+      ),
+    ).toEqual([])
+  })
+
+  it("leaves the default two-level layout as it was", () => {
+    const sides = [
+      { key: "mine", label: "Mine", items: [authored(1, "approved")] },
+    ]
+    expect(
+      headers(layoutSides(sides, "review", "sam")).map((h) => h.depth),
+    ).toEqual([0, 1])
   })
 })

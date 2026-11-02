@@ -371,6 +371,14 @@ export type SubgroupHeader = {
    */
   id?: string
   label: string
+  /**
+   * The side this band belongs to, when the side has been folded into it
+   * rather than drawn as a heading of its own: "Mine" on a "Their move" band.
+   * A surface draws it before the label as a quieter prefix. Kept out of
+   * `label` so the label is still the band's own name, the one a search, a
+   * collapse key or a test reads, whichever side it sits on.
+   */
+  side?: string
   age: string
   /** How deep this row hangs. See `GHItem.depth`; read it through `depthOf`. */
   depth?: number
@@ -1060,8 +1068,42 @@ export const layoutGHItems = (
   ])
 }
 
+/**
+ * A group the host lays out itself and hangs under a side, after the bands:
+ * ambre's Dormant and Muted, say, whose rows sit behind a show-more rather
+ * than in a band. `label` is drawn as given, count included, and `items` are
+ * placed as given. Counted as part of the side, so a side holding only these
+ * is still a side.
+ */
+export type SideGroup = { key: string; label: string; items: AnyItem[] }
+
 /** One side of a two-level layout: the host's grouping and its rows. */
-export type LayoutSide = { key: string; label: string; items: GHItem[] }
+export type LayoutSide = {
+  key: string
+  label: string
+  items: GHItem[]
+  /** Host-built groups after the bands. See `SideGroup`. */
+  tail?: readonly SideGroup[]
+}
+
+export type LayoutSidesOptions = {
+  /**
+   * One heading level instead of two: the side folds into each band's header
+   * as its `side` prefix, and no side header is drawn. See `layoutSides`.
+   */
+  fold?: boolean
+}
+
+// The bands that answer the question a tab is opened to ask, whether there is
+// something for you to do. The same test the work cockpit's ticket tree applies
+// to its own groups ("action" and "ready"), spelled in this package's keys: the
+// whose-move tab's Your move and Ready to merge, the needs-you tab's Decide and
+// Merge. A tab whose groups are all waits has nothing for a header to say that
+// the rows' own turn arrows do not.
+const ANSWER_BANDS: ReadonlySet<string> = new Set(["you", "merge", "decide"])
+
+const sideHasContent = (side: LayoutSide): boolean =>
+  side.items.length > 0 || (side.tail ?? []).some((g) => g.items.length > 0)
 
 /**
  * Lay out a section in two levels: the host's sides, then the usual bands
@@ -1073,7 +1115,10 @@ export type LayoutSide = { key: string; label: string; items: GHItem[] }
  * then runs exactly what `layoutGHItems` would for its rows alone, with the
  * band headers one level down. An empty side is omitted for the same reason an
  * empty band is, and a side holding one band still gets that band's header:
- * "Their move" under a side is the answer, not decoration.
+ * "Their move" under a side is the answer, not decoration. A side's `tail`
+ * follows its bands at the same level, and a side holding nothing else keeps
+ * its header with a count of zero: the tail is under it, and a band with no
+ * side above it would read as belonging to the side before.
  *
  * Header ids are namespaced by section and then by side, because the labels
  * collide by design — every side can have a "Your move" — and a surface keying
@@ -1083,41 +1128,157 @@ export type LayoutSide = { key: string; label: string; items: GHItem[] }
  * having a heading above them.
  *
  * Done keeps its flat newest-first list inside each side; it has no bands.
+ *
+ * `fold` lays the same groups out at ONE level, for a host whose tabs were
+ * stacking three headings above the first row: a side rule, a band stepped in
+ * under it, then the repo fence. On a calm tab two of the three restated the
+ * tab's own count ("Mine (75)", "Your move (75)" under a tab chip reading 75),
+ * and on a busy one the reader still had to hold two levels to place a row. So
+ * the side becomes a prefix on each band ("Mine · Their move (2)", `side` on
+ * the header) and every header sits at depth 0.
+ *
+ * Folded, a header is drawn only when it tells the reader something the rows
+ * would not:
+ *
+ * - With two sides on screen, every group is headed and prefixed, since the
+ *   header is the only thing that says which side a row is on.
+ * - With one, the prefix is dropped (it would restate the only side there is)
+ *   and the work cockpit's rule decides: headers only when there are two or
+ *   more groups and one of them is an answer (`ANSWER_BANDS`). A tab of
+ *   nothing but Your move is its rows; a tab of Your move and Their move needs
+ *   the line between them.
+ * - A tail forces headers, because its show-more under an unheaded list reads
+ *   as more of the rows above it.
+ *
+ * That rule costs one thing `layoutGHItems` deliberately keeps: a tab of only
+ * Their move rows no longer says so in words. The stage tabs pay it to read
+ * the same as the board, whose ticket tree has never headed a lone group.
+ * Hosts that want the label keep the default.
  */
 export const layoutSides = (
   sides: readonly LayoutSide[],
   sectionId: string,
   login: string,
-): AnyItem[] =>
-  sides
-    .filter((side) => side.items.length > 0)
-    .flatMap((side): AnyItem[] => {
-      const sideId = `${sectionId}:${side.key}`
-      const header: SubgroupHeader = {
-        kind: "subgroup-header",
-        id: sideId,
-        label: `${side.label} (${side.items.length})`,
-        age: "",
-        depth: 0,
-      }
-      if (sectionId === "done")
-        return [header, ...insertRepoHeaders(sortByRecency(side.items))]
+  { fold = false }: LayoutSidesOptions = {},
+): AnyItem[] => {
+  const present = sides.filter(sideHasContent)
+  if (fold) return foldSides(present, sectionId, login)
+  return present.flatMap((side): AnyItem[] => {
+    const sideId = `${sectionId}:${side.key}`
+    const header: SubgroupHeader = {
+      kind: "subgroup-header",
+      id: sideId,
+      label: `${side.label} (${side.items.length})`,
+      age: "",
+      depth: 0,
+    }
+    const tail = tailOf(side, sideId, 1)
+    if (sectionId === "done")
       return [
         header,
-        ...bandGroupsOf(side.items, sectionId, login).flatMap(
-          ({ key, label, rows }): AnyItem[] => [
-            {
-              kind: "subgroup-header",
-              id: `${sideId}:${key}`,
-              label: `${label} (${rows.length})`,
-              age: "",
-              depth: 1,
-            },
-            ...insertRepoHeaders(rows),
-          ],
-        ),
+        ...insertRepoHeaders(sortByRecency(side.items)),
+        ...tail.flatMap(({ header, items }) => [header, ...items]),
       ]
-    })
+    return [
+      header,
+      ...bandGroupsOf(side.items, sectionId, login).flatMap(
+        ({ key, label, rows }): AnyItem[] => [
+          {
+            kind: "subgroup-header",
+            id: `${sideId}:${key}`,
+            label: `${label} (${rows.length})`,
+            age: "",
+            depth: 1,
+          },
+          ...insertRepoHeaders(rows),
+        ],
+      ),
+      ...tail.flatMap(({ header, items }) => [header, ...items]),
+    ]
+  })
+}
+
+type LaidGroup = {
+  header: SubgroupHeader
+  items: AnyItem[]
+  answers: boolean
+  hostBuilt: boolean
+}
+
+const tailOf = (side: LayoutSide, sideId: string, depth: number): LaidGroup[] =>
+  (side.tail ?? [])
+    .filter((g) => g.items.length > 0)
+    .map((g) => ({
+      header: {
+        kind: "subgroup-header",
+        id: `${sideId}:${g.key}`,
+        label: g.label,
+        age: "",
+        depth,
+      },
+      items: g.items,
+      answers: false,
+      hostBuilt: true,
+    }))
+
+const foldSides = (
+  present: readonly LayoutSide[],
+  sectionId: string,
+  login: string,
+): AnyItem[] => {
+  const twoSided = present.length > 1
+  const groups = present.flatMap((side): LaidGroup[] => {
+    const sideId = `${sectionId}:${side.key}`
+    const prefix = twoSided ? { side: side.label } : {}
+    // Done has no bands, so the side IS its one group, and its header is the
+    // side's own name rather than a prefix on nothing.
+    const own: LaidGroup[] =
+      sectionId === "done"
+        ? side.items.length === 0
+          ? []
+          : [
+              {
+                header: {
+                  kind: "subgroup-header",
+                  id: sideId,
+                  label: `${side.label} (${side.items.length})`,
+                  age: "",
+                  depth: 0,
+                },
+                items: insertRepoHeaders(sortByRecency(side.items)),
+                answers: false,
+                hostBuilt: false,
+              },
+            ]
+        : bandGroupsOf(side.items, sectionId, login).map(
+            ({ key, label, rows }) => ({
+              header: {
+                kind: "subgroup-header",
+                id: `${sideId}:${key}`,
+                label: `${label} (${rows.length})`,
+                ...prefix,
+                age: "",
+                depth: 0,
+              },
+              items: insertRepoHeaders(rows),
+              answers: ANSWER_BANDS.has(key),
+              hostBuilt: false,
+            }),
+          )
+    const tail = tailOf(side, sideId, 0).map((g) => ({
+      ...g,
+      header: { ...g.header, ...prefix },
+    }))
+    return [...own, ...tail]
+  })
+  const headed =
+    twoSided ||
+    groups.some((g) => g.hostBuilt) ||
+    (groups.length > 1 && groups.some((g) => g.answers))
+  return groups.flatMap(({ header, items }) =>
+    headed ? [header, ...items] : items,
+  )
+}
 
 /**
  * A two-way repo split, when a host has one. `undefined` — the ordinary case —

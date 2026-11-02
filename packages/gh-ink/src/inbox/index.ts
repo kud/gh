@@ -86,6 +86,8 @@ export {
   type DetailContext,
   type OriginSplit,
   type LayoutSide,
+  type LayoutSidesOptions,
+  type SideGroup,
   type SettledResult,
 } from "./inbox.js"
 export type {

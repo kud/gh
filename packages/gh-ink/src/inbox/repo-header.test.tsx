@@ -467,3 +467,47 @@ describe("side and band headers on screen", () => {
     ])
   })
 })
+
+// One level: the side folded into each band as a quiet prefix. The label keeps
+// the column it has with no side, so a tab that never folds draws as before.
+describe("folded side prefix on screen", () => {
+  const band = (id: string, label: string, side?: string): AnyItem => ({
+    kind: "subgroup-header",
+    id,
+    label,
+    ...(side ? { side } : {}),
+    age: "",
+    depth: 0,
+  })
+
+  const FOLDED: Section[] = [
+    {
+      id: "review",
+      label: "Review",
+      items: [
+        band("review:mine:merge", "Ready to merge (1)", "Mine"),
+        fence("kud/gh"),
+        pr(1, "kud/gh"),
+        band("review:others:you", "Your move (1)", "Others"),
+        fence("kud/epure"),
+        pr(2, "kud/epure"),
+      ],
+    },
+  ]
+
+  const lines = (frame: string) =>
+    frame.split("\n").map((l) => l.replace(ANSI, ""))
+
+  it("draws the side before the band, after the chevron", async () => {
+    const { stdout, done } = mount(FOLDED)
+    await settle()
+    await settle()
+    const frame = lines(stdout.lastFrame())
+    done()
+    expect(frame.some((l) => l.includes("» Mine · Ready to merge (1)"))).toBe(
+      true,
+    )
+    expect(frame.some((l) => l.includes("» Others · Your move (1)"))).toBe(true)
+    expect(frame.some((l) => /─{4,}/.test(l) && l.includes("Mine"))).toBe(false)
+  })
+})

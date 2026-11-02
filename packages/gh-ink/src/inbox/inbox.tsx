@@ -81,12 +81,7 @@ import {
   pruneOverrides,
 } from "./overrides.js"
 import type { Override, Patch } from "./overrides.js"
-import {
-  blockEnd,
-  rootOrphans,
-  treeDepthOf,
-  withoutBlocks,
-} from "./block.js"
+import { blockEnd, rootOrphans, treeDepthOf, withoutBlocks } from "./block.js"
 export { blockEnd } from "./block.js"
 import {
   SidePanel,
@@ -190,6 +185,8 @@ import type {
   Standing,
   OriginSplit,
   LayoutSide,
+  LayoutSidesOptions,
+  SideGroup,
 } from "@kud/gh-workflow"
 export {
   depthOf,
@@ -228,6 +225,8 @@ export type {
   Standing,
   OriginSplit,
   LayoutSide,
+  LayoutSidesOptions,
+  SideGroup,
 }
 
 // ─── Work filter ─────────────────────────────────────────────────────────────
@@ -3469,6 +3468,11 @@ const ItemRow = ({
       </Box>
     )
 
+  // A folded side (`layoutSides`' `fold`) rides on the band as a prefix, in the
+  // muted tone and not bold: it is the coarser grouping, already settled by the
+  // time the eye reaches the band, so it reads before the label without
+  // competing with it. The label stays bold and in the column it always had
+  // after `» `, so a band with no side draws exactly what it did.
   if (item.kind === "subgroup-header")
     return (
       <Box marginTop={gap ? 1 : 0} width={cols} backgroundColor={selBg}>
@@ -3476,6 +3480,14 @@ const ItemRow = ({
         <Text color={colors.accent} bold>
           {"» "}
         </Text>
+        {item.side ? (
+          <>
+            <Text color={colors.muted}>{item.side}</Text>
+            <Text color={colors.muted} dimColor>
+              {" · "}
+            </Text>
+          </>
+        ) : null}
         <Text bold>{item.label}</Text>
       </Box>
     )
