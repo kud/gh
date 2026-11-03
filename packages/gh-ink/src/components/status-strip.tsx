@@ -214,6 +214,7 @@ const itemSpans = (item: StripItem, now: number): StripSpan[] => {
       if (isSettled(item)) {
         spans.push(dim(FAIL))
         if (cause) spans.push(dim(cause))
+        spans.push(dim(" · known"))
         break
       }
       spans.push({ text: FAIL, color: colors.error, bold: true })
@@ -245,7 +246,7 @@ const countSpans = (rank: Rank, n: number): StripSpan[] => {
     case "build":
       return [...buildSpans(), { text: ` ${n}`, color: colors.error }]
     case "settled":
-      return [dim(`${FAIL} ${n} settled`)]
+      return [dim(`${FAIL} ${n} known`)]
     case "unknown":
       return [dim(`? ${n} no data`)]
   }
@@ -294,7 +295,7 @@ type Candidate = { spans: StripSpan[]; age: boolean }
 // data`: a list of names nobody heard from answers no question the count does
 // not, and on a misconfigured day it was the longest thing on the row.
 // Narrowing then sheds the least actionable first: the settled failures fold
-// to `✕ N settled`, the healthy-with-red-build ones to `build ✕ N`, then the
+// to `✕ N known`, the healthy-with-red-build ones to `build ✕ N`, then the
 // warnings to `⚠ N`. The failures stay named longest —
 // the age goes before any of them does — and when even they do not fit, the
 // worst are named while they fit and the rest counted, so the row says "and

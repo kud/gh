@@ -147,7 +147,7 @@ describe("stripRows: since when, and settled", () => {
     )
     expect(issues).toBe(
       `events: ${WARN}   exports: ${OK} · build ${FAIL}   ` +
-        `search: ${FAIL} alerting 3d   ? 1 no data`,
+        `search: ${FAIL} alerting 3d · known   ? 1 no data`,
     )
     const cross = spans.filter((s) => s.text === FAIL).at(-1)
     expect(cross).toMatchObject({ dim: true })
@@ -354,7 +354,7 @@ describe("stripRows: narrow rows shed the least actionable first", () => {
     expect(stripRows(badDay, fits(fullIssues), NOW).issues).toBe(fullIssues)
   })
 
-  it("1. folds a settled failure into `✕ N settled` before any build", () => {
+  it("1. folds a settled failure into `✕ N known` before any build", () => {
     const known: StatusStrip = {
       title: "services",
       items: [
@@ -362,8 +362,8 @@ describe("stripRows: narrow rows shed the least actionable first", () => {
         { key: "bbb", state: "ok", alarm: true },
       ],
     }
-    const named = `bbb: ${OK} · build ${FAIL}   aaa: ${FAIL} alerting`
-    const folded = `bbb: ${OK} · build ${FAIL}   ${FAIL} 1 settled`
+    const named = `bbb: ${OK} · build ${FAIL}   aaa: ${FAIL} alerting · known`
+    const folded = `bbb: ${OK} · build ${FAIL}   ${FAIL} 1 known`
     expect(stripRows(known, fits(named, false), NOW).issues).toBe(named)
     expect(stripRows(known, fits(named, false) - 1, NOW).issues).toBe(folded)
   })
