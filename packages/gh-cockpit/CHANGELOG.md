@@ -1,5 +1,12 @@
 # @kud/gh-cockpit
 
+## 0.15.7
+
+### Patch Changes
+
+- Updated dependencies [d517a3e]
+  - @kud/gh-ink@0.86.7
+
 ## 0.15.6
 
 ### Patch Changes

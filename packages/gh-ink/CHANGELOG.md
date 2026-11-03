@@ -1,5 +1,11 @@
 # @kud/gh-ink
 
+## 0.86.7
+
+### Patch Changes
+
+- d517a3e: The status strip says a long-running alert is known in words, not only in a dimmer colour: `worker: ✕ alerting 31h · known`, and `✕ N known` when folded.
+
 ## 0.86.6
 
 ### Patch Changes
