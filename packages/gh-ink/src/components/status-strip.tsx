@@ -40,9 +40,9 @@ export type StripItem = {
    */
   since?: number
   /**
-   * The host says this failure is long-standing and known — triaged, being
-   * watched, not news. The cross stays, because it is still real, but the
-   * item draws dim — mark and cause, no bold, no colour — and ranks after
+   * The host says this failure is long-standing, so known rather than news:
+   * the host decides when (by age alone, say). The cross stays, because it is
+   * still real, but the item draws dim, `· known` after its cause, and ranks after
    * fresh fails, warnings and red builds, before `no data`. Answering "do I
    * need to look?" with "not first" is exactly what the strip is for, and a
    * settled item with a red build still counts under `build ✕` when folded:
