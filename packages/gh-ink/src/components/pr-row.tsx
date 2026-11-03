@@ -12,6 +12,7 @@ import {
 } from "@kud/gh-workflow"
 import { displayFor } from "../lib/health-display.js"
 import { truncate } from "../lib/truncate.js"
+import { METER_COLS, meterCellsOf, weightTierOf } from "../lib/weight.js"
 import { Text, useBackdropped } from "../inbox/backdrop.js"
 import type { FocusGutter } from "../inbox/focus-slot.js"
 
@@ -477,8 +478,16 @@ export const layoutOf = ({
     // the column is drawn on it too — blank, which is how absence reads here.
     // The author is one of those columns now, not a per-row suffix after the
     // title: its width moves neither with title length nor with whose row it is.
+    //
+    // The size column carries the weight meter ahead of its numbers, so it is
+    // charged for both: the meter is the same fact drawn as a shape, and it
+    // lives and dies with the size column rather than taking its own rung on
+    // the ladder below — a meter without its numbers is a claim you cannot check.
     const block = TRAILING.reduce(
-      (w, k) => (givingUp[k] || own[k] === 0 ? w : w + 2 + own[k]),
+      (w, k) =>
+        givingUp[k] || own[k] === 0
+          ? w
+          : w + 2 + own[k] + (k === "size" ? 2 + METER_COLS : 0),
       0,
     )
     const pills = announcements.reduce((w, a) => w + 2 + a.label.length, 0)
@@ -657,6 +666,7 @@ export const PrRow = ({
     : !login || !item.lastActor || spokeLast
       ? [" ", colors.muted]
       : ["←", colors.accent]
+  const weight = weightTierOf(item)
   const {
     numStr,
     showAuthor,
@@ -830,6 +840,27 @@ export const PrRow = ({
           files, so a six-line change that bumps `package-lock.json` reads as
           large. The number is honest about what the diff view will show; it is
           not a proxy for thought required. */}
+      {/* The weight meter, just ahead of the numbers it summarises: four cells,
+          the heavier of a lines tier and a files tier (lib/weight.ts). The
+          numbers are exact and need reading; the meter is the same fact as a
+          silhouette you can run down the column, and it is the only place the
+          file count reaches the row — `+12 -9` across forty files is not the
+          review `+12 -9` in one is. Fixed width so the numbers never move, and
+          blank rather than a flat `▁▁▁▁` on a row nobody measured: an empty
+          floor would say "tiny", which is a claim the fetch never made. */}
+      {block.size > 0 && !givingUp.size ? (
+        <Box marginLeft={2} width={METER_COLS} flexShrink={0}>
+          {weight !== null ? (
+            <Text>
+              {meterCellsOf(weight).map((cell, i) => (
+                <Text key={i} color={cell.color}>
+                  {cell.glyph}
+                </Text>
+              ))}
+            </Text>
+          ) : null}
+        </Box>
+      ) : null}
       {block.size > 0 && !givingUp.size ? (
         <Box
           marginLeft={2}

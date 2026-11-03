@@ -155,6 +155,69 @@ describe("PrRow", () => {
   })
 
   /*
+   * The weight meter sits two cells ahead of `+adds -dels`: the same fact as
+   * a silhouette, with the file count folded in. Four cells on every row, so
+   * the numbers after it line up whatever the tier — and blank on a row that
+   * never carried the numbers, because `▁▁▁▁` would say "tiny" about a PR
+   * nobody measured.
+   */
+  it("draws the weight meter just ahead of the size", () => {
+    const rows = [
+      pr({
+        title: "fix a typo",
+        additions: 1,
+        deletions: 1,
+        changedFiles: 1,
+      }),
+      pr({
+        number: 1295,
+        title: "SHOP-1234 move auth into the middleware chain",
+        additions: 2697,
+        deletions: 458,
+        changedFiles: 24,
+      }),
+      pr({
+        number: 412,
+        title: "vendor the payment SDK",
+        additions: 5039,
+        deletions: 0,
+        changedFiles: 2,
+      }),
+      pr({ number: 77, title: "not measured yet" }),
+    ]
+    const columns = trailingColumnsOf(rows)
+    const [tiny, huge, vendored, unmeasured] = rows.map((item) =>
+      frameOf(
+        <PrRow item={item} active={false} cols={100} columns={columns} />,
+      ),
+    )
+    expect(tiny).toContain("▁▁▁▁  ")
+    expect(huge).toContain("▂▄▆█  ")
+    // +5039 in two files is a vendor drop: capped at large, never huge.
+    expect(vendored).toContain("▂▄▆▁  ")
+    expect(vendored).not.toContain("█")
+    for (const glyph of ["▁", "▂", "▄", "▆", "█"]) {
+      expect(unmeasured).not.toContain(glyph)
+    }
+    // Fixed width: the removal count ends on one column whatever the tier.
+    const ends = [
+      tiny.indexOf("-1") + 2,
+      huge.indexOf("-458") + 4,
+      vendored.indexOf("-0") + 2,
+    ]
+    expect(new Set(ends).size).toBe(1)
+    // Two cells between the meter and the size column; `+2697 -458` is the
+    // section's widest size, so it fills the column flush to its left edge.
+    expect(huge.indexOf("+2697")).toBe(huge.indexOf("▂▄▆█") + 4 + 2)
+    // And the age still ends every row on the same edge.
+    expect(
+      new Set(
+        [tiny, huge, vendored, unmeasured].map((f) => f.lastIndexOf("2d")),
+      ).size,
+    ).toBe(1)
+  })
+
+  /*
    * A hole in an aligned column reads as "none". So when one row needs its size
    * cell gone to keep a readable title, the section gives the column up for
    * every row, and a row that had room draws no size either.
@@ -465,7 +528,12 @@ describe("PrRow author column", () => {
     const login = "octocat"
     const rows = [
       pr({ repo: "acme/frontend-web", author: login }),
-      pr({ number: 88, repo: "acme/api-gateway", author: login, unresolved: 2 }),
+      pr({
+        number: 88,
+        repo: "acme/api-gateway",
+        author: login,
+        unresolved: 2,
+      }),
     ]
     const columns = trailingColumnsOf(rows)
     const numberCols = numberColumnsOf(rows)
