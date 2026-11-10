@@ -76,6 +76,12 @@ export type ExtensionTarget = {
   // active tab is empty. Typed as AnyItem, so a row-scoped body narrows on `kind`
   // rather than assuming it got a PR.
   item?: AnyItem
+  // Every visible selected row, handed ONLY to an extension that opted in with
+  // `batch` while a multi-select is running; `item` above stays the row under
+  // the cursor either way, so a batch body can still name "the row I was on".
+  // Filter-scoped deliberately: the same search that narrows the count in the
+  // footer narrows this list, and the extension acts on what the reader can see.
+  items?: AnyItem[]
   // The job named on the CI glance row, when the host renders one.
   ciJob?: string
   // The authenticated login. Always known by the time the browse screen renders,
@@ -179,6 +185,13 @@ export interface InboxExtension {
   // would read as if it were. Both kinds appear in the footer and the legend,
   // because both are things you can press.
   scope?: "item" | "global"
+  // Opt-in: while a multi-select is on screen, this key receives every visible
+  // selected row in `target.items` (with `item` still the cursor row) instead
+  // of firing once for the cursor row. A body written for one row has no idea
+  // what to do with twelve, so silence keeps the single-row behaviour; a
+  // declared one also gets its hint in the selection footer. Meant for cheap,
+  // reversible verbs (mute), never for anything that would need a confirm.
+  batch?: boolean
   // Which menu group an item extension's row belongs to: `"act"` for verbs that
   // act on the row (Submit, Land, Delegate), `"open"` for verbs that open
   // something (Open ticket). Absent or `"other"` lands with the quiet verbs at
