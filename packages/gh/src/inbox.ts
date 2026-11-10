@@ -63,16 +63,32 @@ import { ghGraphql } from "./gh.js"
 export const MY_PRS_LIMIT = 100
 
 /**
+ * How many of `myPRs` one request asks for, with the full health selection.
+ *
+ * Smaller than `MY_PRS_LIMIT` since 2026-11-10, and the reason is WALL CLOCK,
+ * not cost — the same ceiling `HEALTH_BATCH_SIZE` documents. A work account with
+ * 36 open PRs, each carrying long check rollups, took 7.9s at a 100-row window on
+ * its own, and 502ed every time beside `reviewRequests` in the same request:
+ * the resolver ran past the proxy's ~11s. At 25 the page took 4.9s. The window
+ * still holds the whole set, because `fetchInbox` pages past it, and
+ * `MY_PRS_MAX_PAGES` rose with it so the ceiling stays 500 rows.
+ *
+ * `MY_PRS_LIMIT` keeps 100 for the pulse, which asks for no health at all.
+ */
+export const MY_PRS_PAGE_SIZE = 25
+
+/**
  * How many pages of `myPRs` one `fetchInbox` may hold, first page included.
  *
  * The first page covers almost every account on its own — `MY_PRS_LIMIT` is the
  * search API's maximum — and each further page is one more full-cost request, so
- * the loop stops at five (500 rows) with more still available rather than
+ * the loop stops at twenty pages of `MY_PRS_PAGE_SIZE` (500 rows) with more
+ * still available rather than
  * chasing an unbounded set. Past the ceiling the tab is still marked sampled —
  * `sourceCoverage` reads `pageInfo.hasNextPage`, not the row count — so the
  * dim "shown/total" note keeps describing the same situation it always did.
  */
-export const MY_PRS_MAX_PAGES = 5
+export const MY_PRS_MAX_PAGES = 20
 
 /**
  * How many rows each source asks for — the cap, as DATA rather than a literal
@@ -124,7 +140,7 @@ export const MY_PRS_MAX_PAGES = 5
  * pages past the first window when it does not.
  */
 export const SOURCE_LIMITS: Record<InboxSource, number> = {
-  myPRs: MY_PRS_LIMIT,
+  myPRs: MY_PRS_PAGE_SIZE,
   reviewRequests: 20,
   reviewed: 20,
   assigned: 100,
@@ -213,6 +229,14 @@ export type InboxQueryOptions = {
    * rather than in a filter over the rows.
    */
   excludeRepos?: readonly string[]
+  /**
+   * Account owners (users or organisations) every search is confined to,
+   * applied as `user:` qualifiers, which GitHub ORs together. For an inbox that
+   * belongs to one side of a split account: a login that authors work PRs and
+   * personal PRs alike would otherwise fetch both and throw half away. Ignored
+   * under `repo`, which is narrower. See `inboxScope` and `sourcesFor`.
+   */
+  owners?: readonly string[]
   /** How far back `recentlyDone` looks. Defaults to 14 days. */
   doneWithinDays?: number
   /**
@@ -756,6 +780,8 @@ const SOURCES: Record<
 }
 
 const REPO_SLUG = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/
+/** A GitHub account name: letters, digits and single hyphens. */
+const OWNER_SLUG = /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/
 
 /**
  * The two scope qualifiers every search is built from, resolved from `repo`.
@@ -781,20 +807,33 @@ const REPO_SLUG = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/
 export const inboxScope = (
   repo?: string,
   excludeRepos: readonly string[] = [],
+  owners: readonly string[] = [],
 ) => {
   const bad = excludeRepos.find((r) => !REPO_SLUG.test(r))
   if (bad !== undefined)
     throw new Error(`excludeRepos: "${bad}" is not an owner/name slug`)
+  const badOwner = owners.find((o) => !OWNER_SLUG.test(o))
+  if (badOwner !== undefined)
+    throw new Error(`owners: "${badOwner}" is not an account name`)
   const hidden = excludeRepos.map((r) => `-repo:${r} `).join("")
+  const within = repo
+    ? `repo:${repo} `
+    : owners.map((o) => `user:${o} `).join("")
   return {
-    scope: `${repo ? `repo:${repo} ` : ""}${hidden}`,
-    owned: repo ? "" : "user:@me ",
+    scope: `${within}${hidden}`,
+    // Empty under `owners` too, and for the same reason as under `repo`: the
+    // owner qualifiers are ORed, so `user:@me` beside them would WIDEN every
+    // search to your own repos instead of narrowing it. Measured 2026-11-10:
+    // open issues under `user:@me` alone, 150; beside one organisation, 329.
+    // The sources that need it are dropped instead — see `sourcesFor`.
+    owned: repo || owners.length > 0 ? "" : "user:@me ",
   }
 }
 
 const selectionsFor = ({
   repo,
   excludeRepos,
+  owners,
   doneWithinDays = 14,
   shape = "full",
 }: InboxQueryOptions): Selections => {
@@ -802,7 +841,7 @@ const selectionsFor = ({
      two shapes cannot drift into two separately-maintained queries. */
   const full = shape === "full"
   return {
-    ...inboxScope(repo, excludeRepos),
+    ...inboxScope(repo, excludeRepos, owners),
     doneSince: sinceDay(doneWithinDays),
     health: full ? PR_HEALTH : "",
     size: PR_SIZE,
@@ -842,11 +881,30 @@ const AUTHORED_ISSUE_SOURCES: readonly InboxSource[] = [
   "authoredIssuesAssigned",
 ]
 
+/**
+ * The sources that only mean something through `user:@me` — "on repos I own".
+ *
+ * Under `owners` they have no honest spelling: `owned` is emptied there (see
+ * `inboxScope`), so `repoIssues` would become every open issue across the named
+ * accounts and `repoPRs` every open PR by anyone. Dropped rather than asked,
+ * which is also the saving: on the account that prompted `owners`, these were
+ * personal repos the work board fetched in full and then filtered to nothing.
+ */
+const OWNED_SOURCES: readonly InboxSource[] = [
+  "repoIssues",
+  "repoPRs",
+  "othersDone",
+  "repoIssuesUnassigned",
+  "repoIssuesAssigned",
+]
+
 const sourcesFor = (options: InboxQueryOptions): readonly InboxSource[] => {
   const sources = options.sources ?? INBOX_SOURCES
-  return options.repo
-    ? sources.filter((source) => !AUTHORED_ISSUE_SOURCES.includes(source))
-    : sources
+  if (options.repo)
+    return sources.filter((source) => !AUTHORED_ISSUE_SOURCES.includes(source))
+  if (options.owners?.length)
+    return sources.filter((source) => !OWNED_SOURCES.includes(source))
+  return sources
 }
 
 export const buildInboxQuery = (options: InboxQueryOptions = {}) => {

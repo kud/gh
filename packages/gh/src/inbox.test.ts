@@ -6,6 +6,7 @@ import {
   INBOX_SOURCES,
   OPT_IN_INBOX_SOURCES,
   MY_PRS_MAX_PAGES,
+  MY_PRS_PAGE_SIZE,
   SOURCE_LIMITS,
   sourceCoverage,
   cappedSources,
@@ -106,6 +107,51 @@ describe("buildInboxQuery", () => {
         expect(() => buildInboxQuery({ excludeRepos: [bad] })).toThrow(
           /excludeRepos/,
         )
+    })
+  })
+
+  describe("owners", () => {
+    it("confines every source it asks to the named accounts", () => {
+      const query = buildInboxQuery({ owners: ["acme", "acme-labs"] })
+      for (const alias of [
+        "myPRs",
+        "reviewRequests",
+        "assigned",
+        "recentlyDone",
+      ])
+        expect(searchFor(query, alias)).toContain("user:acme user:acme-labs ")
+    })
+
+    // `user:@me` beside ORed owner qualifiers widens the search to your own
+    // repos rather than narrowing it, so it must never appear under owners.
+    it("never pairs the owners with user:@me", () => {
+      // `-user:@me` (authoredIssues' "outside my repos") is a negation and fine.
+      expect(buildInboxQuery({ owners: ["acme"] })).not.toMatch(/[^-]user:@me/)
+    })
+
+    it("drops the sources that only mean repos-I-own", () => {
+      const query = buildInboxQuery({
+        owners: ["acme"],
+        sources: [...INBOX_SOURCES, "othersDone"],
+      })
+      for (const alias of ["repoIssues", "repoPRs", "othersDone"])
+        expect(query).not.toContain(`${alias}: search(`)
+      expect(query).toContain("authoredIssues: search(")
+    })
+
+    it("yields to repo, which is narrower", () => {
+      const query = buildInboxQuery({ repo: "acme/api", owners: ["acme"] })
+      expect(searchFor(query, "myPRs")).toContain("repo:acme/api ")
+      expect(query).not.toContain("user:acme ")
+    })
+
+    it("adds nothing when empty, so an existing caller keeps its query", () => {
+      expect(buildInboxQuery({ owners: [] })).toBe(buildInboxQuery())
+    })
+
+    it("refuses anything that is not an account name", () => {
+      for (const bad of ['acme" OR "', "acme/api", "-acme", ""])
+        expect(() => buildInboxQuery({ owners: [bad] })).toThrow(/owners/)
     })
   })
 
@@ -770,7 +816,13 @@ describe("source coverage", () => {
     expect(
       sourceCoverage({ myPRs: { issueCount: 8, nodes: new Array(8).fill({}) } })
         .myPRs,
-    ).toEqual({ total: 8, shown: 8, cap: 100, capped: false, partial: false })
+    ).toEqual({
+      total: 8,
+      shown: 8,
+      cap: MY_PRS_PAGE_SIZE,
+      capped: false,
+      partial: false,
+    })
   })
 
   /*
