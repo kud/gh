@@ -1334,8 +1334,16 @@ export const withHeaders = (items: AnyItem[], idx: number): number => {
   return start
 }
 
+// Both error listeners are load-bearing. A `pbcopy` that exits before reading
+// its stdin (missing, killed, or the test suite's no-op stub) makes the write
+// below fail with EPIPE, and an EPIPE nobody listens for is an uncaught
+// exception that takes the whole inbox down over a copy. A failed copy is a
+// lost clipboard, never a crash. It first surfaced in CI on 2026-11-10, the
+// first time a mounted test pressed `c`.
 export const clipboard = (text: string) => {
   const p = spawn("pbcopy", [], { stdio: "pipe" })
+  p.on("error", () => {})
+  p.stdin.on("error", () => {})
   p.stdin.write(text)
   p.stdin.end()
 }
@@ -5686,7 +5694,8 @@ const BrowseScreen = ({
   const moveViewed = (dir: 1 | -1): number => {
     const next = moveCursor(section.items, cursor, dir)
     let newVs = viewStart
-    if (dir === -1) newVs = Math.min(viewStart, withHeaders(section.items, next))
+    if (dir === -1)
+      newVs = Math.min(viewStart, withHeaders(section.items, next))
     else
       while (next >= newVs + windowCount(section.items, newVs, listHeight))
         newVs++
@@ -5942,14 +5951,21 @@ const BrowseScreen = ({
           : section.items.findIndex((i) => rowKey(i) === anchor)
       // A header under the cursor cannot anchor; the row the move landed on can.
       const startIdx =
-        anchorIdx >= 0 ? anchorIdx : isSelectable(section.items[from]) ? from : next
+        anchorIdx >= 0
+          ? anchorIdx
+          : isSelectable(section.items[from])
+            ? from
+            : next
       const runBase = anchorIdx >= 0 ? base : new Set(selected)
       if (anchorIdx < 0) {
         setBase(runBase)
         setAnchor(rowKey(section.items[startIdx]!))
       }
       setSelected(
-        new Set([...runBase, ...rangeKeys(section.items, startIdx, next, rowKey)]),
+        new Set([
+          ...runBase,
+          ...rangeKeys(section.items, startIdx, next, rowKey),
+        ]),
       )
       return
     }
@@ -6508,42 +6524,42 @@ const BrowseScreen = ({
     : visibleSelection.length > 0
       ? selectedHints
       : activeItem?.kind === "repo-header"
-      ? [
-          ["↑↓", "nav"],
-          ["←→", "tab"],
-          ["↵", "open repo"],
-          ["o", "browser"],
-          headerHint,
-          ["?", "help"],
-          ["q", "quit"],
-        ]
-      : activeItem?.kind === "subgroup-header"
         ? [
             ["↑↓", "nav"],
             ["←→", "tab"],
+            ["↵", "open repo"],
+            ["o", "browser"],
             headerHint,
             ["?", "help"],
             ["q", "quit"],
           ]
-        : [
-            ["↑↓", "nav"],
-            ["←→", "tab"],
-            ["↵/d", "open"],
-            ["m", "actions"],
-            // Always, now that the launcher opens a pasted PR or issue too. It was
-            // shown only where Jira was configured, when a ticket key was all it
-            // could take and without one it could only apologise.
-            ["⌃K", "launch"],
-            // Advertised only where it does something, and named for what it
-            // shows rather than for the furniture: nobody wants "a sidebar".
-            ...(showRail
-              ? ([["⇥", railTitle]] as [string, string][])
-              : hasRail
-                ? ([["i", railTitle]] as [string, string][])
-                : []),
-            ["?", "help"],
-            ["q", "quit"],
-          ]
+        : activeItem?.kind === "subgroup-header"
+          ? [
+              ["↑↓", "nav"],
+              ["←→", "tab"],
+              headerHint,
+              ["?", "help"],
+              ["q", "quit"],
+            ]
+          : [
+              ["↑↓", "nav"],
+              ["←→", "tab"],
+              ["↵/d", "open"],
+              ["m", "actions"],
+              // Always, now that the launcher opens a pasted PR or issue too. It was
+              // shown only where Jira was configured, when a ticket key was all it
+              // could take and without one it could only apologise.
+              ["⌃K", "launch"],
+              // Advertised only where it does something, and named for what it
+              // shows rather than for the furniture: nobody wants "a sidebar".
+              ...(showRail
+                ? ([["⇥", railTitle]] as [string, string][])
+                : hasRail
+                  ? ([["i", railTitle]] as [string, string][])
+                  : []),
+              ["?", "help"],
+              ["q", "quit"],
+            ]
   const matchCount = section.items.filter(
     (i) => i.kind !== "repo-header" && i.kind !== "subgroup-header",
   ).length
