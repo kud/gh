@@ -1,5 +1,12 @@
 # @kud/gh-workflow
 
+## 0.21.4
+
+### Patch Changes
+
+- Updated dependencies [1db865f]
+  - @kud/gh@0.23.0
+
 ## 0.21.3
 
 ### Patch Changes
