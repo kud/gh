@@ -1334,16 +1334,8 @@ export const withHeaders = (items: AnyItem[], idx: number): number => {
   return start
 }
 
-// Both error listeners are load-bearing. A `pbcopy` that exits before reading
-// its stdin (missing, killed, or the test suite's no-op stub) makes the write
-// below fail with EPIPE, and an EPIPE nobody listens for is an uncaught
-// exception that takes the whole inbox down over a copy. A failed copy is a
-// lost clipboard, never a crash. It first surfaced in CI on 2026-11-10, the
-// first time a mounted test pressed `c`.
 export const clipboard = (text: string) => {
   const p = spawn("pbcopy", [], { stdio: "pipe" })
-  p.on("error", () => {})
-  p.stdin.on("error", () => {})
   p.stdin.write(text)
   p.stdin.end()
 }

@@ -1,9 +1,35 @@
-import { describe, it, expect } from "vitest"
+import { describe, it, expect, vi } from "vitest"
 import { EventEmitter } from "node:events"
 import React from "react"
 import { render } from "ink"
 import { App } from "./inbox.js"
 import type { AnyItem, GHItem, Section } from "./inbox.js"
+
+// What `c` wrote to the clipboard, read off a stubbed pbcopy rather than the
+// machine's — the same stub repo-header.test.tsx and sidebar.test.tsx use.
+// Without it the first `c` spawned the runner's real pbcopy: missing on
+// GitHub's Linux hardware, so the write raised an uncaught EPIPE and failed
+// the suite on 2026-11-10. Guarding `clipboard()` against that instead broke
+// those two files' stubs, which carry no `on`; the test owes the stub, not
+// the code.
+const copied: string[] = []
+vi.mock("node:child_process", async (orig) => {
+  const actual = await orig<typeof import("node:child_process")>()
+  return {
+    ...actual,
+    spawn: (cmd: string, ...rest: unknown[]) =>
+      cmd === "pbcopy"
+        ? {
+            stdin: {
+              write: (text: string) => {
+                copied.push(text)
+              },
+              end: () => {},
+            },
+          }
+        : (actual.spawn as (...a: unknown[]) => unknown)(cmd, ...rest),
+  }
+})
 
 /*
  * THE MULTI-SELECT, driven by real keypresses on a mounted inbox. Read back off
@@ -137,8 +163,14 @@ describe("multi-select", () => {
     await press(SHIFT_DOWN)
     expect(selectedCount(frame())).toBe(4)
     expect(frame()).toContain("●")
+    copied.length = 0
     await press("c")
     expect(frame()).toContain("Copied 4 links")
+    expect(copied).toEqual([
+      [1, 2, 3, 4]
+        .map((n) => `https://github.com/acme/api/pull/${n}`)
+        .join("\n"),
+    ])
     stop()
   })
 
