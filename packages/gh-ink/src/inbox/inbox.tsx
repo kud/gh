@@ -75,6 +75,14 @@ import {
 } from "./diff.js"
 import type { Transient } from "./diff.js"
 import {
+  LIVE_POLL_MS,
+  LIVE_QUIET_MS,
+  patchInPlace,
+  regroupWait,
+  samePlacement,
+  settlingRows,
+} from "./live.js"
+import {
   applyOverrides,
   failedOverrides,
   failureNotice,
@@ -7019,6 +7027,9 @@ export const App = ({
   emptyHint,
   liveLabel,
   onSettled,
+  rowFetcher,
+  livePollMs = LIVE_POLL_MS,
+  liveQuietMs = LIVE_QUIET_MS,
 }: {
   fetcher: () => Promise<{
     sections: Section[]
@@ -7058,6 +7069,30 @@ export const App = ({
    * a function would not survive the cache the sidebar is painted from.
    */
   liveLabel?: LiveLabel
+  /**
+   * Re-read only the rows still settling — PRs whose checks are running — and
+   * answer with the whole list laid out again around what they say now.
+   *
+   * The cheap half of a live inbox. A host keeps the raw data of its last
+   * fetch, asks `nodes(ids:)` about these rows alone (`buildHealthQueries`,
+   * `mergeHealth` in `@kud/gh`), and lays the merged data out exactly as it
+   * would a full fetch — so a row whose verdict now belongs to another band
+   * comes back in that band, and the inbox decides when it is allowed to go
+   * there. Return `budget` from the response's `rateLimit` so the same guard
+   * that pauses auto-refresh pauses this. `null` means nothing to report.
+   *
+   * Called every `livePollMs` while a row is settling and never otherwise, so
+   * leaving it out changes nothing and an idle board spends nothing.
+   */
+  rowFetcher?: (rows: GHItem[]) => Promise<{
+    sections: Section[]
+    login: string
+    budget?: InboxBudget
+  } | null>
+  /** How often settling rows are re-read — see `LIVE_POLL_MS`. */
+  livePollMs?: number
+  /** How long the keyboard must rest before a row may change group — see `LIVE_QUIET_MS`. */
+  liveQuietMs?: number
   // What this inbox is called, for the loading line. The shell is host-agnostic;
   // only the host knows whether it is a cockpit, a board, or something else.
   title?: string
@@ -7337,7 +7372,12 @@ export const App = ({
      and leave you to spot the difference against a frame the terminal had
      already scrolled away — the reason the manual gate felt like a cost rather
      than a control. */
-  const showData = (sections: Section[], login: string, fetched = true) => {
+  const showData = (
+    sections: Section[],
+    login: string,
+    fetched = true,
+    narrate = true,
+  ) => {
     const before = displayedSections.current
     displayedSections.current = sections
     displayedKey.current = signatureOf(sections)
@@ -7346,6 +7386,7 @@ export const App = ({
     // laid over it separately, in `hold`.
     if (fetched) {
       setPending(null)
+      deferredRegroup.current = null
       setFetchedAt(Date.now())
     }
 
@@ -7362,7 +7403,7 @@ export const App = ({
     // The same words the pending indicator used a keypress ago, now in the past
     // tense. Set before the early return below, so a refresh whose marks all
     // settle instantly still leaves nothing stale behind it.
-    setAppliedSummary(summariseDiff(counts))
+    setAppliedSummary(narrate ? summariseDiff(counts) : "")
     // Marks no tab has shown yet survive into this refresh. The hold is spent
     // per tab, so an unseen marker is a promise the cockpit has not kept —
     // dropping it here would make a second `r` the way to lose the news the
@@ -7630,6 +7671,157 @@ export const App = ({
     if (pending) showData(pending.sections, pending.login)
     else revalidate(true)
   }
+
+  /*
+   * Live rows: a verdict ticks where it stands, a regroup waits for a pause.
+   *
+   * Two speeds, because the two changes cost the reader different things. A
+   * status going from running to passed moves nothing — the row keeps its line,
+   * the cursor keeps its row — so it lands the moment the answer does, marked
+   * `updated` with the same ramp any refreshed row plays. A verdict that also
+   * changes whose move it is would shift every row below it, and doing that
+   * between two keypresses is the reshuffle the `r apply` gate exists to stop.
+   * So that half is HELD: the row shows its new status in its old place, and
+   * once the keyboard has been quiet for `liveQuietMs` (and no drill is open)
+   * the regroup lands through `showData` like any applied fetch — `moved-out`
+   * dissolving where it stood, `moved-in` filling in where it went, the tab
+   * pulsing if that is somewhere else. No new motion, and nothing silent.
+   *
+   * Never through `receive`. That path parks anything with a changed health
+   * token behind `r apply`, which would make the cheap poll pay to learn
+   * something and then hide it.
+   */
+  const deferredRegroup = useRef<{
+    sections: Section[]
+    login: string
+    // When the verdict ticked in place. The regroup never lands in the same
+    // beat: the reader sees WHY the row is about to move (running → passed)
+    // before it moves, so the travel reads as a consequence rather than a jump.
+    at: number
+  } | null>(null)
+  const [regroupRev, setRegroupRev] = useState(0)
+  // Any key, whatever it does — a key swallowed by a prompt is still a person
+  // at the keyboard, and the regroup is waiting on exactly that person.
+  const lastTouchAt = useRef(0)
+  useInput(() => {
+    lastTouchAt.current = Date.now()
+  })
+
+  const receiveLive = (truth: {
+    sections: Section[]
+    login: string
+    budget?: InboxBudget
+  }) => {
+    if (truth.budget) setBudget(truth.budget)
+    const next = applyOverrides(
+      reconcile(displayedSections.current, truth.sections, Date.now()),
+      overrides.current,
+    )
+    // A full fetch waiting behind `r` predates this answer. Applying it later
+    // must not tick the row back to running.
+    setPending((p) =>
+      p ? { ...p, sections: patchInPlace(p.sections, next) } : p,
+    )
+    // Not narrated: "1 moved" over a row that did not move is the header
+    // telling a small lie, and the `updated` mark already says which row.
+    if (samePlacement(displayedSections.current, next)) {
+      deferredRegroup.current = null
+      showData(next, truth.login, false, false)
+      return
+    }
+    showData(
+      patchInPlace(displayedSections.current, next),
+      truth.login,
+      false,
+      false,
+    )
+    deferredRegroup.current = {
+      sections: next,
+      login: truth.login,
+      at: Date.now(),
+    }
+    setRegroupRev((n) => n + 1)
+  }
+
+  // Through refs, because both run from timers that closed over an older
+  // render, and `showData` reads the marks from state.
+  const liveInFlight = useRef(false)
+  const liveTick = useRef<() => void>(() => {})
+  liveTick.current = () => {
+    if (!rowFetcher || liveInFlight.current) return
+    // The auto-refresh guard, unchanged: when the pool cannot afford two full
+    // fetches, background spend stops and the inbox says it is paused. The
+    // last points are the reader's to spend on `r`, not a timer's.
+    if (!canAffordAuto()) {
+      setSkippedForBudget(true)
+      return
+    }
+    const rows = settlingRows(displayedSections.current)
+    if (rows.length === 0) return
+    liveInFlight.current = true
+    rowFetcher(rows)
+      .then((answer) => {
+        if (answer) receiveLive(answer)
+      })
+      // Silent on purpose: the row keeps its last known verdict, which is true
+      // as of the last answer, and the next full fetch reconciles it.
+      .catch(() => {})
+      .finally(() => {
+        liveInFlight.current = false
+      })
+  }
+  const landRegroup = useRef<() => boolean>(() => true)
+  landRegroup.current = () => {
+    const held = deferredRegroup.current
+    if (!held) return true
+    // Landing calls setState({ phase: "browse" }) — from a drill that would
+    // throw the reader out of the PR they opened.
+    if (state.phase !== "browse") return false
+    deferredRegroup.current = null
+    showData(
+      applyOverrides(held.sections, overrides.current),
+      held.login,
+      false,
+    )
+    return true
+  }
+
+  // Keyed on WHICH rows are settling, so the timer exists only while there is
+  // something to ask about and stops the moment the last check finishes.
+  const settlingKey =
+    rowFetcher && state.phase === "browse"
+      ? settlingRows(state.sections)
+          .map((row) => row.url)
+          .join("\n")
+      : ""
+  useEffect(() => {
+    if (!settlingKey) return
+    const timer = setInterval(() => liveTick.current(), livePollMs)
+    return () => clearInterval(timer)
+  }, [settlingKey, livePollMs])
+
+  useEffect(() => {
+    if (!deferredRegroup.current) return
+    let timer: ReturnType<typeof setTimeout>
+    const attempt = () => {
+      const wait = regroupWait(
+        Math.max(lastTouchAt.current, deferredRegroup.current?.at ?? 0),
+        Date.now(),
+        liveQuietMs,
+      )
+      if (wait === 0 && landRegroup.current()) return
+      timer = setTimeout(attempt, Math.max(wait, 250))
+    }
+    timer = setTimeout(
+      attempt,
+      regroupWait(
+        Math.max(lastTouchAt.current, deferredRegroup.current?.at ?? 0),
+        Date.now(),
+        liveQuietMs,
+      ),
+    )
+    return () => clearTimeout(timer)
+  }, [regroupRev, liveQuietMs])
 
   /*
    * Patches the reader made ahead of the server, keyed by row. A ref because
