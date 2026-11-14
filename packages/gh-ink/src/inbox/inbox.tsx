@@ -24,6 +24,13 @@ import { Backdrop, backdropStyle, Text, useBackdropped } from "./backdrop.js"
 export { backdropStyle }
 import { truncate } from "../lib/truncate.js"
 export { truncate }
+import {
+  isSelectable,
+  rangeKeys,
+  selectedRows,
+  selectedUrls,
+  selectionGutter,
+} from "./multi-select.js"
 import { searchBarState } from "./search-bar.js"
 import {
   numberColumnsOf,
@@ -1615,6 +1622,26 @@ export const selectionBackground = (
   active: boolean,
   backdropped: boolean,
 ): string | undefined => (active && !backdropped ? SELECTION_BG : undefined)
+
+/**
+ * The wash behind a row that is selected but not under the cursor: quieter than
+ * the cursor's, because the two now share a screen and only one row may read
+ * as "here". The `●` in the gutter carries the state; this only groups it.
+ */
+export const MULTI_SELECT_BG = "#111118"
+
+/**
+ * `selectionBackground` with the multi-select folded in, so every branch of a
+ * row asks one question. The cursor wins over the selection, and the backdrop
+ * over both, for the reason given above.
+ */
+export const rowBackground = (
+  active: boolean,
+  selected: boolean,
+  backdropped: boolean,
+): string | undefined =>
+  selectionBackground(active, backdropped) ??
+  (selected && !active && !backdropped ? MULTI_SELECT_BG : undefined)
 
 export const TICKET_KEY_COLOUR = colors.ticket
 
@@ -3298,6 +3325,7 @@ export const tabLabel = (
 const ItemRow = ({
   item,
   active,
+  selected = false,
   gap,
   login,
   merged,
@@ -3323,6 +3351,12 @@ const ItemRow = ({
 }: {
   item: AnyItem
   active: boolean
+  /**
+   * Whether this row is part of the multi-select. Handed down by the list,
+   * which holds the set; the row only draws the answer. Never a colour alone — the dot rides in the gutter, where a
+   * piped frame and a colourblind reader see it too.
+   */
+  selected?: boolean
   gap?: boolean
   login?: string
   /** The section's `#n` cell width — see `numberColumnsOf`. */
@@ -3419,7 +3453,7 @@ const ItemRow = ({
   const backdropped = useBackdropped()
   // The selection wash, resolved once and worn by every branch below — the PR
   // row takes it as a prop because it lives across the module boundary.
-  const selBg = selectionBackground(active, backdropped)
+  const selBg = rowBackground(active, selected, backdropped)
   const transient: Transient | undefined = leaving ? "out" : refreshMark
   // Slower than the merge sparkle, off the same counter — see TRANSIT_FRAME_TICKS.
   const transitFrame = Math.floor(sparkFrame / TRANSIT_FRAME_TICKS)
@@ -3462,7 +3496,7 @@ const ItemRow = ({
   if (item.kind === "subgroup-header" && depthOf(item) > 0)
     return (
       <Box marginTop={gap ? 1 : 0} width={cols} backgroundColor={selBg}>
-        <Text color={colors.info}>{active ? "❯ " : "  "}</Text>
+        <Text color={colors.info}>{selectionGutter(active, selected)}</Text>
         <Text>{"  ".repeat(depthOf(item))}</Text>
         <Text color={colors.accent} bold>
           {"› "}
@@ -3474,7 +3508,7 @@ const ItemRow = ({
   if (item.kind === "subgroup-header" && opensBands)
     return (
       <Box marginTop={gap ? 1 : 0} width={cols} backgroundColor={selBg}>
-        <Text color={colors.info}>{active ? "❯ " : "  "}</Text>
+        <Text color={colors.info}>{selectionGutter(active, selected)}</Text>
         <Text bold>{item.label}</Text>
         <Text dimColor={!active}>
           {" " + "─".repeat(Math.max(4, FENCE_COLS - item.label.length - 1))}
@@ -3493,7 +3527,7 @@ const ItemRow = ({
   if (item.kind === "subgroup-header" && item.side && !item.label)
     return (
       <Box marginTop={gap ? 1 : 0} width={cols} backgroundColor={selBg}>
-        <Text color={colors.info}>{active ? "❯ " : "  "}</Text>
+        <Text color={colors.info}>{selectionGutter(active, selected)}</Text>
         <Text backgroundColor={tonalColors.muted.fill} color={colors.secondary}>
           {` ${item.side} `}
         </Text>
@@ -3503,7 +3537,7 @@ const ItemRow = ({
   if (item.kind === "subgroup-header")
     return (
       <Box marginTop={gap ? 1 : 0} width={cols} backgroundColor={selBg}>
-        <Text color={colors.info}>{active ? "❯ " : "  "}</Text>
+        <Text color={colors.info}>{selectionGutter(active, selected)}</Text>
         <Text color={colors.accent} bold>
           {"» "}
         </Text>
@@ -3514,7 +3548,7 @@ const ItemRow = ({
   if (item.kind === "show-more")
     return (
       <Box width={cols} backgroundColor={selBg}>
-        <Text color={colors.info}>{active ? "❯ " : "  "}</Text>
+        <Text color={colors.info}>{selectionGutter(active, selected)}</Text>
         {/* Blank, never a mark: the tail names no url. But the stem it closes
             runs after the focus gutter on every row above it, so skipping the
             cell drew the corner two columns left of that stem (2026-10-29). */}
@@ -3532,7 +3566,7 @@ const ItemRow = ({
   if (item.kind === "show-less")
     return (
       <Box width={cols} backgroundColor={selBg}>
-        <Text color={colors.info}>{active ? "❯ " : "  "}</Text>
+        <Text color={colors.info}>{selectionGutter(active, selected)}</Text>
         {focus !== undefined ? <Text>{"  "}</Text> : null}
         {typeGutter ? <Text>{typeGutterBlank}</Text> : null}
         <Text dimColor>{prefix}</Text>
@@ -3618,7 +3652,7 @@ const ItemRow = ({
     const focusCell = focusCellFor(focus, item.url)
     return (
       <Box marginTop={gap ? 1 : 0} width={cols} backgroundColor={selBg}>
-        <Text color={colors.info}>{active ? "❯ " : "  "}</Text>
+        <Text color={colors.info}>{selectionGutter(active, selected)}</Text>
         {/* The focus gutter sits directly after the cursor, BEFORE the tree
             run: the stem then just precedes the row's own first mark, the
             marked row is found on the same scan that reads `❯`, and the tree
@@ -3835,6 +3869,7 @@ const ItemRow = ({
     <PrRow
       item={item}
       active={active}
+      selected={selected}
       login={login}
       cols={cols}
       selectionBg={selBg}
@@ -4342,6 +4377,11 @@ export const HelpModal = ({
   const keys: [string, string][] = [
     ["↑ ↓", "navigate"],
     ["← → · tab", "switch tab"],
+    // The multi-select, beside the movement it extends — a range is anchored on
+    // navigation and read over it, so nothing else on the list reads as
+    // naturally in the legend.
+    ["⇧↑↓", "select range"],
+    ["space", "select row"],
     ["↵ · d", "open / drill in · repo: checkout"],
     ["m", "actions · close"],
     ["e", "explain this row"],
@@ -4913,6 +4953,26 @@ const BrowseScreen = ({
     onTabChange?.(activeId)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeId])
+  /*
+   * The multi-select: the selected rowKeys, the range anchor (a rowKey too, so
+   * a refresh that reorders the list cannot move it), and the base the range
+   * is unioned onto, captured when the anchor is set so a ⇧-run keeps the rows
+   * space picked before it. One tab's selection only: leaving the tab clears
+   * it, because a verb acting on rows the reader can no longer see is the
+   * surprise this feature must never spring.
+   */
+  const [selected, setSelected] = useState<Set<string>>(() => new Set())
+  const [anchor, setAnchor] = useState<string | null>(null)
+  const [base, setBase] = useState<Set<string>>(() => new Set())
+  // Two callers: the peel's esc arm and the tab switch below.
+  const clearSelection = () => {
+    setSelected(new Set())
+    setAnchor(null)
+    setBase(new Set())
+  }
+  useEffect(() => {
+    clearSelection()
+  }, [activeId])
   const [flash, setFlash] = useState<string | null>(null)
   const menu = useActionMenu()
   const [repoFilter, setRepoFilter] = useState<Set<string>>(new Set())
@@ -5086,6 +5146,23 @@ const BrowseScreen = ({
     setCursors((p) => ({ ...p, [activeId]: firstSelectable(section) }))
     setViewStarts((p) => ({ ...p, [activeId]: 0 }))
   }, [search])
+
+  /*
+   * The count is derived from the drawn list at render, so a row a refresh
+   * removes stops counting at once. The SET is pruned here as well, against
+   * the tab's full list rather than the drawn one (a search must not drop a
+   * hidden row's membership): otherwise a row that left and a later fetch
+   * brought back would come back selected, which nobody asked for.
+   */
+  useEffect(() => {
+    const live = new Set(rawSection.items.filter(isSelectable).map(rowKey))
+    setSelected((prev) =>
+      [...prev].every((k) => live.has(k))
+        ? prev
+        : new Set([...prev].filter((k) => live.has(k))),
+    )
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rawSection.items])
 
   const allRepos = reposInSections(localSections)
 
@@ -5286,6 +5363,12 @@ const BrowseScreen = ({
       "url" in activeItem
     )
       return (onActivityDismiss?.(activeItem.url), true)
+    // Before the search filter: `esc` first stops selecting, then unfilters.
+    // With nothing selected it peels on exactly as it did before.
+    if (selected.size > 0) {
+      clearSelection()
+      return true
+    }
     if (search != null) return (filter.clear(), true)
     if (repoFilter.size > 0) return (setRepoFilter(new Set()), true)
     return false
@@ -5580,6 +5663,39 @@ const BrowseScreen = ({
     )
   }
 
+  /*
+   * The selection as the verbs and the footer see it: the selected rows still
+   * drawn, minus any a refresh is walking off screen. A departing row stays
+   * drawn for TRANSIT_HOLD_MS so the reader sees it go, but it is no longer on
+   * the board, so it neither counts nor gets opened, copied or muted.
+   */
+  const visibleSelection = selectedRows(section.items, selected, rowKey).filter(
+    (i) => {
+      const t = transientOf(transients, i, section.id)
+      return (
+        t !== "out" &&
+        t !== "moved-out" &&
+        !("url" in i && leavingUrls?.includes(i.url))
+      )
+    },
+  )
+
+  // One cursor step with its viewStart walk, shared by the plain and the ⇧
+  // arrows so a range lands with its last row on screen exactly as a plain
+  // press would. ↑ snaps up past any header above the row; ↓ crawls down.
+  const moveViewed = (dir: 1 | -1): number => {
+    const next = moveCursor(section.items, cursor, dir)
+    let newVs = viewStart
+    if (dir === -1)
+      newVs = Math.min(viewStart, withHeaders(section.items, next))
+    else
+      while (next >= newVs + windowCount(section.items, newVs, listHeight))
+        newVs++
+    setCursors((p) => ({ ...p, [activeId]: next }))
+    setViewStarts((p) => ({ ...p, [activeId]: newVs }))
+    return next
+  }
+
   useInput((input, key) => {
     // ABOVE both guards below, deliberately. They exist to stop a key ACTING on
     // the list; neither is a reason to miss the reader coming back — a swallowed
@@ -5808,19 +5924,48 @@ const BrowseScreen = ({
     // stays a position with its own clamp while useTabs owns a tab VALUE —
     // adopting either would add a derived index and a clamp effect on top, to
     // replace four correct lines. The repo picker above is the fit; this is not.
+    //
+    // ⇧↑ / ⇧↓ (ESC[1;2A/B, which Ink reports as the arrow plus `shift`) used to
+    // fall into the plain arms and just move. Now they extend a range: the
+    // first press anchors on the row the cursor stood on, and the selection is
+    // the base plus every selectable row from the anchor to the cursor. ABOVE
+    // the plain arms and returning, or the cursor would move twice.
+    if (key.shift && (key.upArrow || key.downArrow)) {
+      if (section.items.length === 0) return
+      const from = cursor
+      const next = moveViewed(key.downArrow ? 1 : -1)
+      // Found by identity on every press, never kept as an index: a refresh
+      // applied mid-run reorders the list, and an index would then anchor on
+      // whichever row moved into the slot. A filtered-out anchor starts afresh.
+      const anchorIdx =
+        anchor === null
+          ? -1
+          : section.items.findIndex((i) => rowKey(i) === anchor)
+      // A header under the cursor cannot anchor; the row the move landed on can.
+      const startIdx =
+        anchorIdx >= 0
+          ? anchorIdx
+          : isSelectable(section.items[from])
+            ? from
+            : next
+      const runBase = anchorIdx >= 0 ? base : new Set(selected)
+      if (anchorIdx < 0) {
+        setBase(runBase)
+        setAnchor(rowKey(section.items[startIdx]!))
+      }
+      setSelected(
+        new Set([
+          ...runBase,
+          ...rangeKeys(section.items, startIdx, next, rowKey),
+        ]),
+      )
+      return
+    }
     if (key.upArrow) {
-      const next = moveCursor(section.items, cursor, -1)
-      const newVs = Math.min(viewStart, withHeaders(section.items, next))
-      setCursors((p) => ({ ...p, [activeId]: next }))
-      setViewStarts((p) => ({ ...p, [activeId]: newVs }))
+      moveViewed(-1)
     }
     if (key.downArrow) {
-      const next = moveCursor(section.items, cursor, 1)
-      let newVs = viewStart
-      while (next >= newVs + windowCount(section.items, newVs, listHeight))
-        newVs++
-      setCursors((p) => ({ ...p, [activeId]: next }))
-      setViewStarts((p) => ({ ...p, [activeId]: newVs }))
+      moveViewed(1)
     }
     // ←→ and Tab are one gesture on the ring, wrapping at both ends — the
     // arrows used to clamp while Tab wrapped four lines below, two end
@@ -5918,6 +6063,41 @@ const BrowseScreen = ({
         return { ...p, [tabId]: vs }
       })
       return
+    }
+    /*
+     * THE BATCH ARM. While any selected row is on screen, `o` and `c` act on
+     * all of them, and so does an extension that declared `batch`. Above the
+     * header arms and every single-row arm, so the footer's promise holds
+     * wherever the cursor stands. Only the cheap, reversible verbs: merge, land
+     * and `x` each run a confirm with a per-PR preview and head check, which a
+     * batch would have to throw away, so they stay single-row on purpose.
+     *
+     * Read over `section.items`, the DRAWN list: a selected row a search hides
+     * is not acted on, so the verb never reaches further than the count says.
+     * With nothing selected on screen, every key falls through unchanged.
+     */
+    if (visibleSelection.length > 0) {
+      const urls = selectedUrls(visibleSelection)
+      if (input === "o" && urls.length > 0) {
+        quietly`open ${urls}`.catch(() => {})
+        showFlash(`↗ Opened ${urls.length} tab${urls.length === 1 ? "" : "s"}`)
+        return
+      }
+      if (input === "c" && urls.length > 0) {
+        clipboard(urls.join("\n"))
+        showFlash(`✓ Copied ${urls.length} link${urls.length === 1 ? "" : "s"}`)
+        return
+      }
+      // `item` stays the cursor row; `items` is the batch. An extension that did
+      // not opt in falls through to the single-row arm below, untouched.
+      const batch = extensionFor(input, extensions)
+      if (batch?.batch) {
+        onOpenExt?.(batch.id, {
+          ...extensionTargetFor(activeItem),
+          items: visibleSelection,
+        })
+        return
+      }
     }
     // Any extension whose declared key is pressed opens it. This used to be a
     // hardcoded `input === "J"` arm calling onOpenExt("jenkins", …), which made
@@ -6082,6 +6262,22 @@ const BrowseScreen = ({
     // cannot tell the two apart without terminal-specific key protocols.
     if (input === "m") {
       openMenu()
+      return
+    }
+
+    // Space toggles the cursor row and drops the range anchor, so the next ⇧
+    // press starts a fresh range from wherever the cursor is then. Down here,
+    // below the search branch, for the reason `e` had to move: while the field
+    // is up, a space is a query character like any letter.
+    if (input === " " && isSelectable(activeItem)) {
+      const spotKey = rowKey(activeItem)
+      setSelected((prev) => {
+        const next = new Set(prev)
+        if (next.has(spotKey)) next.delete(spotKey)
+        else next.add(spotKey)
+        return next
+      })
+      setAnchor(null)
       return
     }
 
@@ -6284,6 +6480,22 @@ const BrowseScreen = ({
     "c",
     `copy ${headerLinks} link${headerLinks === 1 ? "" : "s"}`,
   ]
+  /*
+   * While a selection is on screen the footer is the selection's, wholesale,
+   * the way the rail's is: `o` and `c` mean the batch in every arm above, so
+   * `m actions` beside them would name a key that still acts on one row. The
+   * count is the drawn rows, so a search or refresh that narrows it narrows
+   * the number with no keystroke.
+   */
+  const batchHints = (extensions ?? [])
+    .filter((e) => e.batch)
+    .map((e) => [e.key, e.hint ?? e.title.toLowerCase()] as [string, string])
+  const selectedHints: [string, string][] = [
+    [String(visibleSelection.length), "selected"],
+    ["o", "open"],
+    ["c", "copy"],
+    ...batchHints,
+  ]
   const hints: [string, string][] = railActive
     ? // The rail's own keymap while it holds focus, not the list's with a line
       // bolted on. A footer advertising `m actions` beside a cursor that cannot
@@ -6301,43 +6513,45 @@ const BrowseScreen = ({
         ["?", "help"],
         ["q", "quit"],
       ]
-    : activeItem?.kind === "repo-header"
-      ? [
-          ["↑↓", "nav"],
-          ["←→", "tab"],
-          ["↵", "open repo"],
-          ["o", "browser"],
-          headerHint,
-          ["?", "help"],
-          ["q", "quit"],
-        ]
-      : activeItem?.kind === "subgroup-header"
+    : visibleSelection.length > 0
+      ? selectedHints
+      : activeItem?.kind === "repo-header"
         ? [
             ["↑↓", "nav"],
             ["←→", "tab"],
+            ["↵", "open repo"],
+            ["o", "browser"],
             headerHint,
             ["?", "help"],
             ["q", "quit"],
           ]
-        : [
-            ["↑↓", "nav"],
-            ["←→", "tab"],
-            ["↵/d", "open"],
-            ["m", "actions"],
-            // Always, now that the launcher opens a pasted PR or issue too. It was
-            // shown only where Jira was configured, when a ticket key was all it
-            // could take and without one it could only apologise.
-            ["⌃K", "launch"],
-            // Advertised only where it does something, and named for what it
-            // shows rather than for the furniture: nobody wants "a sidebar".
-            ...(showRail
-              ? ([["⇥", railTitle]] as [string, string][])
-              : hasRail
-                ? ([["i", railTitle]] as [string, string][])
-                : []),
-            ["?", "help"],
-            ["q", "quit"],
-          ]
+        : activeItem?.kind === "subgroup-header"
+          ? [
+              ["↑↓", "nav"],
+              ["←→", "tab"],
+              headerHint,
+              ["?", "help"],
+              ["q", "quit"],
+            ]
+          : [
+              ["↑↓", "nav"],
+              ["←→", "tab"],
+              ["↵/d", "open"],
+              ["m", "actions"],
+              // Always, now that the launcher opens a pasted PR or issue too. It was
+              // shown only where Jira was configured, when a ticket key was all it
+              // could take and without one it could only apologise.
+              ["⌃K", "launch"],
+              // Advertised only where it does something, and named for what it
+              // shows rather than for the furniture: nobody wants "a sidebar".
+              ...(showRail
+                ? ([["⇥", railTitle]] as [string, string][])
+                : hasRail
+                  ? ([["i", railTitle]] as [string, string][])
+                  : []),
+              ["?", "help"],
+              ["q", "quit"],
+            ]
   const matchCount = section.items.filter(
     (i) => i.kind !== "repo-header" && i.kind !== "subgroup-header",
   ).length
@@ -6776,6 +6990,7 @@ const BrowseScreen = ({
                     key={`${viewStart + i}:${rowKey(item)}`}
                     item={item}
                     active={viewStart + i === cursor}
+                    selected={selected.has(rowKey(item))}
                     login={login}
                     merged={
                       (item.kind === "pr" || item.kind === "issue") &&
