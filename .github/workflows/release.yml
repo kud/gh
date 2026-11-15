@@ -13,10 +13,10 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # NB: no `registry-url` on setup-node — it writes an empty _authToken into
       # .npmrc that overrides OIDC and yields E404 (per kud's publisher agent).
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
