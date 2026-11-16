@@ -4,6 +4,7 @@ import React from "react"
 import { render } from "ink"
 import { App } from "./inbox.js"
 import type { AnyItem, GHItem, Section } from "./inbox.js"
+import type { ExtensionTarget, InboxExtension } from "./extension.js"
 
 // What `c` wrote to the clipboard, read off a stubbed pbcopy rather than the
 // machine's — the same stub repo-header.test.tsx and sidebar.test.tsx use.
@@ -96,7 +97,11 @@ const header = (repo: string): AnyItem =>
 
 const five = (): AnyItem[] => [pr(1), pr(2), pr(3), pr(4), pr(5)]
 
-const mount = async (before: Section[], after: Section[] = before) => {
+const mount = async (
+  before: Section[],
+  after: Section[] = before,
+  extensions: InboxExtension[] = [],
+) => {
   const stdout = new FakeStdout(120, 40)
   const stdin = new FakeStdin()
   let call = 0
@@ -108,6 +113,7 @@ const mount = async (before: Section[], after: Section[] = before) => {
       })}
       title="cockpit"
       detailFor={() => null}
+      extensions={extensions}
     />,
     {
       stdout: stdout as never,
@@ -231,6 +237,69 @@ describe("multi-select", () => {
     await press(SHIFT_DOWN)
     await press(SHIFT_DOWN)
     expect(selectedCount(frame())).toBe(2)
+    stop()
+  })
+
+
+  it("gives batch extensions the selected rows, not the cursor row", async () => {
+    const received: ExtensionTarget[] = []
+    const mute: InboxExtension = {
+      id: "mute",
+      key: "z",
+      title: "Mute",
+      hint: "mute",
+      scope: "item",
+      batch: true,
+      body: () => null,
+      run: (target) => received.push(target),
+    }
+    const { frame, press, stop } = await mount(
+      [{ id: "open", label: "Open", items: five() }],
+      undefined,
+      [mute],
+    )
+    await press(" ") // Select PR #1.
+    await press(DOWN)
+    await press(" ") // Select PR #2.
+    await press(DOWN) // Leave the cursor on unselected PR #3.
+    expect(selectedCount(frame())).toBe(2)
+    expect(frame()).toContain("z mute")
+    await press("z")
+    expect(received).toHaveLength(1)
+    expect(received[0]?.items?.map((item) => "url" in item && item.url)).toEqual([
+      "https://github.com/acme/api/pull/1",
+      "https://github.com/acme/api/pull/2",
+    ])
+    // The old item contract still names the row under the cursor.
+    expect("url" in received[0]!.item! && received[0]!.item!.url).toBe(
+      "https://github.com/acme/api/pull/3",
+    )
+    stop()
+  })
+
+  it("keeps non-batch extensions on the cursor row during selection", async () => {
+    const received: ExtensionTarget[] = []
+    const single: InboxExtension = {
+      id: "single",
+      key: "z",
+      title: "Single action",
+      scope: "item",
+      body: () => null,
+      run: (target) => received.push(target),
+    }
+    const { press, stop } = await mount(
+      [{ id: "open", label: "Open", items: five() }],
+      undefined,
+      [single],
+    )
+    await press(" ") // Select PR #1.
+    await press(DOWN) // Cursor on PR #2.
+    await press("z")
+    expect(received).toHaveLength(1)
+    expect(received[0]?.items).toBeUndefined()
+    expect("url" in received[0]!.item! && received[0]!.item!.url).toBe(
+      "https://github.com/acme/api/pull/2",
+    )
     stop()
   })
 
