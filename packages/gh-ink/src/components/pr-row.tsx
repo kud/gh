@@ -13,6 +13,7 @@ import {
 import { displayFor } from "../lib/health-display.js"
 import { truncate } from "../lib/truncate.js"
 import { METER_COLS, meterCellsOf, weightTierOf } from "../lib/weight.js"
+import { selectionGutter } from "../inbox/multi-select.js"
 import { Text, useBackdropped } from "../inbox/backdrop.js"
 import type { FocusGutter } from "../inbox/focus-slot.js"
 
@@ -68,6 +69,14 @@ export const typeGutterPad = (label: string): string =>
 export type PrRowProps = {
   item: GHItem
   active: boolean
+  /**
+   * Whether this row is part of the multi-select. Presentational here: the
+   * LIST resolves the row against its Set and hands down the answer, and the
+   * drawn answer rides in the gutter's second column — a dot beside the cursor,
+   * so a piped frame carries the state no colour could. The wash still arrives
+   * as `selectionBg` above, resolved once for every row.
+   */
+  selected?: boolean
   login?: string
   /**
    * The selection wash for this frame, resolved by the list — see
@@ -581,6 +590,7 @@ export const layoutOf = ({
 export const PrRow = ({
   item,
   active,
+  selected = false,
   login,
   cols,
   selectionBg,
@@ -699,7 +709,9 @@ export const PrRow = ({
     // The wash paints every cell of the fixed-width row — an Ink Box's
     // background covers its full measure, not just the inked cells.
     <Box width={cols} backgroundColor={selectionBg}>
-      {gutter ? <Text color={colors.info}>{active ? "❯ " : "  "}</Text> : null}
+      {gutter ? (
+        <Text color={colors.info}>{selectionGutter(active, selected)}</Text>
+      ) : null}
       {/* The focus gutter, directly after the cursor and BEFORE the tree run:
           the stem then just precedes the row's own health cell, the marked row
           is found on the same scan that reads `❯`, and a child row's tree stem
