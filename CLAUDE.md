@@ -1,11 +1,12 @@
 # @kud/gh — working notes
 
-An npm-workspaces monorepo behind cockpit. Six packages, one direction of flow:
+An npm-workspaces monorepo behind cockpit. Seven packages, one direction of flow:
 
 ```
 @kud/gh          surface-agnostic core — shells out to `gh`, returns plain data
-  └ @kud/gh-ink  Ink components, the inbox, and the whose-move bands
-      └ @kud/gh-cockpit  the host that assembles sections
+  └ @kud/gh-workflow  whose move it is, sorting, grouping — no renderer, no transport
+      └ @kud/gh-ink  Ink components and the inbox that draws the whose-move bands
+          └ @kud/gh-cockpit  the host that assembles sections
 @kud/gh-pr-comments · gh-pr-health · gh-webhook-replay   thin CLIs over the core
 ```
 
@@ -72,8 +73,8 @@ in the same commit.** Nothing waits for a publish.
 
 The cost: cockpit's build needs `gh-ink/dist` to already exist, and
 `workspaces: ["packages/*"]` expands ALPHABETICALLY — `gh-cockpit` before
-`gh-ink`. So the root `build` script builds `@kud/gh` and `@kud/gh-ink`
-explicitly first, then sweeps `--workspaces`. Keep that prelude when you touch
+`gh-ink`. So the root `build` script builds `@kud/gh`, `@kud/gh-workflow` and
+`@kud/gh-ink` explicitly first, then sweeps `--workspaces`. Keep that prelude when you touch
 the script, and extend it if a new package acquires dependents.
 
 > [!IMPORTANT]
