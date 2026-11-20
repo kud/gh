@@ -21,9 +21,17 @@ npm install @kud/gh-ink @kud/gh
 | Export                                          | What                                                                                                                      |
 | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
 | `CommentsPanel` (`CommentsPanelProps`)          | Selectable review-thread + conversation panel — resolve (`x`), reply (`r`), show/hide resolved (`R`).                     |
+| `HealthPanel` (`HealthPanelProps`)              | Checks, reviews and merge state — open a check (`↵`), retrigger failed CI (`r`), merge after confirmation (`m`).          |
 | `healthDisplay` / `healthGlyph` / `healthColor` | Map a `@kud/gh` `Health` token → glyph + `@kud/ink-ui` colour. Glyph distinguishes (colourblind-safe); colour reinforces. |
 | `healthLegend`                                  | Ordered `[Health, label]` pairs for a help legend.                                                                        |
 | `renderMarkdown`                                | GitHub-flavoured markdown → styled terminal lines.                                                                        |
+| `PrRow` · `SidePanel` · `StatusStripLine`       | The row, sidebar and status-strip pieces of the inbox.                                                                    |
+
+The inbox shell — `App` and its helpers, `configureInbox`, `layoutGHItems` — is
+exported from here too, and cockpit re-exports it. The whose-move logic it draws
+(`whoseMove`, `bandOf`, the sorting and grouping) lives in
+[`@kud/gh-workflow`](../gh-workflow), which has no renderer, and is re-exported
+here so a host needs one import.
 
 ## Design
 
