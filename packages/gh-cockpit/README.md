@@ -17,7 +17,7 @@
 
 ## 🌟 Features
 
-- 🎯 **Whose-move bands** — every tab splits into `Your move` and `Their move`, so the two rows you can act on stop hiding among the eighteen you can't
+- 🎯 **Whose-move bands** — every tab but Done splits into `Your move` and `Their move`, so the two rows you can act on stop hiding among the eighteen you can't; on your own PRs, `Ready to merge` and `Drafts` peel off as well
 - 🧭 **Standing, not guesswork** — the same `✗` is your afternoon on a PR you wrote and the author's on one you were asked to review; the band knows which
 - 🔍 **`--here` scoping** — resolves the repo from your git remote and scopes every search server-side, so other repos are never fetched at all
 - 🎛️ **Pattern filtering** — `--include acme/*,me/acme-*` and `--exclude`, replacing any built-in notion of which repos are "yours"
@@ -61,7 +61,7 @@ $ cockpit
   ~   #10    add internalNotes to Contract                 1w
   ── acme/api-gateway ─────
   ✗ ← #1496  point history at the generic route            2d
-  !   #1449  guard null ids before per-id fetches          6w
+  ±   #1449  guard null ids before per-id fetches          6w
 ```
 
 ## 🛠️ Build your own CLI
@@ -102,17 +102,21 @@ const fetchCockpit = async (): Promise<{ sections: Section[]; login: string }> =
     $`gh api graphql -f query=${buildInboxQuery({})}`.quiet(),
   )
   const data = JSON.parse(result.stdout).data
+  // The bands read every row against the viewer — who spoke last, whose repo it
+  // is — so the layout needs the login, and laying out without one is wrong
+  // rather than degraded.
+  const login: string = data.viewer.login
 
   const rows = (nodes: any[], standing?: "authored" | "queued" | "spoken") =>
     (nodes ?? []).map((n) => ({ ...toGHItem(n), ...(standing ? { standing } : {}) }))
 
   return {
-    login: data.viewer.login,
+    login,
     sections: [
       {
         id: "mine",
         label: "Mine",
-        items: layoutGHItems(rows(data.myPRs.nodes, "authored"), "mine"),
+        items: layoutGHItems(rows(data.myPRs.nodes, "authored"), "mine", login),
       },
       {
         // Two searches, one tab. `standing` is stamped per search because nothing
@@ -125,9 +129,10 @@ const fetchCockpit = async (): Promise<{ sections: Section[]; login: string }> =
             ...rows(data.reviewed.nodes, "spoken"),
           ],
           "review",
+          login,
         ),
       },
-      { id: "done", label: "Done", items: layoutGHItems(rows(data.recentlyDone.nodes), "done") },
+      { id: "done", label: "Done", items: layoutGHItems(rows(data.recentlyDone.nodes), "done", login) },
     ].filter((s) => s.items.some((i) => i.kind !== "repo-header")),
   }
 }
@@ -167,24 +172,37 @@ A poller is wrong twice over: it spends quota on the long stretches where nothin
 | Export                                   | Purpose                                                                                  |
 | ---------------------------------------- | ---------------------------------------------------------------------------------------- |
 | `defineCockpit(config)` | Types your own config object. A convenience for hosts — nothing internal reads it |
-| `configureInbox(config)`                 | Host opinions: `repoPriority`, `profiles`, `checkoutDir`, `cacheNamespace`, `cacheTtlMs` |
+| `configureInbox(config)`                 | Host opinions: `repoPriority`, `labelPriority`, `impliedLabels`, `profiles`, `checkoutDir`, `cacheNamespace`, `cacheTtlMs` |
 | `parseArgs(argv)` | Parses `--here`, `--include`, `--exclude` and a positional filter name. You decide what they mean |
 | `registerCheckDrills(drills)`            | Where a CI check drills in; unregistered checks open in a browser                        |
 | `registerPrompts(forms)`                 | What a delegated agent is told to do. Nothing registered means the agent starts cold, and `y` copies the row URL |
+| `registerDecisionHooks(hooks)`           | Hooks for the decision block a PR view draws                                             |
 | `detailFor(ctx)`                         | The drill-in view for a row — `PrView` or `IssueView`                                    |
 | `PrView` · `IssueView`                   | The drill-in views themselves, if you want to wrap them                                  |
 | `withRetry(fn)`                          | Retries transient `50x` responses; GitHub returns them under load                        |
 | `toGHItem(node)` · `computeHealth(node)` | GraphQL node → row, and the health token behind each glyph                               |
+| `buildInboxQuery` · `fetchInbox`         | The inbox's GraphQL document, or the whole read run for you                              |
+| `layoutGHItems(items, sectionId, login)` · `whoseMove` · `bandOf` | Banding, re-exported from [`@kud/gh-workflow`](../gh-workflow) through `@kud/gh-ink`  |
+
+Two opt-in extensions, `delegateExtension` and `copyPromptExtension`, come from `@kud/gh-cockpit/extensions` — a separate entry point because each adds a keybinding, and importing one is how you say yes to it.
 
 ### Whose move is it
 
-|                                                       | `authored`<br>your PR | `queued`<br>asked of you | `spoken`<br>you reviewed |
-| ----------------------------------------------------- | --------------------- | ------------------------ | ------------------------ |
-| `✗` CI failing · `!` conflict · `±` changes requested | **you**               | them                     | them                     |
-| `·` awaiting review · `*` checks running              | them                  | **you**                  | them                     |
-| `✓` approved                                          | **you**               | **you**                  | them                     |
-| `◆` open threads                                      | **you**               | **you**                  | **you**                  |
-| `~` draft                                             | them                  | them                     | them                     |
+|                                         | `authored`<br>your PR | `queued`<br>asked of you | `spoken`<br>you reviewed |
+| --------------------------------------- | --------------------- | ------------------------ | ------------------------ |
+| `✗` CI failing · `±` changes requested  | **you**               | them                     | them                     |
+| `!` conflict                            | **you**               | **you**                  | them                     |
+| `·` awaiting review                     | them                  | **you**                  | them                     |
+| `*` checks running                      | them                  | **you**                  | them                     |
+| `✓` approved                            | **you**               | **you**                  | them                     |
+| `◆` open threads                        | **you**               | **you**                  | **you** if they spoke last, else them |
+| `~` draft                               | **you**               | them                     | them                     |
+
+A conflict is not a verdict on the code — nobody examined anything, and the diff you were asked to read survives the rebase — so a review asked of you stays yours through one. A red build does not: it is the author's. A thread on a PR you have already reviewed is yours only when somebody else had the last word; one you opened and nobody answered is theirs.
+
+Four claims sit above the table. A row you pinned — a 👍 from you on the PR body — is yours, always. On your own PR, somebody else having spoken last makes it yours whatever the health says. Awaiting review on a repo you own is yours, since nobody is coming to review it. And an issue (no review state to read) is yours from `authored` and `Unclassified` from anywhere else — a band for rows that decline a verdict rather than a shade of `them`.
+
+On `authored` alone, your move peels into three: `Ready to merge` (approved, or awaiting review on your own repo), `Your move`, and `Drafts`.
 
 `standing` is declared per search rather than inferred, because nothing on a row records it: a PR awaiting review and one you already reviewed are the same PR to GitHub's API, and opposite things to you.
 
@@ -207,8 +225,13 @@ cd gh && npm install
 ```
 
 ```sh
-npm run build --workspace @kud/gh-cockpit
+npm run build
 ```
+
+Build from the root, not just this workspace. Cockpit compiles against its
+siblings' `dist/`, and on a fresh clone there is none: building it alone fails
+with `Cannot find module '@kud/gh-ink'`. The root script builds `@kud/gh`,
+`@kud/gh-workflow` and `@kud/gh-ink` first for exactly that reason.
 
 | Script              | Does                               |
 | ------------------- | ---------------------------------- |
@@ -221,6 +244,8 @@ npm run build --workspace @kud/gh-cockpit
 src/
   config.ts        defineCockpit and the config types
   args.ts          --here / --include / --exclude parsing
+  prompts.ts       registerPrompts
+  decision.ts      registerDecisionHooks
   lib.ts           shared layer, re-exports @kud/gh-ink
   views/           PrView, IssueView, and the drill-in views
   extensions/      opt-in extensions, exported separately
@@ -231,7 +256,8 @@ src/
 |                                                          |                                                    |
 | -------------------------------------------------------- | -------------------------------------------------- |
 | [@kud/gh](https://www.npmjs.com/package/@kud/gh)         | Surface-agnostic core: queries, health computation |
-| [@kud/gh-ink](https://www.npmjs.com/package/@kud/gh-ink) | Ink components, whose-move banding, layout         |
+| [@kud/gh-workflow](https://www.npmjs.com/package/@kud/gh-workflow) | Whose move it is, sorting, grouping, filtering |
+| [@kud/gh-ink](https://www.npmjs.com/package/@kud/gh-ink) | Ink components and the inbox shell                 |
 | [@kud/ink-ui](https://www.npmjs.com/package/@kud/ink-ui) | Terminal UI primitives                             |
 | [zx](https://www.npmjs.com/package/zx)                   | Shelling out to `gh`                               |
 
