@@ -18,7 +18,7 @@ jobs:
       # .npmrc that overrides OIDC and yields E404 (per kud's publisher agent).
       - uses: actions/setup-node@v7
         with:
-          node-version: 24
+          node-version: lts/*
           cache: npm
       - run: npm ci
       # The quality gates run HERE, not only in ci.yml, because ci.yml cannot be
