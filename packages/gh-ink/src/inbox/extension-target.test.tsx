@@ -76,8 +76,28 @@ const SECTIONS: Section[] = [
   },
 ]
 
-const settle = () => new Promise((resolve) => setImmediate(resolve))
 const after = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+// Waits on what the test can observe rather than on a count of event-loop turns.
+//
+// Both specs here used to sync on bare `setImmediate` ticks — two to mount, one
+// or two after the keypress — and that count had no slack at all: two turns was
+// exactly what an idle machine needed for the rows to paint AND for the browse
+// screen's input handler to be attached. React's scheduler yields back to the
+// event loop once a task has run for ~5ms, so on a loaded runner the same work
+// spills into one more turn. The rows then land a turn late, the `z` is written
+// to a stdin nobody is listening to yet, and Ink drops it without a trace: the
+// spy is never called and `seen` is undefined. That is how this failed on the
+// Node 22 leg of CI on 2026-11-21 while the lts/* leg passed — not a Node
+// difference, a slower worker. Skewing `performance.now` reproduces it every
+// time on any machine. The deadline only bounds a genuine failure.
+const until = async (ok: () => boolean, what: string) => {
+  const deadline = Date.now() + 5000
+  while (!ok()) {
+    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`)
+    await after(10)
+  }
+}
 
 describe("ExtensionTarget", () => {
   const mount = (ext: InboxExtension) => {
@@ -96,9 +116,18 @@ describe("ExtensionTarget", () => {
         patchConsole: false,
       },
     )
+    // Painted is not the same as listening: the rows reach the frame on the
+    // commit, and the browse screen's input handler is attached by the passive
+    // effects that follow it. Waiting on a real timer after the paint lets that
+    // flush finish, however many turns the scheduler splits it across.
+    const ready = async () => {
+      await until(() => stdout.lastFrame().includes("first row"), "the rows")
+      await after(50)
+    }
     return {
       stdout,
       stdin,
+      ready,
       done: () => {
         instance.unmount()
         instance.cleanup()
@@ -119,11 +148,10 @@ describe("ExtensionTarget", () => {
         return null
       },
     }
-    const { stdin, done } = mount(spy)
-    await settle()
-    await settle()
+    const { stdin, ready, done } = mount(spy)
+    await ready()
     stdin.press("z")
-    await settle()
+    await until(() => seen !== undefined, "the extension to open")
     done()
 
     expect(seen?.item?.kind).toBe("pr")
@@ -147,14 +175,12 @@ describe("ExtensionTarget", () => {
         return null
       },
     }
-    const { stdout, stdin, done } = mount(muter)
-    await settle()
-    await settle()
+    const { stdout, stdin, ready, done } = mount(muter)
+    await ready()
     expect(stdout.lastFrame()).toContain("first row")
 
     stdin.press("z")
-    await settle()
-    await settle()
+    await until(() => stdout.lastFrame().includes("Muted #1"), "the flash")
     const frame = stdout.lastFrame()
 
     // The row is on its way out, not out: it wears GONE where you can see it
