@@ -12,7 +12,12 @@ import {
 } from "@kud/gh"
 
 type HookWithContexts = Hook & { contexts: string[] }
-type Phase = "loading" | "pick" | "replaying" | "done" | "error"
+type Phase = "loading" | "pick" | "replaying"
+
+// What the run came to, handed out of the Ink tree so `main` can print it once
+// the alternate screen is gone. `lines[0]` is the ✓/✗ verdict; the rest say
+// which hook and where it points, the same two lines command mode prints.
+export type Outcome = { ok: boolean; lines: string[] }
 
 const hookLabel = (hook: HookWithContexts): string => {
   if (hook.contexts.length > 0) return hook.contexts.join(", ")
@@ -32,12 +37,28 @@ const hookHost = (hook: Hook): string => {
   }
 }
 
-const App = ({ repo }: { repo: string }) => {
+// The result used to be drawn INSIDE the alternate screen and held for 1.8 s
+// before exit, and leaving the alternate screen is exactly what throws its
+// contents away — so the one line that said whether the replay landed was gone
+// the moment it could have been read, failures included. A replay that errored
+// left nothing in the scrollback to say it had. The App now reports and exits
+// at once, and `main` prints the outcome to the normal screen, where it stays.
+const App = ({
+  repo,
+  onFinish,
+}: {
+  repo: string
+  onFinish: (outcome: Outcome) => void
+}) => {
   const { exit } = useApp()
   const [phase, setPhase] = useState<Phase>("loading")
   const [hooks, setHooks] = useState<HookWithContexts[]>([])
   const [cursor, setCursor] = useState(0)
-  const [msg, setMsg] = useState("")
+
+  const finish = (outcome: Outcome) => {
+    onFinish(outcome)
+    exit()
+  }
 
   useEffect(() => {
     fetchHooks(repo)
@@ -51,17 +72,8 @@ const App = ({ repo }: { repo: string }) => {
         setHooks(withContexts)
         setPhase("pick")
       })
-      .catch((e: Error) => {
-        setMsg(e.message)
-        setPhase("error")
-      })
+      .catch((e: Error) => finish({ ok: false, lines: [`✗ ${e.message}`] }))
   }, [])
-
-  useEffect(() => {
-    if (phase !== "done" && phase !== "error") return
-    const t = setTimeout(exit, 1800)
-    return () => clearTimeout(t)
-  }, [phase])
 
   useInput((input, key) => {
     if (input === "q") return exit()
@@ -71,18 +83,21 @@ const App = ({ repo }: { repo: string }) => {
       setCursor((c) => Math.min(hooks.length - 1, c + 1))
     if (key.return) {
       const hook = hooks[cursor]
+      if (!hook) return
+      const where = `  ${hookLabel(hook)} · ${hook.config.url}`
       setPhase("replaying")
       fetchLatestPrDeliveryId(repo, hook.id)
         .then((id) =>
-          replayDelivery(repo, hook.id, id).then(() => {
-            setMsg(`delivery ${id}`)
-            setPhase("done")
-          }),
+          replayDelivery(repo, hook.id, id).then(() =>
+            finish({
+              ok: true,
+              lines: [`✓ Webhook replayed on ${repo}`, `${where} · delivery ${id}`],
+            }),
+          ),
         )
-        .catch((e: Error) => {
-          setMsg(e.message)
-          setPhase("error")
-        })
+        .catch((e: Error) =>
+          finish({ ok: false, lines: [`✗ ${e.message}`, where] }),
+        )
     }
   })
 
@@ -90,13 +105,6 @@ const App = ({ repo }: { repo: string }) => {
     return <Text color={colors.info}>Fetching webhooks…</Text>
   if (phase === "replaying")
     return <Text color={colors.info}>Replaying latest pull_request…</Text>
-  if (phase === "done")
-    return (
-      <Text color={colors.success}>
-        ✓ Webhook replayed on {repo} · {msg}
-      </Text>
-    )
-  if (phase === "error") return <Text color={colors.error}>✗ {msg}</Text>
 
   return (
     <Box flexDirection="column">
@@ -162,7 +170,20 @@ const main = async () => {
     return
   }
 
-  render(<App repo={repo} />, { alternateScreen: true })
+  let outcome: Outcome | null = null
+  const app = render(
+    <App repo={repo} onFinish={(o) => (outcome = o)} />,
+    { alternateScreen: true },
+  )
+  await app.waitUntilExit()
+  // Narrowed by hand: TypeScript cannot see the callback assign it.
+  const result = outcome as Outcome | null
+  if (!result) return // `q` before anything happened: nothing to report.
+  if (result.ok) console.log(result.lines.join("\n"))
+  else {
+    console.error(result.lines.join("\n"))
+    process.exitCode = 1
+  }
 }
 
 void main()
