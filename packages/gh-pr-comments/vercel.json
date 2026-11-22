@@ -1,0 +1,17 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "installCommand": "cd ../.. && npm ci",
+  "buildCommand": "npm run demo:build",
+  "outputDirectory": "demo",
+  "rewrites": [
+    {
+      "source": "/projects/gh-pr-comments/demo",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/projects/gh-pr-comments/demo/:path*",
+      "destination": "/:path*"
+    }
+  ]
+}
