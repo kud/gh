@@ -10,6 +10,7 @@ import {
   type PrHealthData,
 } from "@kud/gh"
 import { HealthPanel } from "@kud/gh-ink"
+import { FIXTURES, SCREENS, type Fixture } from "./fixtures.js"
 
 type Target = { repo: string; number: number }
 
@@ -23,19 +24,36 @@ const openUrl = (url: string) => {
   if (url) void execa("open", [url]).catch(() => {})
 }
 
-const App = ({ target }: { target: Target }) => {
+// The flag values cli-shot passes are words too, so the positional PR ref has
+// to be looked for with them taken out — otherwise `--screen list` reads as a
+// ref called "list" and the run goes looking for a PR that does not exist.
+const flagValue = (args: string[], flag: string): string | undefined => {
+  const at = args.indexOf(flag)
+  return at === -1 ? undefined : args[at + 1]
+}
+
+const positional = (args: string[]): string | undefined =>
+  args.find((a, i) => !a.startsWith("-") && args[i - 1] !== "--screen")
+
+const App = ({ target, fixture }: { target: Target; fixture?: Fixture }) => {
   const { exit } = useApp()
   const [data, setData] = useState<PrHealthData | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   const load = useCallback(() => {
+    // Mock mode never reaches `gh`: the fixture arrives after a beat so a
+    // recording shows the same "Fetching status…" frame a real run opens on.
+    if (fixture) {
+      const timer = setTimeout(() => setData(fixture.data), 120)
+      return () => clearTimeout(timer)
+    }
     fetchHealth(target.repo, target.number)
       .then((d) => {
         setData(d)
         setError(null)
       })
       .catch((e: Error) => setError(e.message))
-  }, [target])
+  }, [target, fixture])
 
   useEffect(load, [load])
   useInput((input) => {
@@ -56,7 +74,9 @@ const App = ({ target }: { target: Target }) => {
         data={data}
         error={error}
         reload={load}
-        onOpenCheck={(c: PrCheck) => openUrl(c.detailsUrl ?? c.targetUrl ?? "")}
+        onOpenCheck={(c: PrCheck) =>
+          fixture ? undefined : openUrl(c.detailsUrl ?? c.targetUrl ?? "")
+        }
       />
       <Box marginTop={1}>
         <Text dimColor>
@@ -69,7 +89,31 @@ const App = ({ target }: { target: Target }) => {
 
 const main = async () => {
   const args = process.argv.slice(2)
-  const arg = args.find((a) => !a.startsWith("-"))
+  const screen = flagValue(args, "--screen")
+
+  // The cli-shot contract: `--screen list` names the screens, `--screen <name>`
+  // opens one, `--mock` swaps every data source for the invented fixtures.
+  if (screen === "list") {
+    console.log(SCREENS.join("\n"))
+    return
+  }
+  if (args.includes("--mock")) {
+    const fixture = FIXTURES[screen ?? SCREENS[0]]
+    if (!fixture) {
+      console.error(`✗ No screen called ${screen} — try --screen list`)
+      process.exit(2)
+    }
+    render(
+      <App
+        target={{ repo: fixture.repo, number: fixture.number }}
+        fixture={fixture}
+      />,
+      { alternateScreen: true },
+    )
+    return
+  }
+
+  const arg = positional(args)
   const target =
     parseRef(arg) ??
     (await resolveCurrentPr()
