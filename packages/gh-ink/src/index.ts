@@ -50,6 +50,15 @@ export {
 } from "./components/status-strip.js"
 export { renderMarkdown } from "./lib/markdown.js"
 export {
+  shellQuote,
+  isSafeBranchName,
+  isSafeRepoSlug,
+  checkoutCmdFor,
+  fetchAndSwitchCmd,
+  switchCmd,
+  type CheckoutPlan,
+} from "./lib/shell.js"
+export {
   healthDisplay,
   healthGlyph,
   healthColor,
