@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react"
-import { render, Box, Text, useApp, useInput } from "ink"
+import { render, Box, Text, useApp, useInput, useWindowSize } from "ink"
 import { colors } from "@kud/ink-ui"
 import { fetchPrComments, resolveCurrentPr, type PrComments } from "@kud/gh"
 import { CommentsPanel } from "@kud/gh-ink"
@@ -31,6 +31,7 @@ const App = ({ target, fixture }: { target: Target; fixture?: Fixture }) => {
   const [data, setData] = useState<PrComments | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [replying, setReplying] = useState(false)
+  const { rows } = useWindowSize()
 
   const load = useCallback(() => {
     // Mock mode never reaches `gh`: the fixture arrives after a beat so a
@@ -54,8 +55,15 @@ const App = ({ target, fixture }: { target: Target; fixture?: Fixture }) => {
     if (!replying && input === "q") exit()
   })
 
+  // The root takes the terminal's full height because CommentsPanel's
+  // ScrollView sizes its window by measuring a flexGrow box, and a flexGrow box
+  // inside a parent of no fixed height grows into nothing. Without it the
+  // window measured one row and stayed there: the standalone CLI showed a
+  // single line of the review and a "18–18 / 37" indicator, in every terminal.
+  // Cockpit never showed it, because its host already hands the panel a sized
+  // region — which is why it went unnoticed until the first recording of it.
   return (
-    <Box flexDirection="column">
+    <Box flexDirection="column" height={rows}>
       <Box>
         <Text bold color={colors.accent}>
           {target.repo} #{target.number}
