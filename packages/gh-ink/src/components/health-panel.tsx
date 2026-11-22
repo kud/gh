@@ -15,15 +15,88 @@ import {
 // Four glyphs, never three: a check that was cancelled and one that is still
 // running are both "not green", and collapsing them lost the only fact that
 // tells you whether waiting will help. kud is colourblind, so the shape has to
-// carry it — `-` reads as no result, `·` as not yet.
+// carry it — `-` reads as finished with no result, `◌` as not yet.
+//
+// `·` was the not-yet glyph until 2026-11-22, and it was also the separator in
+// every summary line two rows up — `4 passed · 1 failed` — so the one mark that
+// meant "keep waiting" was the same dot the eye had learnt to skip. It is a
+// separator only now, here and in the summaries, and `◌` is an empty slot that
+// something is still on its way to fill.
+//
+// SKIPPED and NEUTRAL take `-` although `isPassCheck` counts them as passing,
+// and that split is deliberate: the classifier answers "does this block the
+// PR?", which they do not, and must keep answering it for `computeHealth` and
+// the whose-move bands. The glyph answers "what did this check find?", and a
+// skipped job found nothing. A green ✓ beside a job that never ran was the
+// panel claiming a verdict nobody reached — the same over-claim that moved
+// CANCELLED out of the fail set, pointing the other way. Hence the display-only
+// predicate below rather than an edit to the classifier.
+const isNoVerdictPass = (c: PrCheck): boolean =>
+  ["SKIPPED", "NEUTRAL"].includes(c.conclusion ?? "")
+
 const checkIcon = (c: PrCheck): [string, string] =>
-  isPassCheck(c)
-    ? ["✓", colors.success]
+  isFailCheck(c)
+    ? ["✗", colors.error]
+    : isInconclusiveCheck(c)
+      ? ["-", colors.warning]
+      : isNoVerdictPass(c)
+        ? ["-", colors.muted]
+        : isPassCheck(c)
+          ? ["✓", colors.success]
+          : ["◌", colors.warning]
+
+/**
+ * Where a check sorts in the list: worst first, so the row you came to the
+ * panel for is the row the cursor opens on. Failures, then the runs that ended
+ * asking for a person (cancelled, stale, ACTION_REQUIRED — which `isFailCheck`
+ * counts as a failure for the band, but which is a gate waiting on a click, not
+ * a verdict on the code, so it sorts beside the other runs worth a retrigger),
+ * then what is still running, then what finished without a verdict, then the
+ * passes. Every row is still drawn: a pass folded out of sight is a pass you
+ * cannot open, and a list that changes length with its contents moves the
+ * cursor under your finger.
+ */
+export const checkRank = (c: PrCheck): number =>
+  c.conclusion === "ACTION_REQUIRED"
+    ? 1
     : isFailCheck(c)
-      ? ["✗", colors.error]
+      ? 0
       : isInconclusiveCheck(c)
+        ? 1
+        : isNoVerdictPass(c)
+          ? 3
+          : isPassCheck(c)
+            ? 4
+            : 2
+
+/** Stable within a rank, so GitHub's own order survives as the tie-break. */
+export const orderChecks = (checks: PrCheck[]): PrCheck[] =>
+  checks
+    .map((c, i) => [c, i] as const)
+    .sort(([a, i], [b, j]) => checkRank(a) - checkRank(b) || i - j)
+    .map(([c]) => c)
+
+/**
+ * The mark beside "Checks". It used to be `✓` whenever nothing had failed and
+ * nothing was running, which drew a green tick over a list in which every run
+ * had been cancelled: `✓  0 passed · 3 cancelled`. A tick has to be earned by a
+ * pass, so a cancelled run — or a list with no pass in it at all — gets `-`.
+ */
+export const checksMark = (counts: {
+  passed: number
+  failed: number
+  cancelled: number
+  pending: number
+}): [string, string] =>
+  counts.failed > 0
+    ? ["✗", colors.error]
+    : counts.pending > 0
+      ? ["◌", colors.warning]
+      : counts.cancelled > 0
         ? ["-", colors.warning]
-        : ["·", colors.warning]
+        : counts.passed === 0
+          ? ["-", colors.muted]
+          : ["✓", colors.success]
 
 const checkLabel = (c: PrCheck) => {
   const name = c.context ?? c.name ?? ""
@@ -33,12 +106,16 @@ const checkUrl = (c: PrCheck) => c.detailsUrl ?? c.targetUrl ?? ""
 const runIdOf = (url: string): string | null =>
   url.match(/\/runs\/(\d+)/)?.[1] ?? null
 
+// A comment is a review that finished without a verdict, so it takes the same
+// `-` a skipped check does; a review still in draft is not finished, so `◌`.
 const reviewIcon = (state: string): [string, string] =>
   state === "APPROVED"
     ? ["✓", colors.success]
     : state === "CHANGES_REQUESTED"
       ? ["~", colors.warning]
-      : ["·", colors.muted]
+      : state === "PENDING"
+        ? ["◌", colors.muted]
+        : ["-", colors.muted]
 
 const MERGE: Record<string, [string, string]> = {
   CLEAN: ["ready", colors.success],
@@ -49,20 +126,32 @@ const MERGE: Record<string, [string, string]> = {
 }
 const mergeText = (status: string): [string, string] =>
   MERGE[status] ?? ["checking…", colors.warning]
+// The merge mark, in the colour of the words beside it: a tick only when GitHub
+// says the PR can land, a cross where it says it cannot, and `◌` for the states
+// that resolve by waiting or by a push — behind, unstable, still computing.
+const mergeMark = (status: string): [string, string] => {
+  const [, color] = mergeText(status)
+  return status === "CLEAN"
+    ? ["✓", color]
+    : status === "BLOCKED" || status === "DIRTY"
+      ? ["✗", color]
+      : ["◌", color]
+}
 
 const Summary = ({
   label,
-  icon,
+  mark: [icon, iconColor],
   parts,
 }: {
   label: string
-  icon: string
+  mark: [string, string]
   parts: [string, string][]
 }) => (
   <Box>
     <Text>{"  "}</Text>
     <Text bold>{label.padEnd(10)}</Text>
-    <Text>{icon + "  "}</Text>
+    <Text color={iconColor as any}>{icon}</Text>
+    <Text>{"  "}</Text>
     {parts.map(([text, color], i) => (
       <React.Fragment key={text + i}>
         {i > 0 && <Text dimColor>{" · "}</Text>}
@@ -101,12 +190,18 @@ export const HealthPanel = ({
   onMerged,
 }: HealthPanelProps) => {
   const [cursor, setCursor] = useState(0)
-  const [note, setNote] = useState<string | null>(null)
+  // The note carries its own colour. It was always drawn in the success green,
+  // so `✗ merge failed` arrived in the colour of a merge that landed — and for
+  // a colourblind reader the green was the only part of the line that had not
+  // been read yet when the eye moved on.
+  const [note, setNote] = useState<{ text: string; color: string } | null>(
+    null,
+  )
   const [confirm, setConfirm] = useState<"merge" | null>(null)
   const [busy, setBusy] = useState(false)
 
-  const checks = (data?.statusCheckRollup ?? []).filter((c) =>
-    (c.name ?? c.context)?.trim(),
+  const checks = orderChecks(
+    (data?.statusCheckRollup ?? []).filter((c) => (c.name ?? c.context)?.trim()),
   )
   const reviewers: [string, string][] = data
     ? Object.entries(
@@ -130,8 +225,8 @@ export const HealthPanel = ({
   // Same tempo as the inbox flash, and the same reason to clear the old timer:
   // see showFlash in inbox.tsx.
   const noteTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const flash = (msg: string) => {
-    setNote(msg)
+  const flash = (text: string, color: string) => {
+    setNote({ text, color })
     if (noteTimer.current) clearTimeout(noteTimer.current)
     noteTimer.current = setTimeout(() => setNote(null), 1500)
   }
@@ -142,17 +237,17 @@ export const HealthPanel = ({
     onSuccess?: () => void,
   ) => {
     setBusy(true)
-    setNote(`⋯ ${msg}…`)
+    setNote({ text: `⋯ ${msg}…`, color: colors.info })
     try {
       await run()
-      flash(`✓ ${msg}`)
+      flash(`✓ ${msg}`, colors.success)
       // A handler that navigates away REPLACES the reload rather than racing it.
       // Refetching a PR whose panel is about to unmount spends a request to learn
       // what we already know, and lands its setState on a dead component.
       if (onSuccess) onSuccess()
       else reload()
     } catch {
-      flash(`✗ ${msg} failed`)
+      flash(`✗ ${msg} failed`, colors.error)
     } finally {
       setBusy(false)
     }
@@ -168,7 +263,7 @@ export const HealthPanel = ({
       (c) => (isFailCheck(c) || isInconclusiveCheck(c)) && runIdOf(checkUrl(c)),
     )
     const runId = stuck && runIdOf(checkUrl(stuck))
-    if (!runId) return flash("No Actions run to retrigger")
+    if (!runId) return flash("No Actions run to retrigger", colors.warning)
     void act("retrigger CI", () => rerunFailedRun(repo, runId))
   }
 
@@ -203,10 +298,11 @@ export const HealthPanel = ({
   if (!data) return <Text color={colors.info}>Fetching status…</Text>
 
   const reviewerMap = Object.fromEntries(reviewers)
-  const passed = checks.filter(isPassCheck).length
+  const skipped = checks.filter(isNoVerdictPass).length
+  const passed = checks.filter(isPassCheck).length - skipped
   const failed = checks.filter(isFailCheck).length
   const stale = checks.filter(isInconclusiveCheck).length
-  const pending = checks.length - passed - failed - stale
+  const pending = checks.length - passed - skipped - failed - stale
   const approved = Object.values(reviewerMap).filter(
     (s) => s === "APPROVED",
   ).length
@@ -218,6 +314,7 @@ export const HealthPanel = ({
   if (failed > 0) checkParts.push([`${failed} failed`, colors.error])
   if (stale > 0) checkParts.push([`${stale} cancelled`, colors.warning])
   if (pending > 0) checkParts.push([`${pending} pending`, colors.warning])
+  if (skipped > 0) checkParts.push([`${skipped} skipped`, colors.muted])
 
   const reviewParts: [string, string][] = [
     approved > 0
@@ -230,13 +327,36 @@ export const HealthPanel = ({
     reviewParts.push(["review required", colors.warning])
 
   const [mText, mColor] = mergeText(data.mergeStateStatus)
-  const checksIcon = failed > 0 ? "✗" : pending > 0 ? "·" : "✓"
-  const reviewsIcon = changesReq > 0 ? "✗" : approved > 0 ? "✓" : "·"
-  const mergeIcon = data.mergeStateStatus === "CLEAN" ? "✓" : "·"
+  const checksIcon = checksMark({
+    passed,
+    failed,
+    cancelled: stale,
+    pending,
+  })
+  const reviewsIcon: [string, string] =
+    changesReq > 0
+      ? ["✗", colors.error]
+      : approved > 0
+        ? ["✓", colors.success]
+        : [
+            "◌",
+            data.reviewDecision === "REVIEW_REQUIRED"
+              ? colors.warning
+              : colors.muted,
+          ]
 
+  // Merge leads. It is the question the panel is opened to answer — can this
+  // land? — and it sat under two lists that grow with the PR, so on a busy one
+  // it was the line most likely to be below the fold. The words are unchanged;
+  // only the order is.
   return (
     <Box flexDirection="column">
-      <Summary label="Checks" icon={checksIcon} parts={checkParts} />
+      <Summary
+        label="Merge"
+        mark={mergeMark(data.mergeStateStatus)}
+        parts={[[mText, mColor]]}
+      />
+      <Summary label="Checks" mark={checksIcon} parts={checkParts} />
       <Box flexDirection="column">
         {checks.map((c, i) => {
           const [icon, color] = checkIcon(c)
@@ -254,7 +374,7 @@ export const HealthPanel = ({
       </Box>
 
       <Box marginTop={checks.length ? 1 : 0}>
-        <Summary label="Reviews" icon={reviewsIcon} parts={reviewParts} />
+        <Summary label="Reviews" mark={reviewsIcon} parts={reviewParts} />
       </Box>
       {reviewers.map(([login, state], j) => {
         const [icon, color] = reviewIcon(state)
@@ -269,10 +389,6 @@ export const HealthPanel = ({
         )
       })}
 
-      <Box marginTop={reviewers.length ? 1 : 0}>
-        <Summary label="Merge" icon={mergeIcon} parts={[[mText, mColor]]} />
-      </Box>
-
       {confirm === "merge" ? (
         <Box marginTop={1}>
           <Text color={colors.warning}>
@@ -283,7 +399,7 @@ export const HealthPanel = ({
         </Box>
       ) : note ? (
         <Box marginTop={1}>
-          <Text color={colors.success}>{"  " + note}</Text>
+          <Text color={note.color as any}>{"  " + note.text}</Text>
         </Box>
       ) : null}
     </Box>
