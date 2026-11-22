@@ -23,6 +23,12 @@ import { Backdrop, backdropStyle, Text, useBackdropped } from "./backdrop.js"
 // anything failing to compile.
 export { backdropStyle }
 import { truncate } from "../lib/truncate.js"
+import {
+  checkoutCmdFor,
+  isSafeRepoSlug,
+  switchCmd,
+  type CheckoutPlan,
+} from "../lib/shell.js"
 export { truncate }
 import {
   isSelectable,
@@ -1347,6 +1353,10 @@ export const buildCheckoutCmd = async (
   branch: string,
   login: string,
 ): Promise<string> => {
+  // The slug is interpolated into a jq program below and into the typed line;
+  // GitHub never issues one outside this shape, so anything else is refused.
+  if (!isSafeRepoSlug(repoFull))
+    throw new Error(`refusing repo ${JSON.stringify(repoFull)}`)
   const [repoOwner, repoName] = repoFull.split("/")
   // Where a clone lands is the host's call: the profile claiming this repo, if it
   // keeps its own directory, else the configured fallback. Nothing is inferred
@@ -1389,26 +1399,25 @@ export const buildCheckoutCmd = async (
     if (existsSync(candidate)) repoPath = candidate
   }
 
-  let cmd: string
+  // Quoting and the branch check live in the pure builder (lib/shell.ts), so
+  // what is decided here is only WHERE the checkout is.
+  let plan: CheckoutPlan
   if (repoPath) {
-    cmd = `cd ${repoPath}`
+    plan = { kind: "local", path: repoPath }
   } else if (repoOwner === login) {
-    cmd = `cd ${cloneBase} && gh repo clone ${repoFull} && cd ${repoName}`
+    plan = { kind: "clone", cloneBase, repoFull, repoName }
   } else {
     const r = await $({
       nothrow: true,
       quiet: true,
     })`gh repo list ${login} --fork --limit 200 --json name,parent --jq ${`.[] | select(.parent.nameWithOwner == "${repoFull}") | .name`}`
-    const forkName = r.stdout.trim()
-    if (forkName) {
-      cmd = `cd ${cloneBase} && git clone git@github.com:${login}/${forkName}.git && cd ${forkName} && git remote add upstream git@github.com:${repoFull}.git`
-    } else {
-      cmd = `cd ${cloneBase} && gh repo fork ${repoFull} --clone && cd $(ls -td -- */ | head -1)`
-    }
+    const forkName = r.stdout.trim().split("\n")[0] ?? ""
+    plan =
+      forkName && /^[A-Za-z0-9._-]+$/.test(forkName)
+        ? { kind: "fork-clone", cloneBase, login, forkName, repoFull }
+        : { kind: "fork-new", cloneBase, repoFull }
   }
-  if (branch)
-    cmd += ` && git fetch origin ${branch} 2>/dev/null; git switch ${branch}`
-  return cmd
+  return checkoutCmdFor(plan, branch)
 }
 
 // Find a repo's local checkout by matching its git remote against every
@@ -2308,19 +2317,17 @@ export const buildActions = (
       group: "switch",
       icon: "\uEBCB",
       run: () => {
-        const script = [
-          "delay 0.5",
-          'tell application "iTerm2"',
-          "  tell current session of current window",
-          `    write text "git switch ${item.branch}"`,
-          "  end tell",
-          "end tell",
-        ].join("\n")
-        const proc = spawn("osascript", ["-e", script], {
-          detached: true,
-          stdio: "ignore",
-        })
-        proc.unref()
+        // Through runHere's ITERM_CMD, never into the AppleScript source: the
+        // branch is the PR author's to name, and it used to be spliced in
+        // between double quotes. See lib/shell.ts.
+        let cmd: string
+        try {
+          cmd = switchCmd(item.branch!)
+        } catch {
+          showFlash("✗ Not a branch name this can switch to")
+          return
+        }
+        runHere(cmd)
         process.exit(0)
       },
     })
@@ -6379,19 +6386,17 @@ const BrowseScreen = ({
     }
     if (activeItem.kind !== "task") {
       if (input === "s" && activeItem.kind === "pr" && activeItem.branch) {
-        const script = [
-          "delay 0.5",
-          'tell application "iTerm2"',
-          "  tell current session of current window",
-          `    write text "git switch ${activeItem.branch}"`,
-          "  end tell",
-          "end tell",
-        ].join("\n")
-        const proc = spawn("osascript", ["-e", script], {
-          detached: true,
-          stdio: "ignore",
-        })
-        proc.unref()
+        // Through runHere's ITERM_CMD, never into the AppleScript source: the
+        // branch is the PR author's to name, and it used to be spliced in
+        // between double quotes. See lib/shell.ts.
+        let cmd: string
+        try {
+          cmd = switchCmd(activeItem.branch!)
+        } catch {
+          showFlash("✗ Not a branch name this can switch to")
+          return
+        }
+        runHere(cmd)
         process.exit(0)
       }
       if (

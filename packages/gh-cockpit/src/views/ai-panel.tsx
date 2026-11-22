@@ -10,6 +10,7 @@ import {
   runInPane,
   runInPaneHorizontal,
   runHere,
+  shellQuote,
 } from "../lib.js"
 import { portablePromptFor, type PromptContext } from "../prompts.js"
 
@@ -71,7 +72,9 @@ const isInstalled = async (cmd: string): Promise<boolean> =>
 
 // The command reaches iTerm2 through the ITERM_CMD env var and `write text`, so
 // AppleScript never sees the string — but a shell does, and it types it verbatim.
-const shellQuote = (s: string): string => `'${s.replace(/'/g, `'\\''`)}'`
+// `shellQuote` is gh-ink's, the one every remote value in a typed line goes
+// through; this file used to keep a private copy while the branch beside it went
+// in bare.
 
 // The no-launch half of delegation: put the prompt on the clipboard for a session
 // that is already warm elsewhere, rather than starting a cold one. Shows the exact
