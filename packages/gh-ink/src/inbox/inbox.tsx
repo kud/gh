@@ -1411,9 +1411,11 @@ export const buildCheckoutCmd = async (
   return cmd
 }
 
-// Find a repo's local checkout by matching its git remote against ~/Projects
-// (and the work/home split) — the "glob the github remote" resolution. Returns
-// the absolute path, or null when the repo isn't checked out locally.
+// Find a repo's local checkout by matching its git remote against every
+// directory checkoutDirs() yields — the "glob the github remote" resolution.
+// Those directories are the host's, supplied through configureInbox; with none
+// configured nothing is searched, and the answer is null, which is the truth.
+// Returns the absolute path, or null when the repo isn't checked out locally.
 export const resolveRepoPath = async (
   repoFull: string,
 ): Promise<string | null> => {
