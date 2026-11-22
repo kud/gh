@@ -132,8 +132,12 @@ const main = async () => {
   const args = process.argv.slice(2)
   const hookIdx = args.indexOf("--hook")
   const hookPattern = hookIdx >= 0 ? args[hookIdx + 1] : undefined
+  // Skip the `--hook` value, and only when there is one: without the guard,
+  // `hookIdx + 1` is 0 when the flag is absent, so the first argument — the
+  // repo, in the picker's only invocation — was always the one skipped and
+  // `gh-webhook-replay owner/repo` fell back to the current directory's repo.
   const positional = args.find(
-    (a, i) => !a.startsWith("-") && i !== hookIdx + 1,
+    (a, i) => !a.startsWith("-") && !(hookIdx >= 0 && i === hookIdx + 1),
   )
   const repo = positional ?? (await resolveCurrentRepo().catch(() => null))
 
