@@ -18,7 +18,7 @@ gh-pr-comments                 # the current branch's PR
 gh-pr-comments owner/repo#123  # a specific PR
 ```
 
-`↑↓` move · `x` resolve/unresolve · `r` reply · `R` show/hide resolved · `q` quit.
+`↑↓` move · `x` resolve/unresolve · `r` reply · `R` unfold/fold resolved and outdated threads · `q` quit.
 
 ## Licence
 
