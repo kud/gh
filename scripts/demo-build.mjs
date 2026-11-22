@@ -5,15 +5,12 @@
 //
 //   node scripts/demo-build.mjs gh-pr-health
 //
-// cli-shot is fetched from git and built here rather than installed as a
-// dependency, and that is not a preference. `--format web` is on cli-shot's
-// main but not yet on npm, and the repository commits no dist/ and has no
-// `prepare` script — so a `github:` devDependency or `npx github:…` installs a
-// package whose bin points at a file that does not exist. Once a release
-// carrying `--format web` is on npm, this collapses to a devDependency on
-// @kud/cli-shot and a one-line script, and this file should go.
+// A script rather than a one-line package.json entry because of build order:
+// the CLI imports its siblings' dist/, and a fresh checkout — which is what a
+// Vercel build is — has none, so they are built first, in the same order the
+// root `build` script keeps for the same reason.
 import { execFileSync } from "node:child_process"
-import { existsSync, mkdirSync, rmSync } from "node:fs"
+import { existsSync, rmSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -25,45 +22,37 @@ if (!name || !existsSync(join(pkg, "package.json"))) {
   process.exit(2)
 }
 
-const REPO = "https://github.com/kud/cli-shot"
-const REF = process.env.CLI_SHOT_REF ?? "main"
-
 const run = (cmd, args, cwd = root) =>
   execFileSync(cmd, args, { cwd, stdio: "inherit" })
 
-// The CLI and everything it imports, in dependency order — the same prelude
-// the root `build` script keeps, for the same reason: a fresh checkout has no
-// dist/ anywhere, and a sibling built before its dependency fails.
 for (const ws of ["@kud/gh", "@kud/gh-workflow", "@kud/gh-ink", `@kud/${name}`])
   run("npm", ["run", "build", "-w", ws])
 
-// Keyed by ref so switching branches never reuses a stale build. Not under
-// node_modules/.cache, the usual home for this: TypeScript treats anything
-// below a node_modules directory as an external package, and cli-shot's own
-// declaration build then fails with a bare "Error parsing" on its index.ts.
-const cache = join(root, ".cache", "cli-shot", REF.replace(/\W+/g, "-"))
-const bin = join(cache, "dist", "cli.js")
-if (!existsSync(bin)) {
-  rmSync(cache, { recursive: true, force: true })
-  mkdirSync(dirname(cache), { recursive: true })
-  run("git", ["clone", "--quiet", "--depth", "1", "--branch", REF, REPO, cache])
-  run("npm", ["ci", "--no-audit", "--no-fund"], cache)
-  run("npm", ["run", "build"], cache)
-}
-
 const out = join(pkg, "demo")
 rmSync(out, { recursive: true, force: true })
-run("node", [
-  bin,
-  "--out",
-  out,
-  "--format",
-  "web",
-  "--title",
-  name,
-  "--base",
-  `/projects/${name}/demo/`,
-  "--",
-  "node",
-  join(pkg, "dist", "index.js"),
-])
+// --settle 1200, not the default 350: a recording ends once the screen has
+// held still that long, and on a loaded machine a CLI's pause between its
+// loading frame and its data can outlast 350 ms — the cast then ends on
+// "Fetching…" and the demo shows a page that never loads. It did exactly that
+// to another CLI's first demo build.
+run(
+  "npx",
+  [
+    "--no-install",
+    "cli-shot",
+    "--out",
+    out,
+    "--format",
+    "web",
+    "--settle",
+    "1200",
+    "--title",
+    name,
+    "--base",
+    `/projects/${name}/demo/`,
+    "--",
+    "node",
+    join(pkg, "dist", "index.js"),
+  ],
+  pkg,
+)
