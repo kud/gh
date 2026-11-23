@@ -360,7 +360,7 @@ export const PrView = ({
           return
         }
         // `R` marks a draft PR ready — on the Health tab only. Conversation
-        // keeps `R` = show resolved, which CommentsPanel owns.
+        // keeps `R` = unfold resolved, which CommentsPanel owns.
         if (input === "R" && tab === "health") {
           void markReady()
           return
@@ -515,7 +515,7 @@ export const PrView = ({
           ["↑↓", "thread"],
           ["x", "resolve"],
           ["r", "reply"],
-          ["R", "show resolved"],
+          ["R", "unfold resolved"],
           ...decisionHints,
           ["M", "actions"],
           ["a", "AI"],

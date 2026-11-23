@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react"
 import { render, Box, Text, useApp, useInput, useWindowSize } from "ink"
-import { colors } from "@kud/ink-ui"
 import { fetchPrComments, resolveCurrentPr, type PrComments } from "@kud/gh"
 import { CommentsPanel } from "@kud/gh-ink"
 import { FIXTURES, SCREENS, type Fixture } from "./fixtures.js"
@@ -64,8 +63,10 @@ const App = ({ target, fixture }: { target: Target; fixture?: Fixture }) => {
   // region — which is why it went unnoticed until the first recording of it.
   return (
     <Box flexDirection="column" height={rows}>
+      {/* Bold, not accent: in this CLI the accent marks the selected thread and
+          nothing else, so a title in the same orange was a second cursor. */}
       <Box>
-        <Text bold color={colors.accent}>
+        <Text bold>
           {target.repo} #{target.number}
         </Text>
         <Text dimColor> · review comments</Text>
@@ -80,7 +81,7 @@ const App = ({ target, fixture }: { target: Target; fixture?: Fixture }) => {
       />
       <Box marginTop={1}>
         <Text dimColor>
-          ↑↓ move · x resolve · r reply · R resolved · q quit
+          ↑↓ move · x resolve · r reply · R unfold resolved · q quit
         </Text>
       </Box>
     </Box>
