@@ -28,6 +28,7 @@ export {
   blockEnd,
   reposInSections,
   workCount,
+  totalCount,
   warningCount,
   truncate,
   buildActions,

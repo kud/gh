@@ -124,6 +124,7 @@ export {
   ageLabel,
   toCiStatusState,
   workCount,
+  totalCount,
   warningCount,
   truncate,
   useActionMenu,

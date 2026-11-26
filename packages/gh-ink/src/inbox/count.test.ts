@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { workCount, type AnyItem, type Section } from "./inbox.js"
+import { totalCount, workCount, type AnyItem, type Section } from "./inbox.js"
 
 // What the tab badge says. The number is the whole point of this file: it is
 // read at a glance and acted on, so a row counted wrongly is a lie nobody
@@ -159,5 +159,35 @@ describe("workCount", () => {
       task("SHOP-501", 0),
     ]
     expect(workCount(section(items))).toBe(2)
+  })
+})
+
+// The header's total sums the badges, except a tab whose rows are copies of
+// rows other tabs hold: summed, those count twice.
+describe("totalCount", () => {
+  const stage: Section = {
+    id: "review",
+    label: "Review",
+    items: [task("ACME-1", 0), task("ACME-2", 0)],
+  }
+  const copies: Section = {
+    id: "yours",
+    label: "Yours",
+    items: [task("ACME-1", 0)],
+    inTotal: false,
+  }
+
+  it("sums every tab by default", () => {
+    expect(
+      totalCount([stage, { id: "yours", label: "Yours", items: copies.items }]),
+    ).toBe(3)
+  })
+
+  it("skips a tab marked inTotal: false", () => {
+    expect(totalCount([copies, stage])).toBe(2)
+  })
+
+  it("leaves that tab's own badge alone", () => {
+    expect(workCount(copies)).toBe(1)
   })
 })

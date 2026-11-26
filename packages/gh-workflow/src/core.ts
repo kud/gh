@@ -455,6 +455,17 @@ export type Section = {
    * the two.
    */
   sampled?: { total: number }
+  /**
+   * `false` keeps this tab out of the header's whole-board total, while its own
+   * badge still counts its rows.
+   *
+   * For a tab whose rows are COPIES of rows other tabs already hold: a short
+   * "what only you can do" list drawn from the stage tabs, say. Summed with
+   * those tabs, every row in it counts twice, and the header claims more work
+   * than the board has. Absent means the tab counts, which is every tab that
+   * holds rows of its own.
+   */
+  inTotal?: false
 }
 
 // Everything a host needs to render a drilled-into row. `kind` is narrowed so a
