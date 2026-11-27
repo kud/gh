@@ -1719,6 +1719,15 @@ export const taskKeyStyle = (): { color: string; bold: boolean } => ({
  * are the same claim at two scales; computed apart they drift, and a header that
  * disagrees with the sum of its own tabs is worse than either number alone.
  */
+/**
+ * The header's whole-board total: every tab's badge, summed, less the tabs a
+ * host marks `inTotal: false` because their rows are copies of rows another
+ * tab already counts. Those still draw their own badge; only the sum skips them,
+ * so each piece of work counts once on the header.
+ */
+export const totalCount = (sections: readonly Section[]): number =>
+  sections.reduce((n, s) => (s.inTotal === false ? n : n + workCount(s)), 0)
+
 export const workCount = (s: Section): number => {
   let n = 0
   for (let i = 0; i < s.items.length; i++) {
@@ -2590,7 +2599,7 @@ const InboxHeader = ({
   fetchedAt?: number | null
 }) => {
   const frameCols = useFrameCols()
-  const total = sections.reduce((n, s) => n + workCount(s), 0)
+  const total = totalCount(sections)
   // padStart, not padEnd: the count needs a stable width so the header doesn't
   // shuffle as it changes, but padding after the digits splits "47" from
   // "items". The slack belongs in front of the number, where it reads as a gap
