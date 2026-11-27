@@ -1,5 +1,15 @@
 # @kud/gh-pr-comments
 
+## 0.1.177
+
+### Patch Changes
+
+- 2dfc3c3: The standalone `gh-pr-comments` showed one line of the review at a time. The comments panel sizes its scrolling window by measuring the space it is given, and the CLI's root gave it none, so the window measured a single row and stayed there — one line of text above an indicator such as `18–18 / 37`, in every terminal and at every size. The root now takes the terminal's full height, so the window fills the screen between the title and the key hints and scrolls from there. Cockpit was never affected, since it already hands the panel a sized region.
+- 2dfc3c3: `gh-pr-comments` now speaks the cli-shot contract, so its screens can be recorded without a PR, a token or the network. `--screen list` prints the two screens — `review`, with threads still open and one outdated, and `resolved`, the same review once settled — and `--mock --screen <name>` opens the comments panel on that invented review without touching `gh`. Before this the panel could only be shown against a real repository, which put real reviewers and real comments into every screenshot. Without the flags nothing changes: a PR ref or the current branch is resolved and fetched as before.
+- Updated dependencies [32debcb]
+- Updated dependencies [53b9d7a]
+  - @kud/gh-ink@0.89.0
+
 ## 0.1.176
 
 ### Patch Changes

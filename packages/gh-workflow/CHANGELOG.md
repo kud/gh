@@ -1,5 +1,11 @@
 # @kud/gh-workflow
 
+## 0.22.0
+
+### Minor Changes
+
+- 53b9d7a: A tab can now stay out of the header's whole-board total. Mark its `Section` with `inTotal: false` and its own badge still counts its rows, but the header's `N items` skips it. This is for a tab whose rows are copies of rows other tabs already hold, such as a short "what only you can do" list built from the stage tabs, which would otherwise count every item twice. `totalCount(sections)` is the header's sum, exported from `@kud/gh-ink` and `@kud/gh-cockpit`.
+
 ## 0.21.4
 
 ### Patch Changes
